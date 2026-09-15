@@ -23,19 +23,60 @@ enum KycTier {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  name      String
-  email     String   @unique
-  phone     String?  @unique
-  kycTier   KycTier  @default(NONE)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              String    @id @default(cuid())
+  name            String
+  email           String    @unique
+  phone           String?   @unique
+  kycTier         KycTier   @default(NONE)
+  emailVerifiedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  occupancies          Occupancy[] @relation("OccupancyResident")
-  delegatedOccupancies Occupancy[] @relation("OccupancyDelegate")
+  occupancies          Occupancy[]    @relation("OccupancyResident")
+  delegatedOccupancies Occupancy[]    @relation("OccupancyDelegate")
   roles                Role[]
+  sessions             Session[]
+  otps                 Otp[]
+  jobBlogPosts         JobBlogPost[]
 
   @@map("users")
+}
+
+/// Opaque bearer token in the session cookie; only its SHA-256 hash is
+/// stored so a DB read alone can't produce a valid session (DB-backed
+/// sessions chosen over stateless JWT specifically so logout/revoke works —
+/// see SUPERVISOR.md decisions log).
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+  lastSeenAt DateTime @default(now())
+  userAgent  String?
+  ip         String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+/// 6-digit email OTP, used for both signup verification and login (no
+/// passwords in v1). Only the SHA-256 hash of the code is stored.
+model Otp {
+  id         String    @id @default(cuid())
+  userId     String
+  codeHash   String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("otps")
 }
 
 model Society {
@@ -52,9 +93,10 @@ model Society {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  flats     Flat[]
-  roles     Role[]
-  auditLogs AuditLog[]
+  flats        Flat[]
+  roles        Role[]
+  auditLogs    AuditLog[]
+  jobBlogPosts JobBlogPost[]
 
   @@map("societies")
 }
@@ -166,4 +208,50 @@ model AuditLog {
   @@index([actorId])
   @@index([societyId, sequence])
   @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Job blog — Phase 1's referral surface.
+// ---------------------------------------------------------------------------
+
+enum JobBlogKind {
+  HIRING
+  SEEKING
+}
+
+enum JobBlogStatus {
+  ACTIVE
+  FLAGGED
+  REMOVED
+}
+
+model JobBlogPost {
+  id          String        @id @default(cuid())
+  societyId   String
+  posterId    String
+  kind        JobBlogKind
+  title       String
+  body        String
+  status      JobBlogStatus @default(ACTIVE)
+  /// Set at creation to createdAt + 60 days. A post is only publicly listed
+  /// while status = ACTIVE *and* expiresAt is in the future — checked at
+  /// query time rather than flipped by a cron (see SUPERVISOR.md decisions).
+  expiresAt   DateTime
+
+  /// HIRING posts only — SEEKING posts leave these null and are visible
+  /// immediately (no employer to impersonate).
+  companyEmail                String?
+  companyEmailVerifiedAt      DateTime?
+  companyEmailTokenHash       String?
+  companyEmailTokenExpiresAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  society Society @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  poster  User    @relation(fields: [posterId], references: [id], onDelete: Cascade)
+
+  @@index([societyId, status, expiresAt])
+  @@index([posterId, createdAt])
+  @@map("job_blog_posts")
 }

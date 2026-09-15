@@ -12,6 +12,11 @@ describe('validateEnv', () => {
     expect(env.API_PORT).toBe(4000);
     expect(env.API_CORS_ORIGIN).toBe('http://localhost:3000');
     expect(env.LOG_LEVEL).toBe('info');
+    expect(env.SESSION_COOKIE_NAME).toBe('sid');
+    expect(env.SESSION_TTL_DAYS).toBe(30);
+    expect(env.SMTP_HOST).toBe('localhost');
+    expect(env.SMTP_PORT).toBe(1025);
+    expect(env.API_BASE_URL).toBe('http://localhost:4000');
   });
 
   it('coerces API_PORT from a string', () => {

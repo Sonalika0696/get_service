@@ -18,6 +18,12 @@ export class AppConfigService {
       API_CORS_ORIGIN: configService.get('API_CORS_ORIGIN', { infer: true }),
       LOG_LEVEL: configService.get('LOG_LEVEL', { infer: true }),
       DATABASE_URL: configService.get('DATABASE_URL', { infer: true }),
+      SESSION_COOKIE_NAME: configService.get('SESSION_COOKIE_NAME', { infer: true }),
+      SESSION_TTL_DAYS: configService.get('SESSION_TTL_DAYS', { infer: true }),
+      SMTP_HOST: configService.get('SMTP_HOST', { infer: true }),
+      SMTP_PORT: configService.get('SMTP_PORT', { infer: true }),
+      SMTP_FROM: configService.get('SMTP_FROM', { infer: true }),
+      API_BASE_URL: configService.get('API_BASE_URL', { infer: true }),
     };
   }
 

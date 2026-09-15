@@ -9,14 +9,14 @@ Single source of truth for **what's shipped, what's in flight, what's blocked**.
 - The **Demo bar** at the top says what a demo shows *right now*, if the project stops today.
 - Refresh timestamps at the top of the file on each update.
 
-Last updated: *2026-09-16 (Phase 0 backend caught up to the hash-chain/OWNER_ABSENTEE/ownership_share plan update; Phase 1 auth starting)*
-Current active phase: *Phase 0 — Foundation (backend done, frontend not started); Phase 1 backend starting*
+Last updated: *2026-09-16 (Phase 1 backend complete + e2e-verified: auth/OTP/session, job-blog CRUD, company-email verify, rate limit, committee moderation; Phase 1 frontend not started)*
+Current active phase: *Phase 1 — Auth + Job Blog (backend 🟢 done & e2e-green; frontend ⚪ not started). Phase 2 backend next.*
 
 ---
 
 ## Demo bar *(what the project can show today)*
 
-> `docker compose up -d` + `npm run prisma:migrate` + `npm run prisma:seed` + `npm run dev:backend` brings up a NestJS API with a working `/health` check and a seeded 90-flat test society in Postgres. Nothing user-facing yet — no frontend.
+> `docker compose up -d` + `npm run prisma:migrate` + `npm run prisma:seed` + `npm run dev:backend` brings up the NestJS API. Over HTTP you can now sign up a resident, receive an OTP email (Maildev at :1080), verify it for a session cookie, post a job (SEEKING or HIRING), verify a hiring post's company email, browse the society's visible jobs, and — as a committee member — flag/remove a post (which writes a hash-chained audit row). Auth, rate limiting (1 post/resident/month), and the full Phase 1 flow are e2e-tested against real Postgres. Still no frontend — this is all API-level (curl / the e2e suite).
 
 Update this box on the last commit of every phase — it should read like a two-sentence pitch of what a supervisor would see if they opened the app right now.
 
@@ -63,23 +63,23 @@ Update this box on the last commit of every phase — it should read like a two-
 
 ---
 
-## Phase 1 — Auth + Job Blog *(first usable feature)* ⚪
+## Phase 1 — Auth + Job Blog *(first usable feature)* 🟡
 
 **Deliverable:** a resident can sign up, log in, post a job, browse jobs; committee can moderate.
 
 | Track | Task | Status |
 |---|---|---|
-| BE | `auth/` — signup + email OTP + session cookie | ⚪ |
-| BE | `AuthGuard`, `SocietyScopeGuard`, `RolesGuard` | ⚪ |
-| BE | `@CurrentUser`, `@Roles`, `@SocietyScope` decorators | ⚪ |
-| BE | `users/` — profile read/update | ⚪ |
-| BE | `job-blog/` — post CRUD, hiring/seeking kinds | ⚪ |
-| BE | Company-email verification link + status flip | ⚪ |
-| BE | Rate limiter (1 post / resident / month) | ⚪ |
-| BE | Committee `flag`/`remove` action | ⚪ |
-| BE | Auto-archive after 60 days | ⚪ |
-| BE | `notifications/` — Maildev email dispatch | ⚪ |
-| BE | E2E: signup → OTP → post → verify → visible → flag → hidden | ⚪ |
+| BE | `auth/` — signup + email OTP + session cookie | 🟢 *(6-digit OTP, 10-min TTL, 60s cooldown; DB-backed opaque session, only SHA-256 hash stored)* |
+| BE | `AuthGuard`, `SocietyScopeGuard`, `RolesGuard` | 🟢 |
+| BE | `@CurrentUser`, `@Roles`, `@SocietyScope` decorators | 🟢 |
+| BE | `users/` — profile read/update | 🟢 *(`GET/PATCH /api/v1/me`)* |
+| BE | `job-blog/` — post CRUD, hiring/seeking kinds | 🟢 |
+| BE | Company-email verification link + status flip | 🟢 *(hashed token, 24h TTL; HIRING posts hidden until verified)* |
+| BE | Rate limiter (1 post / resident / month) | 🟢 *(society-configurable via `Society.config.jobBlogRateLimitPerMonth`)* |
+| BE | Committee `flag`/`remove` action | 🟢 *(`@Roles(COMMITTEE)`; writes hash-chained audit row)* |
+| BE | Auto-archive after 60 days | 🟢 *(via `expiresAt`; list filters `expiresAt > now`)* |
+| BE | `notifications/` — Maildev email dispatch | 🟢 |
+| BE | E2E: signup → OTP → post → verify → visible → flag → hidden | 🟢 *(`test/job-blog.e2e-spec.ts`, 4 cases against real Postgres; captures OTP/verify-token via a MailerService override since both are only stored hashed; also asserts wrong-OTP→401, non-committee-flag→403, rate-limit→429. Full suite: 9 e2e green)* |
 | FE | `(auth)` group with `/login`, `/signup`, `/verify` | ⚪ |
 | FE | Session cookie SSR read | ⚪ |
 | FE | `(resident)` group + `AppShell` (topbar, sidebar) | ⚪ |
@@ -94,7 +94,9 @@ Update this box on the last commit of every phase — it should read like a two-
 
 **DoD:** the demo — signup → OTP → post → verify → visible — works end-to-end in a fresh clone.
 
-**Blockers / notes:** *(fill as they arise)*
+**Backend status:** verified directly — full suite green: `npm run build` (nest build) ok, `npm run lint` (oxlint) clean, unit tests 14 pass, e2e 9 pass (Phase 0 health + audit chain, plus the new Phase 1 job-blog happy-path + negative cases) against a real Postgres. All routes mapped under `/api/v1` (`auth/{signup,otp,verify,logout}`, `me`, `jobs` CRUD + `flag`/`remove`/`verify-company-email`). Frontend not started — the fresh-clone browser demo in the DoD can't be exercised until Phase 1 FE lands.
+
+**Blockers / notes:** none. Frontend track (all ⚪) is deferred — building backend-first per phase by decision (2026-09-16), so the full-clone browser DoD is pending the FE pass.
 
 ---
 
@@ -346,6 +348,7 @@ Kept visible so they don't get lost between phases.
 
 Use this to keep the supervisor honest when reality forces a decision to change from the plan.
 
+- **2026-09-16 — Build order: backend-first per phase (frontend deferred).** Each phase's backend is completed and e2e-verified against real Postgres, committed to `master` when green, then the next phase's backend starts. The frontend track (all ⚪) is built in a later dedicated pass. Rationale: the end-to-end verification loop is tightest at the API layer, and the backend was already mid-Phase-1; this gets a fully-working, tested API across phases fastest. Consequence: the "fresh clone → browser demo" wording in each phase DoD is only fully satisfiable once the FE pass lands — backend DoD is proven by the phase's e2e suite in the meantime.
 - **2026-09-16 — Plan extension after reading an alternate design set ("CommunityFinance" trio, external).** Cross-checked the alternate design against our plan; imported six additions without changing scope or phase order: (1) explicit **novelty framing** with four claims (trust-graph substrate, escrow-through-society-account, maintenance-adjustment repayment [ours, unique], hash-chained audit) — see [DESIGN.md](DESIGN.md) §1a; (2) **hash-chained AuditLog** (SHA-256 previous-hash chain, tail-hash cached on Society, `GET /audit/verify` endpoint); (3) **OWNER_ABSENTEE** role variant on Occupancy with tenant delegation; (4) **advisory / binding poll types + ownership-weighted voting** (extends Phase 3 without adding a new phase); (5) **vendor discount ladder** on Offer + GSTIN sandbox verification via `gstinapi.in` free tier; (6) **functional-accuracy evaluation** (pool-formation + vendor-recommendation P/R/F1) in the Python sim. Deferred (kept in Future Plans): job referral engine + LinkedIn OAuth + coupon cash-out + inclusion layer + family-member sub-accounts.
 - **Package manager: npm workspaces, not pnpm.** ARCHITECTURE.md allowed either explicitly. pnpm wasn't installed; npm 11 already was. Root `package.json` declares `workspaces: ["backend", "shared"]`; `frontend` gets added when that workspace is scaffolded.
 - **Session model: DB-backed `Session` table, not stateless JWT.** ARCHITECTURE.md said "JWT in httpOnly cookie" without settling revocability. Chosen so logout / force-revoke is possible for committee/treasurer accounts. Not yet implemented — lands with Phase 1 auth.
