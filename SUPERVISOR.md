@@ -9,14 +9,14 @@ Single source of truth for **what's shipped, what's in flight, what's blocked**.
 - The **Demo bar** at the top says what a demo shows *right now*, if the project stops today.
 - Refresh timestamps at the top of the file on each update.
 
-Last updated: *2026-09-16 (Phase 2 backend complete + e2e-verified: vendor directory, GSTIN-gated tier promotion, ratings aggregate, access requests, KYC stub; Phase 1+2 frontend not started)*
-Current active phase: *Phase 2 — Vendor Marketplace (backend 🟢 done & e2e-green; frontend ⚪ not started). Phase 3 backend next.*
+Last updated: *2026-09-16 (Phase 3 backend complete + e2e-verified: reusable poll engine — advisory/binding/event, ownership-weighted voting with tenant-eligibility guards, event auto-fire, expiry/close-early; frontend not started)*
+Current active phase: *Phase 3 — Event Polls (backend 🟢 done & e2e-green; frontend ⚪ not started). Phase 4 backend next.*
 
 ---
 
 ## Demo bar *(what the project can show today)*
 
-> `docker compose up -d` + `npm run prisma:migrate` + `npm run prisma:seed` + `npm run dev:backend` brings up the NestJS API. Over HTTP you can now sign up a resident, receive an OTP email (Maildev at :1080), verify it for a session cookie, post a job (SEEKING or HIRING), verify a hiring post's company email, browse the society's visible jobs, and — as a committee member — flag/remove a post (which writes a hash-chained audit row). Auth, rate limiting (1 post/resident/month), and the full Phase 1 flow are e2e-tested against real Postgres. A committee can also onboard vendors (with offline GSTIN verification that auto-promotes an Active GSTIN to `SOCIETY_ATTESTED`), residents can browse the society's vendor directory (category/name filters) and rate vendors (running aggregate). Still no frontend — this is all API-level (curl / the e2e suite).
+> `docker compose up -d` + `npm run prisma:migrate` + `npm run prisma:seed` + `npm run dev:backend` brings up the NestJS API. Over HTTP you can now sign up a resident, receive an OTP email (Maildev at :1080), verify it for a session cookie, post a job (SEEKING or HIRING), verify a hiring post's company email, browse the society's visible jobs, and — as a committee member — flag/remove a post (which writes a hash-chained audit row). Auth, rate limiting (1 post/resident/month), and the full Phase 1 flow are e2e-tested against real Postgres. A committee can also onboard vendors (with offline GSTIN verification that auto-promotes an Active GSTIN to `SOCIETY_ATTESTED`), residents can browse the society's vendor directory (category/name filters) and rate vendors (running aggregate). Residents can also run polls — advisory/event polls open to all, binding polls committee-created with ownership-weighted voting and tenant-eligibility rules; event polls auto-fire when their minimum commitments are met and notify joiners. Still no frontend — this is all API-level (curl / the e2e suite).
 
 Update this box on the last commit of every phase — it should read like a two-sentence pitch of what a supervisor would see if they opened the app right now.
 
@@ -127,18 +127,18 @@ Update this box on the last commit of every phase — it should read like a two-
 
 ---
 
-## Phase 3 — Event Polls ⚪
+## Phase 3 — Event Polls 🟡
 
 **Deliverable:** a resident creates a poll; neighbours join; auto-fires or expires.
 
 | Track | Task | Status |
 |---|---|---|
-| BE | `polls/` — Poll (with `poll_type: ADVISORY | BINDING | EVENT | BULK_BUY_RESIDENT`, `weight_mode`, `quorum_pct`, `passing_pct`) + Vote + Commitment entities | ⚪ |
-| BE | Min-commitments + deadline auto-fire / expire | ⚪ |
-| BE | Poll creator close-early | ⚪ |
-| BE | Guards: binding polls reject `TENANT`; ownership-weighted votes multiply by `Flat.ownership_share`; flat with `OWNER_ABSENTEE`+`TENANT` counts only owner on binding | ⚪ |
-| BE | Notification hooks on join / vote / close / fire / expire | ⚪ |
-| BE | E2E: advisory (all vote, tally equal) / binding weighted (tenant rejected, owners tally with share) / event fires | ⚪ |
+| BE | `polls/` — Poll (with `poll_type: ADVISORY | BINDING | EVENT | BULK_BUY_RESIDENT`, `weight_mode`, `quorum_pct`, `passing_pct`) + Vote + Commitment entities | 🟢 *(`Poll`/`Vote`/`PollCommitment`; anonymous `Vote.voterHash = sha256(pollId:userId)`, unique per poll to block double-vote)* |
+| BE | Min-commitments + deadline auto-fire / expire | 🟢 *(fire synchronously in the join tx when minCommitments reached; expiry via `processExpired()` — no cron dep added; driven by `POST /polls/process-expired`)* |
+| BE | Poll creator close-early | 🟢 *(creator-only; ADVISORY/BINDING resolve by tally, EVENT/BULK_BUY → CLOSED)* |
+| BE | Guards: binding polls reject `TENANT`; ownership-weighted votes multiply by `Flat.ownership_share`; flat with `OWNER_ABSENTEE`+`TENANT` counts only owner on binding | 🟢 *(pure `poll-tally.util.ts` + service eligibility; tenant→403 on binding; weight = `ownershipShare` under OWNERSHIP_WEIGHTED)* |
+| BE | Notification hooks on join / vote / close / fire / expire | 🟢 *(`sendPollFired`/`sendPollExpired` to committed residents on fire/expire; see quality note below)* |
+| BE | E2E: advisory (all vote, tally equal) / binding weighted (tenant rejected, owners tally with share) / event fires | 🟢 *(`test/polls.e2e-spec.ts`, 6 cases + `poll-tally.util.spec.ts` 10 cases. Full suite: 24 unit + 19 e2e green)* |
 | FE | `/polls` list | ⚪ |
 | FE | `/polls/new` with type picker (event / advisory / binding — binding is committee-only), quorum/passing/weight-mode fields | ⚪ |
 | FE | `/polls/[pollId]` detail with join or vote button, weighted-tally readout, eligibility copy for tenants | ⚪ |
@@ -146,6 +146,15 @@ Update this box on the last commit of every phase — it should read like a two-
 | FE | Playwright happy paths (advisory + binding + event) | ⚪ |
 
 **DoD:** event polls fire correctly; poll engine is reusable for Phase 5.
+
+**Backend status:** verified directly — build ok, oxlint clean, 24 unit + 19 e2e green against real Postgres. Poll engine is intentionally general (eligibility/weight/tally centralised) so Phase 5 extends `BULK_BUY_RESIDENT` rather than forking it.
+
+**Decisions (2026-09-16):**
+- No `@nestjs/schedule` dependency added. Auto-fire is synchronous inside the join transaction (deterministic, e2e-testable); expiry is a callable `processExpired()` exposed as `POST /polls/process-expired` (committee-only) as a stand-in for a future scheduler. GET routes never mutate status.
+- `BULK_BUY_RESIDENT` voting eligibility isn't yet specified by the domain — defaulted to uniform/any-resident (like EVENT); Phase 5 can override.
+- Each e2e scenario builds its own society, because ADVISORY/BINDING quorum denominators are society-wide (a shared society would let one test's residents inflate another's quorum).
+
+**Quality follow-up (non-blocking):** `notifyCommitted` awaits Maildev sends *inside* the fire/expiry DB transaction, so a mail failure would roll back the state change. Best-effort and instant under the test mailer; revisit (move notifications after commit) when notifications become a hard dependency.
 
 ---
 

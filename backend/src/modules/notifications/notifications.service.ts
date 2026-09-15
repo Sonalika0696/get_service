@@ -27,4 +27,24 @@ export class NotificationsService {
       html: `<p>Confirm this hiring post is genuine:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>This link expires in 24 hours.</p>`,
     });
   }
+
+  /** Sent to every committed resident the moment an EVENT/BULK_BUY poll auto-fires (reaches minCommitments). */
+  async sendPollFired(to: string, pollTitle: string): Promise<void> {
+    await this.mailer.send({
+      to,
+      subject: 'Poll fired — enough residents joined',
+      text: `"${pollTitle}" has reached the minimum number of commitments and is now FIRED.`,
+      html: `<p><strong>"${pollTitle}"</strong> has reached the minimum number of commitments and is now <strong>FIRED</strong>.</p>`,
+    });
+  }
+
+  /** Sent to every committed resident when an EVENT/BULK_BUY poll expires without reaching minCommitments. */
+  async sendPollExpired(to: string, pollTitle: string): Promise<void> {
+    await this.mailer.send({
+      to,
+      subject: 'Poll expired — not enough commitments',
+      text: `"${pollTitle}" closed without reaching the minimum number of commitments and has EXPIRED.`,
+      html: `<p><strong>"${pollTitle}"</strong> closed without reaching the minimum number of commitments and has <strong>EXPIRED</strong>.</p>`,
+    });
+  }
 }
