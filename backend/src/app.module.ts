@@ -7,6 +7,7 @@ import { ClockModule } from './infra/clock/clock.module.js';
 import { PrismaModule } from './infra/prisma/prisma.module.js';
 import { MailerModule } from './infra/mailer/mailer.module.js';
 import { GstinApiModule } from './infra/gstinapi/gstinapi.module.js';
+import { RazorpayModule } from './infra/razorpay/razorpay.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { AuditModule } from './modules/audit/audit.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
@@ -17,6 +18,7 @@ import { VendorsModule } from './modules/vendors/vendors.module.js';
 import { KycModule } from './modules/kyc/kyc.module.js';
 import { PollsModule } from './modules/polls/polls.module.js';
 import { LedgerModule } from './modules/ledger/ledger.module.js';
+import { PaymentsModule } from './modules/payments/payments.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor.js';
 
@@ -39,6 +41,7 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     PrismaModule,
     MailerModule,
     GstinApiModule,
+    RazorpayModule,
     AuditModule,
     NotificationsModule,
     AuthModule,
@@ -48,6 +51,7 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     KycModule,
     PollsModule,
     LedgerModule,
+    PaymentsModule,
     HealthModule,
   ],
   providers: [

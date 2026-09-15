@@ -9,8 +9,8 @@ Single source of truth for **what's shipped, what's in flight, what's blocked**.
 - The **Demo bar** at the top says what a demo shows *right now*, if the project stops today.
 - Refresh timestamps at the top of the file on each update.
 
-Last updated: *2026-09-16 (Phase 4A backend complete + e2e-verified: append-only double-entry escrow ledger, unit-of-work posting primitive, atomic idempotency infra, reconciliation stub. Paused here for review before 4B Razorpay; frontend not started)*
-Current active phase: *Phase 4 — Bulk-Buy + Razorpay + Ledger. 4A (ledger) 🟢 done & e2e-green; 4B/4C/4D ⚪ next. Frontend ⚪ not started.*
+Last updated: *2026-09-16 (Phase 4B backend complete + e2e-verified: Razorpay client stub-first + feature-flagged, payments module, signed idempotent webhook as sole ledger-writer, capture/refund → escrow ledger. Supervisor caught + got fixed a capture double-credit bug. Frontend not started)*
+Current active phase: *Phase 4 — Bulk-Buy + Razorpay + Ledger. 4A+4B 🟢 done & e2e-green; 4C (offer flow) next. Frontend ⚪ not started.*
 
 ---
 
@@ -162,7 +162,9 @@ Update this box on the last commit of every phase — it should read like a two-
 
 **Deliverable:** vendor posts an offer; residents pay via Razorpay sandbox; escrow holds funds; treasurer co-authorises payout; ledger balances.
 
-**4A status (2026-09-16):** verified directly — build ok, oxlint clean, 35 unit + 25 e2e green against real Postgres. Money-conservation invariant proven in unit tests; idempotent posting proven over HTTP. **Paused here for supervisor review before 4B (Razorpay).** Decision: Razorpay will be built **stub-first behind a `RAZORPAY_ENABLED` flag** (like GSTIN) so the escrow flow stays fully offline-testable.
+**4A status (2026-09-16):** verified directly — build ok, oxlint clean, 35 unit + 25 e2e green against real Postgres. Money-conservation invariant proven in unit tests; idempotent posting proven over HTTP. Reviewed and approved.
+
+**4B status (2026-09-16):** verified directly — build ok, oxlint clean, 47 unit + 28 e2e green. Razorpay built stub-first behind `RAZORPAY_ENABLED` (off by default) so the escrow flow is fully offline-testable; real HMAC signature verification even in stub mode. **Supervisor review caught a money bug** the green suite missed: `applyCapture` handled `payment.captured` and `order.paid` identically with no Payment-level dedupe, so the captured+order.paid pair (distinct event ids → not caught by event-id idempotency) would credit escrow twice. Fixed with a Payment-status guard on both capture and refund; a new e2e posts a second distinct capture-type event and asserts the ledger entry count stays 1. Next: 4C (offer flow).
 
 ### 4A — Ledger foundation
 | Track | Task | Status |
@@ -176,10 +178,10 @@ Update this box on the last commit of every phase — it should read like a two-
 ### 4B — Razorpay sandbox
 | Track | Task | Status |
 |---|---|---|
-| BE | `infra/razorpay/` client wrapper | ⚪ |
-| BE | `payments/` — order create/capture/refund | ⚪ |
-| BE | Webhook route with signed-payload verification + idempotency | ⚪ |
-| BE | Payment events → ledger entries | ⚪ |
+| BE | `infra/razorpay/` client wrapper | 🟢 *(feature-flagged `RAZORPAY_ENABLED`, off by default → deterministic offline stub; rupees↔paise boundary isolated in the client; `verifyWebhookSignature` is ALWAYS real HMAC-SHA256, timing-safe)* |
+| BE | `payments/` — order create/capture/refund | 🟢 *(`Payment` + `WebhookEvent`; `POST /payments/orders` idempotent, no ledger write; treasurer `POST /payments/:id/refund` calls PSP only; `GET /payments/:id` society-scoped)* |
+| BE | Webhook route with signed-payload verification + idempotency | 🟢 *(public `POST /payments/webhook`; raw-body HMAC verified BEFORE parse via `rawBody:true`; processing wrapped in `IdempotencyService.runOnce` keyed on Razorpay event id)* |
+| BE | Payment events → ledger entries | 🟢 *(webhook is the SOLE ledger-writer: `payment.captured`/`order.paid` → EXTERNAL→BULK_BUY, `refund.processed` → reversal, enlisted in the same tx. **Payment-level guard** makes capture/refund idempotent across the captured+order.paid event pair — fixes a double-credit bug caught in supervisor review)* |
 | FE | `components/razorpay/Checkout.tsx` wrapper | ⚪ |
 | FE | Fallback UI on Razorpay script failure | ⚪ |
 

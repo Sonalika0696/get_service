@@ -20,6 +20,17 @@ describe('validateEnv', () => {
     expect(env.GSTIN_API_ENABLED).toBe(false);
     expect(env.GSTIN_API_URL).toBe('https://gstinapi.in/api/v1/gstin');
     expect(env.GSTIN_API_KEY).toBe('');
+    expect(env.RAZORPAY_ENABLED).toBe(false);
+    expect(env.RAZORPAY_KEY_ID).toBe('rzp_test_stub');
+    expect(env.RAZORPAY_KEY_SECRET).toBe('stub_secret');
+    expect(env.RAZORPAY_WEBHOOK_SECRET).toBe('stub_webhook_secret');
+  });
+
+  it('coerces RAZORPAY_ENABLED from "true"/"1" and leaves anything else falsy', () => {
+    expect(validateEnv({ ...validConfig, RAZORPAY_ENABLED: 'true' }).RAZORPAY_ENABLED).toBe(true);
+    expect(validateEnv({ ...validConfig, RAZORPAY_ENABLED: '1' }).RAZORPAY_ENABLED).toBe(true);
+    expect(validateEnv({ ...validConfig, RAZORPAY_ENABLED: 'false' }).RAZORPAY_ENABLED).toBe(false);
+    expect(validateEnv({ ...validConfig, RAZORPAY_ENABLED: 'nonsense' }).RAZORPAY_ENABLED).toBe(false);
   });
 
   it('coerces GSTIN_API_ENABLED from "true"/"1" and leaves anything else falsy', () => {

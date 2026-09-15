@@ -33,6 +33,20 @@ export const envSchema = z.object({
   GSTIN_API_ENABLED: z.preprocess((value) => value === 'true' || value === '1', z.boolean()).default(false),
   GSTIN_API_URL: z.url().default('https://gstinapi.in/api/v1/gstin'),
   GSTIN_API_KEY: z.string().default(''),
+
+  // --- Phase 4B (Razorpay sandbox) ---
+  /**
+   * Off by default — dev and all automated tests run RazorpayService
+   * against a deterministic in-memory stub instead of calling out to
+   * Razorpay (see src/infra/razorpay/razorpay.service.ts). Webhook
+   * signature verification is REAL HMAC-SHA256 regardless of this flag —
+   * only the "did Razorpay actually charge a card" part is faked. Accepts
+   * "true"/"1" as truthy, anything else (including unset) is false.
+   */
+  RAZORPAY_ENABLED: z.preprocess((value) => value === 'true' || value === '1', z.boolean()).default(false),
+  RAZORPAY_KEY_ID: z.string().default('rzp_test_stub'),
+  RAZORPAY_KEY_SECRET: z.string().default('stub_secret'),
+  RAZORPAY_WEBHOOK_SECRET: z.string().default('stub_webhook_secret'),
 });
 
 export type Env = z.infer<typeof envSchema>;

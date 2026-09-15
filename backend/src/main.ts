@@ -7,7 +7,11 @@ import { AppConfigService } from './config/config.service.js';
 import { createGlobalValidationPipe } from './common/pipes/validation.pipe.js';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // rawBody: true exposes req.rawBody (a Buffer of the exact bytes received)
+  // alongside the normal parsed req.body — needed by POST /payments/webhook
+  // to verify Razorpay's HMAC signature against the exact bytes it signed,
+  // before that payload is trusted or parsed for anything else.
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
 
   const config = app.get(AppConfigService);
 

@@ -27,6 +27,10 @@ export class AppConfigService {
       GSTIN_API_ENABLED: configService.get('GSTIN_API_ENABLED', { infer: true }),
       GSTIN_API_URL: configService.get('GSTIN_API_URL', { infer: true }),
       GSTIN_API_KEY: configService.get('GSTIN_API_KEY', { infer: true }),
+      RAZORPAY_ENABLED: configService.get('RAZORPAY_ENABLED', { infer: true }),
+      RAZORPAY_KEY_ID: configService.get('RAZORPAY_KEY_ID', { infer: true }),
+      RAZORPAY_KEY_SECRET: configService.get('RAZORPAY_KEY_SECRET', { infer: true }),
+      RAZORPAY_WEBHOOK_SECRET: configService.get('RAZORPAY_WEBHOOK_SECRET', { infer: true }),
     };
   }
 

@@ -43,6 +43,7 @@ model User {
   kycDocuments         KycDocument[]
   createdPolls         Poll[]
   pollCommitments      PollCommitment[]
+  payments             Payment[]
 
   @@map("users")
 }
@@ -106,6 +107,7 @@ model Society {
   polls         Poll[]
   accounts      Account[]
   ledgerEntries LedgerEntry[]
+  payments      Payment[]
 
   @@map("societies")
 }
@@ -622,4 +624,74 @@ model IdempotencyKey {
 
   @@unique([scope, key])
   @@map("idempotency_keys")
+}
+
+// ---------------------------------------------------------------------------
+// Payments — Phase 4B. Razorpay sandbox integration on top of the Phase 4A
+// ledger: a Payment tracks one Razorpay order end to end (CREATED at order
+// creation, CAPTURED/REFUNDED as the signed webhook reports settlement).
+// See src/infra/razorpay for the feature-flagged client and
+// src/modules/payments for the order/webhook/refund routes. Amounts here are
+// stored in MAJOR units (rupees) — Razorpay's own API speaks paise, and the
+// conversion happens only at the infra/razorpay boundary (see
+// RazorpayService's doc comment). No offers/bookings/job-cards/payouts
+// (Phase 4C) reference this yet — linkedEntityType/linkedEntityId are plain
+// nullable pointers for that phase to fill in later, same pattern as
+// LedgerEntry's.
+// ---------------------------------------------------------------------------
+
+enum PaymentStatus {
+  CREATED
+  CAPTURED
+  REFUNDED
+  FAILED
+}
+
+model Payment {
+  id         String  @id @default(cuid())
+  societyId  String
+  residentId String?
+
+  /// Razorpay order id (order_...). One Payment per order.
+  orderId String @unique
+  /// Razorpay payment id (pay_...), set once the webhook reports a capture.
+  paymentId String? @unique
+
+  /// Major units (rupees) — see file-level doc comment.
+  amount   Decimal       @db.Decimal(14, 2)
+  currency String        @default("INR")
+  status   PaymentStatus @default(CREATED)
+
+  /// Free-text reason the resident is paying (e.g. "bulk-buy contribution").
+  /// Phase 4C fills linkedEntityType/linkedEntityId once a concrete domain
+  /// object (offer/booking/job-card) exists to point at.
+  purpose          String?
+  linkedEntityType String?
+  linkedEntityId   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  society  Society @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  resident User?   @relation(fields: [residentId], references: [id], onDelete: SetNull)
+
+  @@index([societyId])
+  @@index([status])
+  @@map("payments")
+}
+
+/// Durable audit/debug log of every webhook delivery this service has ever
+/// accepted (post signature-verification) — eventId is Razorpay's own event
+/// id. NOT itself the dedupe mechanism (IdempotencyService.runOnce is, keyed
+/// on the same eventId) but kept so a redelivered/replayed event is visible
+/// after the fact without digging through IdempotencyKey's opaque response
+/// blobs.
+model WebhookEvent {
+  id         String   @id @default(cuid())
+  eventId    String   @unique
+  type       String
+  payload    Json
+  receivedAt DateTime @default(now())
+
+  @@map("webhook_events")
 }
