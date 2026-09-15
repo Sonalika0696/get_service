@@ -98,12 +98,14 @@ model Society {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  flats        Flat[]
-  roles        Role[]
-  auditLogs    AuditLog[]
-  jobBlogPosts JobBlogPost[]
-  vendors      Vendor[]
-  polls        Poll[]
+  flats         Flat[]
+  roles         Role[]
+  auditLogs     AuditLog[]
+  jobBlogPosts  JobBlogPost[]
+  vendors       Vendor[]
+  polls         Poll[]
+  accounts      Account[]
+  ledgerEntries LedgerEntry[]
 
   @@map("societies")
 }
@@ -515,4 +517,109 @@ model PollCommitment {
 
   @@unique([pollId, residentId])
   @@map("poll_commitments")
+}
+
+// ---------------------------------------------------------------------------
+// Ledger — Phase 4A. Append-only double-entry escrow ledger: the
+// money-correctness bedrock the payments/bulk-buy/payouts phases (4B/4C)
+// build on. See src/modules/ledger for the posting primitive
+// (LedgerService.post), idempotency infrastructure, and the reconciliation
+// stub. No Razorpay/payments/offers/bookings/payouts live here yet.
+//
+// Model: transfer-style double entry. Every LedgerEntry is ONE balanced
+// transfer moving `amount` from debitAccountId to creditAccountId:
+//   debitAccount.balance  -= amount
+//   creditAccount.balance += amount
+// So every post conserves the sum of all account balances in the closed set
+// (money is neither created nor destroyed by moving it between the
+// non-EXTERNAL accounts). Money entering/leaving the system crosses the
+// EXTERNAL account (the PSP/bank boundary) — crediting EXTERNAL as money
+// leaves the closed set, debiting it as money enters, so EXTERNAL's balance
+// goes negative to represent the platform's net external claim. amount must
+// be strictly > 0; debit and credit accounts must differ and share a society.
+// ---------------------------------------------------------------------------
+
+/// The ARCHITECTURE.md v0.2 account set, plus EXTERNAL (the PSP/bank
+/// boundary) so Phase 4B/4C can post real money movement without a schema
+/// migration. One canonical Account per [societyId, kind] in v1.
+enum AccountKind {
+  SOCIETY_MASTER
+  BULK_BUY
+  VOUCHER
+  DISPUTE
+  LENDING_SIM
+  COMMISSION_SINK
+  EXTERNAL
+}
+
+model Account {
+  id        String      @id @default(cuid())
+  societyId String
+  kind      AccountKind
+  /// Cached running balance, kept in sync with LedgerEntry rows inside the
+  /// same transaction as every post (see LedgerService.post). Never the
+  /// source of truth by itself — LedgerService.verifyBalances() cross-checks
+  /// it against a recompute from LedgerEntry rows (analogous to
+  /// AuditService.verifyChain()).
+  balance   Decimal     @default(0) @db.Decimal(14, 2)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  society       Society       @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  debitEntries  LedgerEntry[] @relation("LedgerEntryDebitAccount")
+  creditEntries LedgerEntry[] @relation("LedgerEntryCreditAccount")
+
+  @@unique([societyId, kind])
+  @@index([societyId])
+  @@map("accounts")
+}
+
+/// Append-only — no module should ever update or delete a row here (see the
+/// file-level doc comment above for the balance convention this enforces).
+model LedgerEntry {
+  id String   @id @default(cuid())
+  ts DateTime @default(now())
+
+  societyId       String
+  debitAccountId  String
+  creditAccountId String
+  /// Always > 0 and debitAccountId != creditAccountId — enforced in
+  /// LedgerService.post at the application layer (no DB CHECK constraint in
+  /// v1, matching how other invariants in this schema are enforced — see
+  /// e.g. Vote.voterHash's doc comment).
+  amount Decimal @db.Decimal(14, 2)
+
+  reasonCode String
+  /// Free-form pointer to the domain object this entry is for (e.g. a future
+  /// Payment/Payout id) — no FK, since the linked entity type varies by
+  /// phase and may not exist yet when this entry is written.
+  linkedEntityType String?
+  linkedEntityId   String?
+
+  createdAt DateTime @default(now())
+
+  society       Society @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  debitAccount  Account @relation("LedgerEntryDebitAccount", fields: [debitAccountId], references: [id])
+  creditAccount Account @relation("LedgerEntryCreditAccount", fields: [creditAccountId], references: [id])
+
+  @@index([societyId, ts])
+  @@index([linkedEntityType, linkedEntityId])
+  @@map("ledger_entries")
+}
+
+/// Backs IdempotencyService.runOnce(scope, key, ...): a replayed request
+/// carrying the same (scope, key) returns the stored response instead of
+/// re-running the operation. `scope` is the route/operation name (e.g.
+/// "LEDGER_ADJUSTMENT"); `key` is the caller-supplied Idempotency-Key header.
+model IdempotencyKey {
+  id             String   @id @default(cuid())
+  key            String
+  scope          String
+  societyId      String?
+  responseStatus Int
+  responseBody   Json
+  createdAt      DateTime @default(now())
+
+  @@unique([scope, key])
+  @@map("idempotency_keys")
 }

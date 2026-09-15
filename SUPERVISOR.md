@@ -9,8 +9,8 @@ Single source of truth for **what's shipped, what's in flight, what's blocked**.
 - The **Demo bar** at the top says what a demo shows *right now*, if the project stops today.
 - Refresh timestamps at the top of the file on each update.
 
-Last updated: *2026-09-16 (Phase 3 backend complete + e2e-verified: reusable poll engine — advisory/binding/event, ownership-weighted voting with tenant-eligibility guards, event auto-fire, expiry/close-early; frontend not started)*
-Current active phase: *Phase 3 — Event Polls (backend 🟢 done & e2e-green; frontend ⚪ not started). Phase 4 backend next.*
+Last updated: *2026-09-16 (Phase 4A backend complete + e2e-verified: append-only double-entry escrow ledger, unit-of-work posting primitive, atomic idempotency infra, reconciliation stub. Paused here for review before 4B Razorpay; frontend not started)*
+Current active phase: *Phase 4 — Bulk-Buy + Razorpay + Ledger. 4A (ledger) 🟢 done & e2e-green; 4B/4C/4D ⚪ next. Frontend ⚪ not started.*
 
 ---
 
@@ -158,17 +158,19 @@ Update this box on the last commit of every phase — it should read like a two-
 
 ---
 
-## Phase 4 — Bulk-Buy Flow A + Razorpay + Ledger ⚪
+## Phase 4 — Bulk-Buy Flow A + Razorpay + Ledger 🟡
 
 **Deliverable:** vendor posts an offer; residents pay via Razorpay sandbox; escrow holds funds; treasurer co-authorises payout; ledger balances.
+
+**4A status (2026-09-16):** verified directly — build ok, oxlint clean, 35 unit + 25 e2e green against real Postgres. Money-conservation invariant proven in unit tests; idempotent posting proven over HTTP. **Paused here for supervisor review before 4B (Razorpay).** Decision: Razorpay will be built **stub-first behind a `RAZORPAY_ENABLED` flag** (like GSTIN) so the escrow flow stays fully offline-testable.
 
 ### 4A — Ledger foundation
 | Track | Task | Status |
 |---|---|---|
-| BE | `ledger/` — Account + LedgerEntry (append-only) | ⚪ |
-| BE | Unit-of-work helper (Prisma transaction wrapper) | ⚪ |
-| BE | Idempotency-key middleware | ⚪ |
-| BE | Nightly reconciliation stub | ⚪ |
+| BE | `ledger/` — Account + LedgerEntry (append-only) | 🟢 *(transfer-style double entry per ARCHITECTURE: `LedgerEntry(debit, credit, amount, reasonCode, linkedEntity)`; `Account` unique per `[societyId, kind]`, cached balance; `AccountKind` incl. `EXTERNAL` PSP boundary)* |
+| BE | Unit-of-work helper (Prisma transaction wrapper) | 🟢 *(`LedgerService.post(input, tx?)` — enlists in a caller's `$transaction` or opens its own; writes the append-only entry + both cached balances atomically. This is the signature 4B/4C reuse.)* |
+| BE | Idempotency-key middleware | 🟢 *(`IdempotencyService.runOnce(scope, key, societyId, fn)`: `scope:key` advisory lock + check→run→record in one tx, so a replay never double-posts; used by `POST /ledger/adjustments` via `Idempotency-Key` header)* |
+| BE | Nightly reconciliation stub | 🟢 *(`ReconciliationService.run` — no PSP source until 4B; returns report shape, no network; `GET /ledger/reconciliation`, treasurer-only)* |
 | FE | `(committee)/admin/treasury` — balances + entries | ⚪ |
 
 ### 4B — Razorpay sandbox

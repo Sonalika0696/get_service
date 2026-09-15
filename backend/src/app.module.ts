@@ -16,6 +16,7 @@ import { JobBlogModule } from './modules/job-blog/job-blog.module.js';
 import { VendorsModule } from './modules/vendors/vendors.module.js';
 import { KycModule } from './modules/kyc/kyc.module.js';
 import { PollsModule } from './modules/polls/polls.module.js';
+import { LedgerModule } from './modules/ledger/ledger.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor.js';
 
@@ -46,6 +47,7 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     VendorsModule,
     KycModule,
     PollsModule,
+    LedgerModule,
     HealthModule,
   ],
   providers: [
