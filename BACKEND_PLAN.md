@@ -14,12 +14,13 @@ Progress is tracked in [SUPERVISOR.md](SUPERVISOR.md).
 
 - [ ] Repo scaffold: `backend/` NestJS app, ESLint + Prettier, tsconfig, package.json
 - [ ] `docker-compose.yml` at repo root: Postgres 16 + Maildev
-- [ ] Prisma set up; initial migration for base entities: `User`, `Society`, `Flat`, `Occupancy`, `Role`
+- [ ] Prisma set up; initial migration for base entities: `User`, `Society` (with `audit_tail_hash`), `Flat` (with `ownership_share` default 1.0), `Occupancy` (`role` enum `OWNER_OCCUPIER | OWNER_ABSENTEE | TENANT`, `delegated_to_user_id` nullable), `Role`
 - [ ] `config/` module with Zod-validated env
 - [ ] `common/` primitives: logger, error filter, validation pipe, `Clock` service
-- [ ] `AuditLogInterceptor` writing to `AuditLog` (append-only table)
+- [ ] `AuditLogInterceptor` writing to `AuditLog` — **hash-chained** (`previous_hash` + `entry_hash = SHA-256(previous_hash || canonicalJson(payload))`); Postgres advisory lock on the society-scoped chain to guarantee serialised appends; `Society.audit_tail_hash` cached
+- [ ] `audit/verify` service: recomputes forward from genesis; returns the first divergent row (or `null`)
 - [ ] Health check route: `GET /health` returns `{ok: true, db: "up"}`
-- [ ] Seed script: 1 society ("Test Society"), 90 flats, 1 committee member, 3 owner-residents, 2 tenants (no KYC yet — placeholder identities)
+- [ ] Seed script: 1 society ("Test Society"), 90 flats, 1 committee member, 2 owner-occupiers, 1 owner-absentee (with tenant delegation), 2 tenants (no KYC yet — placeholder identities)
 
 **Definition of done:** `pnpm --filter backend start:dev` runs. `curl /health` returns ok. `SELECT count(*) FROM "Flat"` returns 90.
 
@@ -54,13 +55,15 @@ Progress is tracked in [SUPERVISOR.md](SUPERVISOR.md).
 **Goal:** committee onboards vendors; residents browse a directory; residents can rate a vendor after a job (job rating stub — real job flow comes in Phase 4).
 
 - [ ] `vendors/` module:
-  - Vendor entity, geolocation, service radius, categories
-  - Verification tier state machine: `unverified → society-attested → platform-audited`
+  - Vendor entity, geolocation, service radius, categories, `gstin`, `gstin_verified_at`
+  - Verification tier state machine: `UNVERIFIED → SOCIETY_ATTESTED → PLATFORM_AUDITED`
   - Access request records (resident-vendor consent events)
   - Ratings table + aggregate maintained lazily
+- [ ] `infra/gstinapi/` client: free-tier GSTIN lookup; retries + timeouts; feature-flagged so tests can stub it
+- [ ] Vendor onboarding: on committee approval, if GSTIN provided → call `gstinapi.in`; if the response says "Active", auto-promote to `SOCIETY_ATTESTED` and stamp `gstin_verified_at`; lookup failures logged, non-fatal
 - [ ] `kyc/` module (light): document upload stub (local disk in dev)
 - [ ] Endpoints: list vendors, vendor detail, committee onboard/approve, resident submit rating (stub until Phase 4 wires real jobs)
-- [ ] E2E test: committee onboards a vendor → resident sees it in directory → resident rates it (stub) → vendor detail shows aggregate rating
+- [ ] E2E test: committee onboards a vendor with a valid test-mode GSTIN → tier auto-flips to `SOCIETY_ATTESTED` → resident sees it in directory → resident rates it (stub) → vendor detail shows aggregate rating
 
 **Definition of done:** vendor directory is real and populated; committee tools work.
 
@@ -71,12 +74,19 @@ Progress is tracked in [SUPERVISOR.md](SUPERVISOR.md).
 **Goal:** a resident can create an event poll (Diwali dinner, shared cab). Neighbours join. No money flows yet — this is the pure poll mechanic used later by bulk-buy.
 
 - [ ] `polls/` module:
-  - Poll entity with kind `EVENT | BULK_BUY_RESIDENT`
-  - Commitments table
+  - Poll entity with `poll_type: ADVISORY | BINDING | EVENT | BULK_BUY_RESIDENT`
+  - `weight_mode: UNIFORM | OWNERSHIP_WEIGHTED` (only meaningful for BINDING)
+  - `quorum_pct`, `passing_pct`, `closes_at` per poll (defaults: 60% / simple majority)
+  - `Vote { poll_id, voter_hash, choice, weight }` — voter hash so aggregate results are readable but individual votes are anonymous outside the audit committee
+  - Commitments table (bulk-buy poll variant only)
   - Min-commitments + deadline auto-fire / auto-cancel
   - Poll creator can close early
-- [ ] Notification hooks: on join, on fire, on expiry
-- [ ] E2E test: resident creates event poll → neighbour joins → poll fires → notifications sent
+  - **Guards:** binding polls reject votes from `TENANT`; ownership-weighted votes multiply by `Flat.ownership_share`; a flat with both `OWNER_ABSENTEE` and `TENANT` counts only the owner's vote on binding polls
+- [ ] Notification hooks: on join, on fire, on expiry, on close
+- [ ] E2E tests:
+  - Advisory: resident creates advisory poll → tenant + owner both vote → poll closes → outcome recorded (each vote weight 1)
+  - Binding + weighted: committee creates binding poll → tenant vote rejected → owner-occupier + owner-absentee vote → outcome computed with ownership_share weights
+  - Event: resident creates event poll → neighbour joins → poll fires → notifications sent
 
 **Definition of done:** the poll engine is reusable and will slot into bulk-buy Flow B without rework.
 
@@ -101,10 +111,11 @@ This is the biggest phase. Split into 4A–4D internal milestones.
 - [ ] Every payment event → ledger entry
 
 ### 4C — Bulk-buy Flow A
-- [ ] `bulk-buy/` module: `Offer` entity
-- [ ] Vendor create offer → resident opt-in → commitment record
-- [ ] Auto-fire on N reached → escrow-in for each commitment via Razorpay
-- [ ] `Booking → JobCard[]` created on fire
+- [ ] `bulk-buy/` module: `Offer` entity with `discount_ladder: Json` (e.g. `[{minN: 5, pct: 5}, {minN: 10, pct: 10}]`), `min_commitments` (equal to ladder's lowest `minN`), `deadline`
+- [ ] DTO validation: ladder is non-empty, `minN` strictly increasing, `pct` monotonic, no duplicates
+- [ ] Vendor create offer → resident opt-in → commitment record; live tier computed from ladder + commitment count
+- [ ] Auto-fire on N reached → **applied tier = ladder entry with highest `minN ≤ commitments_count`** → escrow-in for each commitment via Razorpay
+- [ ] `Booking → JobCard[]` created on fire; each `JobCard.applied_discount_pct` snapshotted at fire time (later joiners cannot retroactively change price)
 - [ ] Per-flat sign-off endpoint
 - [ ] Payout authorisation flow: system-auth (rule-check pass) + treasurer manual → single Razorpay refund/payout in sandbox → ledger entries
 
@@ -164,13 +175,14 @@ This is the biggest phase. Split into 4A–4D internal milestones.
 **Goal:** the lending research module produces artefacts the frontend can render. Runs offline via CLI; not part of the request path.
 
 - [ ] `simulation/` Python package with `pyproject.toml`
-- [ ] `synthetic/` society generator (90 flats parameterised)
+- [ ] `synthetic/` society generator (90 flats parameterised) — emits ground-truth labels for pool-formation and vendor-recommendation alongside the requests
 - [ ] `engine/` discrete-day loop for 3 months
 - [ ] `strategies/` for the three repayment paths
-- [ ] `analysis/` sensitivity sweeps + Monte Carlo
-- [ ] `cli.py`: `python -m sim run --scenario baseline` writes `outputs/report.json` and PNGs
+- [ ] `analysis/sensitivity.py` + `analysis/monte_carlo.py` — parameter sweeps + N-run averaging
+- [ ] `analysis/functional.py` — runs the aggregation engine and recommender over the synthetic requests, computes **precision / recall / F1** for pool-formation and for vendor-recommendation at trust thresholds `{0.3, 0.4, 0.5, 0.6, 0.7}`; results appended under `report.json.functional`
+- [ ] `cli.py`: `python -m sim run --scenario baseline` writes `outputs/report.json` (with `functional`, `sensitivity`, `monte_carlo` sections) and PNGs
 - [ ] Six shipped scenarios (baseline, low opt-in, high default, all-maintenance, all-voucher, mixed)
-- [ ] pytest coverage on engine determinism + strategy invariants
+- [ ] pytest coverage on engine determinism + strategy invariants + functional-metric monotonicity (recall shouldn't grow when the threshold rises)
 
 **Definition of done:** a run of `python -m sim run --scenario baseline` writes reproducible artefacts to `outputs/`.
 
@@ -198,6 +210,7 @@ This is the biggest phase. Split into 4A–4D internal milestones.
 - [ ] `admin/` endpoints: aggregates only, never individual balances
 - [ ] Monthly financial statement generator (society-level)
 - [ ] Audit-log query endpoint with filters
+- [ ] `GET /audit/verify` endpoint surfaced to committee: recomputes the chain and reports either "chain intact through row N with tail hash …" or "first divergence at row K"
 - [ ] Reconciliation dashboard: ledger vs Razorpay daily settlement report
 
 **Definition of done:** everything a committee needs is exposed. Nothing residents shouldn't see is exposed.

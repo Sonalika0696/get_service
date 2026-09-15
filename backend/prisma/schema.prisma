@@ -1,5 +1,6 @@
 // Prisma schema — Society FinTech Platform
-// Phase 0 scope: User, Society, Flat, Occupancy, Role, AuditLog.
+// Tracks DESIGN.md v0.4 / ARCHITECTURE.md v0.2.
+// Phase 0 scope: User, Society, Flat, Occupancy, Role, AuditLog (hash-chained).
 // Later phases extend this file; see BACKEND_PLAN.md for the full entity list.
 
 generator client {
@@ -30,8 +31,9 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  occupancies Occupancy[]
-  roles       Role[]
+  occupancies          Occupancy[] @relation("OccupancyResident")
+  delegatedOccupancies Occupancy[] @relation("OccupancyDelegate")
+  roles                Role[]
 
   @@map("users")
 }
@@ -44,11 +46,15 @@ model Society {
   longitude Float?
   /// Society-level feature/config toggles (e.g. job-post rate limit).
   config    Json     @default("{}")
+  /// Cached tail hash of this society's AuditLog chain — see AuditService.
+  /// Null means the chain hasn't been written to yet (genesis pending).
+  auditTailHash Bytes?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  flats Flat[]
-  roles Role[]
+  flats     Flat[]
+  roles     Role[]
+  auditLogs AuditLog[]
 
   @@map("societies")
 }
@@ -58,6 +64,9 @@ model Flat {
   societyId         String
   unitNo            String
   maintenanceAmount Decimal  @db.Decimal(10, 2)
+  /// Undivided share of the flat, consulted only when a binding poll uses
+  /// OWNERSHIP_WEIGHTED. Defaults to 1.0 (uniform weight) until bylaws say otherwise.
+  ownershipShare    Decimal  @default(1.0) @db.Decimal(5, 4)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -68,8 +77,14 @@ model Flat {
   @@map("flats")
 }
 
+/// OWNER_OCCUPIER: owns and lives in the flat.
+/// OWNER_ABSENTEE: owns but doesn't live there; may delegate operational
+///   rights (service requests, bulk-buy) to the tenant via delegatedToUserId.
+///   Retains financial/governance rights regardless of delegation.
+/// TENANT: rents; no lending/binding-vote rights.
 enum OccupancyRole {
-  OWNER
+  OWNER_OCCUPIER
+  OWNER_ABSENTEE
   TENANT
 }
 
@@ -78,13 +93,18 @@ model Occupancy {
   flatId          String
   userId          String
   role            OccupancyRole
+  /// Only meaningful when role = OWNER_ABSENTEE: the tenant this owner has
+  /// delegated operational rights to. Enforced at the application layer —
+  /// see job-blog / bulk-buy guards, not a DB constraint.
+  delegatedToUserId String?
   tenureStartedAt DateTime      @default(now())
   tenureEndedAt   DateTime?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  flat Flat @relation(fields: [flatId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  flat        Flat  @relation(fields: [flatId], references: [id], onDelete: Cascade)
+  user        User  @relation("OccupancyResident", fields: [userId], references: [id], onDelete: Cascade)
+  delegatedTo User? @relation("OccupancyDelegate", fields: [delegatedToUserId], references: [id], onDelete: SetNull)
 
   @@index([flatId])
   @@index([userId])
@@ -114,20 +134,36 @@ model Role {
 }
 
 // ---------------------------------------------------------------------------
-// Audit — append-only. No module should ever update or delete a row here.
+// Audit — append-only, hash-chained. No module should ever update or delete
+// a row here. See AuditService for the chain-append and chain-verify logic
+// (DESIGN.md §1a.4 — one of the dissertation's four novelty claims).
 // ---------------------------------------------------------------------------
 
 model AuditLog {
-  id          String   @id @default(cuid())
-  ts          DateTime @default(now())
+  id       String @id @default(cuid())
+  /// Global auto-increment, used to order the per-society chain
+  /// (society-scoped WHERE + ORDER BY sequence gives a stable causal order).
+  sequence Int    @default(autoincrement())
+  ts       DateTime @default(now())
+
+  societyId   String
   actorId     String?
   action      String
   subjectType String
   subjectId   String
   payload     Json
 
+  /// entryHash of the previous row in this society's chain (32 zero bytes
+  /// for the genesis row).
+  previousHash Bytes
+  /// SHA-256(previousHash || canonicalJson({ts, societyId, actorId, action,
+  /// subjectType, subjectId, payload})).
+  entryHash    Bytes
+
+  society Society @relation(fields: [societyId], references: [id], onDelete: Restrict)
+
   @@index([subjectType, subjectId])
   @@index([actorId])
-  @@index([ts])
+  @@index([societyId, sequence])
   @@map("audit_logs")
 }

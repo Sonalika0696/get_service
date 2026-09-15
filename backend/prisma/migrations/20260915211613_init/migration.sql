@@ -2,7 +2,7 @@
 CREATE TYPE "KycTier" AS ENUM ('NONE', 'LIGHT', 'STANDARD');
 
 -- CreateEnum
-CREATE TYPE "OccupancyRole" AS ENUM ('OWNER', 'TENANT');
+CREATE TYPE "OccupancyRole" AS ENUM ('OWNER_OCCUPIER', 'OWNER_ABSENTEE', 'TENANT');
 
 -- CreateEnum
 CREATE TYPE "RoleKind" AS ENUM ('COMMITTEE', 'TREASURER', 'DEPUTY_TREASURER');
@@ -28,6 +28,7 @@ CREATE TABLE "societies" (
     "latitude" DOUBLE PRECISION,
     "longitude" DOUBLE PRECISION,
     "config" JSONB NOT NULL DEFAULT '{}',
+    "auditTailHash" BYTEA,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -40,6 +41,7 @@ CREATE TABLE "flats" (
     "societyId" TEXT NOT NULL,
     "unitNo" TEXT NOT NULL,
     "maintenanceAmount" DECIMAL(10,2) NOT NULL,
+    "ownershipShare" DECIMAL(5,4) NOT NULL DEFAULT 1.0,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -52,6 +54,7 @@ CREATE TABLE "occupancies" (
     "flatId" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "role" "OccupancyRole" NOT NULL,
+    "delegatedToUserId" TEXT,
     "tenureStartedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "tenureEndedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -74,12 +77,16 @@ CREATE TABLE "roles" (
 -- CreateTable
 CREATE TABLE "audit_logs" (
     "id" TEXT NOT NULL,
+    "sequence" SERIAL NOT NULL,
     "ts" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "societyId" TEXT NOT NULL,
     "actorId" TEXT,
     "action" TEXT NOT NULL,
     "subjectType" TEXT NOT NULL,
     "subjectId" TEXT NOT NULL,
     "payload" JSONB NOT NULL,
+    "previousHash" BYTEA NOT NULL,
+    "entryHash" BYTEA NOT NULL,
 
     CONSTRAINT "audit_logs_pkey" PRIMARY KEY ("id")
 );
@@ -109,7 +116,7 @@ CREATE INDEX "audit_logs_subjectType_subjectId_idx" ON "audit_logs"("subjectType
 CREATE INDEX "audit_logs_actorId_idx" ON "audit_logs"("actorId");
 
 -- CreateIndex
-CREATE INDEX "audit_logs_ts_idx" ON "audit_logs"("ts");
+CREATE INDEX "audit_logs_societyId_sequence_idx" ON "audit_logs"("societyId", "sequence");
 
 -- AddForeignKey
 ALTER TABLE "flats" ADD CONSTRAINT "flats_societyId_fkey" FOREIGN KEY ("societyId") REFERENCES "societies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -121,7 +128,13 @@ ALTER TABLE "occupancies" ADD CONSTRAINT "occupancies_flatId_fkey" FOREIGN KEY (
 ALTER TABLE "occupancies" ADD CONSTRAINT "occupancies_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "occupancies" ADD CONSTRAINT "occupancies_delegatedToUserId_fkey" FOREIGN KEY ("delegatedToUserId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "roles" ADD CONSTRAINT "roles_societyId_fkey" FOREIGN KEY ("societyId") REFERENCES "societies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "roles" ADD CONSTRAINT "roles_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_societyId_fkey" FOREIGN KEY ("societyId") REFERENCES "societies"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

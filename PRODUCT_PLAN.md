@@ -14,17 +14,22 @@ A residential society is the smallest unit of high-trust, geographically dense e
 
 Around this financial core sits a light community layer: event and service polls, a moderated job blog, and a vendor record every resident can read before joining a poll.
 
-The FinTech contribution defended in the dissertation is the **maintenance-adjustment repayment primitive** and the **society-escrow settlement design**, evaluated on a synthetic 200-flat society with sensitivity analysis and a regulatory pathway.
+The FinTech contribution defended in the dissertation is the **maintenance-adjustment repayment primitive** and the **society-escrow settlement design**, evaluated on a synthetic 90-flat society with sensitivity analysis and a regulatory pathway. Alongside these, the design contributes two reframed novelty claims — a **trust-graph substrate** shared by vendor recommendation, poll-neighbour matching and simulated lending co-signer scoring, and a **hash-chained audit trail** for community finance — both documented in [DESIGN.md](DESIGN.md) §1a.
 
 ---
 
 ## 2. Target users (personas)
 
-### 2.1 Owner-resident *(primary user)*
-- **Profile:** owns the flat; long-term stake in the society; typical age 30-60; disposable income for household services and small savings.
-- **What they get:** full app — bulk buy, vendor marketplace, service polls, event polls, job blog, **and** the lending module (borrow and lend, 2× maintenance cap).
+### 2.1 Owner-occupier *(primary user)*
+- **Profile:** owns the flat and lives in it; long-term stake in the society; typical age 30-60; disposable income for household services and small savings.
+- **What they get:** full app — bulk buy, vendor marketplace, service polls, event polls, job blog, **and** the lending module (borrow and lend, 2× maintenance cap). Full vote on advisory and binding polls.
 - **What they give:** identity verification, on-time maintenance payment history, active participation.
 - **Primary benefit:** their maintenance charge stretches further (discounts + no vendor markup) *and* they get a small, safe way to help or be helped by neighbours financially without going near loan sharks or credit cards.
+
+### 2.1a Owner-absentee *(owner who lets the flat to a tenant)*
+- **Profile:** owns the flat but does not live in it; a tenant occupies the flat and handles day-to-day matters.
+- **What they get:** retains all *financial* rights — lending (simulated), governance vote on both advisory and binding polls, treasury visibility for their own flat's ledger. May delegate *operational* rights (creating service requests, joining bulk-buy on the flat's behalf) to the tenant; delegation is a logged, revocable consent event.
+- **Primary benefit:** stays engaged in society governance and financial flows even from a distance, without having to double-vote or manage day-to-day service coordination.
 
 ### 2.2 Tenant / temporary resident *(secondary user)*
 - **Profile:** rents in the society; typical urban rental cycle 11-24 months; may still be a long-term resident of the city.
@@ -106,11 +111,11 @@ Two symmetric flows.
 
 **Flow A — Vendor-initiated minimum-booking offer**
 - **Users:** vendor (creates offer); residents (opt in); society (escrows and pays out).
-- **What it does:** a vendor publishes: *"I will do X job cards at Y% discount if at least N residents commit within T days."*
+- **What it does:** a vendor publishes: *"I will do X job cards at a tiered discount if enough residents commit within T days."*
 - **How it works:**
-  - Vendor sets: category, scope of one job card, unit price, discount %, minimum N, deadline T, target society/societies.
-  - Residents see the offer inside their society feed; opt-in creates a commitment.
-  - When N is met, the offer fires: residents' funds move to the society escrow (bulk-buy sub-account); vendor schedules the visit day.
+  - Vendor sets: category, scope of one job card, unit price, **discount ladder** — a stepwise list like `[{minN: 5, pct: 5}, {minN: 10, pct: 10}, {minN: 20, pct: 15}]` — plus base minimum N and deadline T, target society/societies.
+  - Residents see the offer inside their society feed; opt-in creates a commitment. The offer detail page shows the current live tier and how many more joiners unlock the next tier.
+  - When N is met, the offer fires at the *highest tier its committed count satisfies*: residents' funds move to the society escrow (bulk-buy sub-account); vendor schedules the visit day.
   - After each job is signed off by its resident, the corresponding job card's funds become releasable.
   - At end-of-day (or end-of-milestone for larger jobs), the society treasurer + platform co-authorise a single consolidated payout to the vendor.
   - Platform commission auto-deducted; vendor gets net.
@@ -141,7 +146,8 @@ Two symmetric flows.
 - **Users:** vendors (register); residents (discover, review); committee (approve, moderate).
 - **What it does:** the directory that Flow A and Flow B pull from.
 - **How it works:**
-  - Vendor onboards with: location (geotagged), service radius, categories, credentials, references. Committee approves.
+  - Vendor onboards with: location (geotagged), service radius, categories, credentials, references, **GSTIN**. Committee approves.
+  - **GSTIN verification** at onboarding via the free `gstinapi.in` public endpoint (100 lookups/month, no card required); an "active" result auto-promotes the vendor from `UNVERIFIED` to `SOCIETY_ATTESTED`.
   - Vendor cannot see resident directory — access is per-transaction and consent-based (a resident's opt-in to a poll is that consent).
   - Ratings: post-job rating by the resident + optional committee rating. Vendors below a threshold lose access.
   - Verification tiers: unverified → society-attested → platform-audited (documents, insurance, past-job proofs).
@@ -186,13 +192,16 @@ This is the module where the dissertation's research contribution lives. It is *
 - **Benefit:** strictly better signal-to-noise than LinkedIn/Naukri for a small volume of high-quality hyperlocal leads. Adds warmth (a real neighbour) to a professional interaction.
 - **Revenue:** none in v1. In v2 (future), commissions on successful hires split with the referrer.
 
-### 3.7 Event polls *(free-tier community feature)*
+### 3.7 Event and governance polls *(free-tier community feature)*
 
-- **Users:** any resident.
-- **What it does:** creates a poll for anything that needs a minimum RSVP — a movie night, a Diwali dinner, a housekeeping-staff pooled bonus, a shared cab to an airport at 5am.
-- **How it works:** same poll mechanic as Flow B, without money flowing (or with committee-escrowed money if it's a shared purchase).
-- **Benefit:** low-cost community engagement; drives platform habit; costs almost nothing to build once the poll infra exists.
-- **Revenue:** none directly. Retention driver.
+- **Users:** any resident (advisory); owners only (binding).
+- **What it does:** creates a poll for anything that needs a minimum RSVP — a movie night, a Diwali dinner, a shared cab at 5am — *and* the same mechanic supports society-wide governance decisions.
+- **Poll types:**
+  - **Advisory** — non-binding straw poll. Any resident can vote. One vote per resident.
+  - **Binding** — formal governance decision (bylaw change, capital-work approval, treasurer election). **Owners only.** Vote weight is configurable per society — uniform (one flat = one vote) or ownership-weighted (weight ∝ undivided share).
+- **How it works:** poll mechanic reused from Flow B; type chosen at creation; quorum + passing threshold configurable per poll (defaults: 60% quorum, simple majority; bylaw-class polls require two-thirds).
+- **Benefit:** replaces informal WhatsApp voting; produces an auditable governance record; costs almost nothing to build once the poll infra exists.
+- **Revenue:** none directly. Retention driver + governance realism for the dissertation.
 
 ### 3.8 Governance and dispute resolution *(admin foundation)*
 
@@ -200,10 +209,10 @@ This is the module where the dissertation's research contribution lives. It is *
 - **What it does:** structured workflow for approvals, votes, and disputes.
 - **How it works:**
   - Committee dashboard: approve vendors, set caps, review flagged posts, moderate disputes.
-  - Governance polls: proposals require committee sign-off, then a society-wide vote if the constitution demands it.
+  - Governance polls: binding polls (owners only, optionally ownership-weighted) require committee sign-off before opening; advisory polls anyone can open.
   - Dispute ladder: resident-vendor / resident-resident (lending, in the simulated system) / vendor-society, each with a defined escalation path.
-  - Audit log: every governance action is timestamped and immutable.
-- **Benefit:** replaces WhatsApp politics with structured process. Reduces committee-turnover shock.
+  - **Hash-chained audit log:** every governance and treasury action writes an `AuditLog` row whose SHA-256 hash chains from the previous row. An admin verification page displays the tail hash and re-verifies the chain on demand — any silent modification to any past row is detectable.
+- **Benefit:** replaces WhatsApp politics with structured process. Reduces committee-turnover shock. Provides tamper-evident finance records suitable for external audit.
 - **Revenue:** none directly; a compliance backbone.
 
 ### 3.9 Notifications and communication *(cross-cutting)*
@@ -221,11 +230,15 @@ These decisions are deliberate. They keep scope honest.
 
 - **No live P2P lending with real money.** Simulated only, on synthetic data. Regulatory pathway documented.
 - **No employer-side commercial referral portal.** Job blog only.
+- **No LinkedIn OAuth / professional-graph ingestion.** The trust graph in v1 is co-residence + prior successful transaction only; the LinkedIn edge lights up only when the future referral engine is built.
+- **No cash-out of vouchers to bank.** Vouchers redeem inside the bulk-buy marketplace only.
+- **No inclusion layer (staff-family referrals + CSR sponsorship).** Documented as future, not built.
 - **No CSR partnerships in the build scope.** Reference framework documented; not implemented.
 - **No digital ROSCA / chit fund** in v1. Documented as future.
 - **No group insurance** in v1. Documented as future.
 - **No security / visitor / gate management.** MyGate/NoBrokerHood own that; we sit on top or beside, not compete.
 - **No mobile-first native apps** committed in the plan — mobile-web responsive is enough for a synthetic-data demonstration. Native is a real-product decision, not a dissertation decision.
+- **No family-member sub-accounts.** One user per role per flat in v1; households manage sharing outside the app.
 
 ---
 
@@ -236,12 +249,19 @@ These decisions are deliberate. They keep scope honest.
 - Partner underwrites regulatory compliance under RBI's Master Direction 2017 (revised August 2024) — ₹2 crore paid-up capital, trustee-operated escrow, T+1 fund retention, no credit enhancement, ₹50 lakh aggregate lender exposure cap.
 - Platform continues to run the matching, capping, and maintenance-adjustment reconciliation.
 
-### 5.2 Full referral portal with commissions
+### 5.2 Full referral portal with commissions *(post-v1)*
 - Employer-verified job posts pay platform on hire.
 - Retention-linked payouts to the referrer (offer, 90-day retention, 365-day retention milestones).
-- Cash-coupon incentives redeemable in the bulk-buy marketplace.
-- Trust-graph-scoped routing.
+- Cash-coupon incentives redeemable in the bulk-buy marketplace **and** convertible to bank cash above a threshold (₹5,000 default).
+- **LinkedIn OAuth** on resident onboarding to seed the professional graph; the trust-graph substrate (§DESIGN.md 1a.2) is extended with LinkedIn edges and shared-employer edges.
+- Trust-graph-scoped routing with a referral-scoring algorithm (weighted sum of trust-edge weight, employer fit, seniority fit, recency).
+- Ninety-day probation window before full coupon release; anti-abuse velocity limits.
 - Anti-fraud reserve, hire-attribution window.
+
+### 5.2a Inclusion layer *(post-v1, funded by CSR)*
+- Referral engine optionally opened to society staff-family (security guards' children, domestic workers' children).
+- Beneficiary identity obscured to residents by default; disclosed only after the referrer opts in.
+- Funded via corporate CSR sponsorship under Section 135 of the Companies Act 2013; platform provides impact reporting.
 
 ### 5.3 Digital ROSCA / chit-group module
 - 6-20 person rotating savings inside a society.
@@ -289,12 +309,15 @@ Sensitivity analysis in the dissertation: adoption rate (30% / 60% / 90%), commi
 ## 7. Success metrics *(dissertation deliverable)*
 
 - **Technical demonstration**
-  - End-to-end escrow flow demonstrated on a synthetic 200-flat society.
-  - Zero-loss ledger reconciliation across a simulated month of activity.
-  - Role-based access enforced across all built features.
-- **Financial simulation**
+  - End-to-end escrow flow demonstrated on a synthetic 90-flat society.
+  - Zero-loss ledger reconciliation across the simulated 3-month horizon.
+  - Role-based access enforced across all built features (adversarial test suite).
+  - Hash-chained audit log verified end-to-end (tail hash recomputes cleanly from genesis).
+- **Financial + functional simulation**
   - Sensitivity analysis of platform economics across the parameters above.
   - Simulated lending module: default and recovery curves under three repayment options.
+  - **Pool-formation accuracy:** precision / recall / F1 for whether the right service requests aggregated together on synthetic ground truth.
+  - **Vendor-recommendation quality:** precision / recall / F1 across trust-threshold values on synthetic ground truth.
 - **Analytical contribution**
   - Regulatory-pathway chapter analysing India's NBFC-P2P framework and state Money Lenders Acts against the maintenance-adjustment primitive.
   - Comparison chapter positioning the design against MyGate / ApnaComplex / NoBrokerHood / ADDA on features, revenue model, and legal exposure.
@@ -316,14 +339,14 @@ Sensitivity analysis in the dissertation: adoption rate (30% / 60% / 90%), commi
 
 ---
 
-## 9. Open decisions still to make *(before we architect the system)*
+## 9. Open decisions (all locked)
 
-Only architectural ones remain — no more product-scope questions.
+All five architectural decisions have been made and are now the operating spec:
 
-1. **Frontend surface** — mobile-web responsive only, or PWA, or one native app? (Suggest: responsive web-first for the dissertation; leave native for future.)
-2. **Payment aggregator** — do we simulate the PA integration or actually wire a sandbox (e.g. Razorpay test mode) for demonstration? (Suggest: sandbox — makes the demo concrete without any real fund movement.)
-3. **Synthetic-society scale** — 200 flats standard, or 100 / 500 / 1,000 as parameters? (Suggest: 200 as the default demo; parameters expose adoption sensitivity.)
-4. **Simulation horizon** — 3 months / 6 months / 12 months of simulated activity for the lending module? (Suggest: 12 months so seasonal effects and defaults have room.)
-5. **Dispute-resolution automation vs. committee-only** — do we design an automated first pass (suggest a resolution based on history), or is every dispute manual to the committee? (Suggest: automated triage, manual final call.)
+1. **Frontend surface:** responsive web (Next.js 16).
+2. **Payment aggregator:** Razorpay sandbox for demo realism.
+3. **Synthetic-society scale:** 90 flats.
+4. **Simulation horizon:** 3 months.
+5. **Dispute resolution:** automated triage + committee-confirmed final call.
 
-Once these five are answered, we can move to the system design.
+Implementation runs in [BACKEND_PLAN.md](BACKEND_PLAN.md), [FRONTEND_PLAN.md](FRONTEND_PLAN.md), tracked in [SUPERVISOR.md](SUPERVISOR.md).

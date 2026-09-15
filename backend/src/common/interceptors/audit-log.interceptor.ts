@@ -2,17 +2,23 @@ import { CallHandler, ExecutionContext, Injectable, Logger, NestInterceptor } fr
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { Observable, tap } from 'rxjs';
-import { PrismaService } from '../../infra/prisma/prisma.service.js';
+import { AuditService } from '../../modules/audit/audit.service.js';
 import { AUDIT_LOG_METADATA_KEY, type AuditLogMetadata } from '../decorators/audit-log.decorator.js';
 
 interface RequestWithUser extends Request {
-  user?: { id: string };
+  /** Populated by AuthGuard from Phase 1 onward. */
+  user?: { id: string; societyId: string };
 }
 
 /**
  * Global interceptor; only does work on routes carrying `@AuditLog(...)`.
  * Writes fire-and-forget (don't block or fail the response) — an audit
  * write failure should be logged, never surfaced to the caller.
+ *
+ * Resolves societyId from the route's `:sid` param if present, else from
+ * the authenticated user's own society (one user, one society in v1 — see
+ * SUPERVISOR.md decisions log). Skips the write (logged) if neither is
+ * available, rather than guessing.
  */
 @Injectable()
 export class AuditLogInterceptor implements NestInterceptor {
@@ -20,7 +26,7 @@ export class AuditLogInterceptor implements NestInterceptor {
 
   constructor(
     private readonly reflector: Reflector,
-    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
   ) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
@@ -34,16 +40,21 @@ export class AuditLogInterceptor implements NestInterceptor {
 
     return next.handle().pipe(
       tap((responseBody: unknown) => {
+        const societyId = resolveSocietyId(request);
+        if (!societyId) {
+          this.logger.warn(`Skipping audit log for ${metadata.action}: no societyId resolvable from route or session`);
+          return;
+        }
+
         const subjectId = extractSubjectId(responseBody, request.params);
-        this.prisma.auditLog
-          .create({
-            data: {
-              actorId: request.user?.id ?? null,
-              action: metadata.action,
-              subjectType: metadata.subjectType,
-              subjectId,
-              payload: safeJson({ params: request.params, body: request.body }),
-            },
+        this.auditService
+          .append({
+            societyId,
+            actorId: request.user?.id ?? null,
+            action: metadata.action,
+            subjectType: metadata.subjectType,
+            subjectId,
+            payload: safeJson({ params: request.params, body: request.body }),
           })
           .catch((error: unknown) => {
             this.logger.error(`Failed to write audit log for ${metadata.action}`, error instanceof Error ? error.stack : String(error));
@@ -51,6 +62,12 @@ export class AuditLogInterceptor implements NestInterceptor {
       }),
     );
   }
+}
+
+function resolveSocietyId(request: RequestWithUser): string | null {
+  const sidParam = request.params.sid;
+  if (typeof sidParam === 'string') return sidParam;
+  return request.user?.societyId ?? null;
 }
 
 function extractSubjectId(responseBody: unknown, params: Record<string, string | string[]>): string {

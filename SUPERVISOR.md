@@ -9,8 +9,8 @@ Single source of truth for **what's shipped, what's in flight, what's blocked**.
 - The **Demo bar** at the top says what a demo shows *right now*, if the project stops today.
 - Refresh timestamps at the top of the file on each update.
 
-Last updated: *2026-09-16*
-Current active phase: *Phase 0 — Foundation (backend done, frontend not started)*
+Last updated: *2026-09-16 (Phase 0 backend caught up to the hash-chain/OWNER_ABSENTEE/ownership_share plan update; Phase 1 auth starting)*
+Current active phase: *Phase 0 — Foundation (backend done, frontend not started); Phase 1 backend starting*
 
 ---
 
@@ -31,7 +31,7 @@ Update this box on the last commit of every phase — it should read like a two-
 
 ---
 
-## Phase 0 — Foundation ⚪
+## Phase 0 — Foundation 🟡
 
 **Deliverable:** repo runs; DB has a seeded 90-flat society; nothing user-facing.
 
@@ -39,12 +39,14 @@ Update this box on the last commit of every phase — it should read like a two-
 |---|---|---|
 | BE | NestJS scaffold + tsconfig + ESLint | 🟢 *(oxlint, not ESLint — see decisions log)* |
 | BE | `docker-compose.yml` (Postgres + Maildev) | 🟢 |
-| BE | Prisma + initial migration (User, Society, Flat, Occupancy, Role) | 🟢 *(+ AuditLog in the same migration)* |
+| BE | Prisma + initial migration (User, Society [+`audit_tail_hash`], Flat [+`ownership_share`], Occupancy [`OWNER_OCCUPIER | OWNER_ABSENTEE | TENANT` + `delegated_to_user_id`], Role) | 🟢 *(+ AuditLog in the same migration — dev DB volume wiped and migration regenerated clean rather than layered; see decisions log)* |
 | BE | `config/` with Zod env validation | 🟢 |
 | BE | `common/`: logger, error filter, validation pipe, Clock | 🟢 *(Clock lives in `infra/clock/` per ARCHITECTURE.md §4.1)* |
-| BE | `AuditLogInterceptor` writing to append-only `AuditLog` | 🟢 *(wired globally; dormant until a route carries `@AuditLog(...)`, first used in Phase 1)* |
+| BE | `AuditLogInterceptor` writing to append-only `AuditLog` | 🟢 *(wired globally; dormant until a route carries `@AuditLog(...)`, first used in Phase 1; now delegates to `AuditService` — see below)* |
+| BE | `AuditLog` write path **hash-chained** (`previous_hash` + `entry_hash = SHA-256(prev || canonicalJson({ts, societyId, actorId, action, subjectType, subjectId, payload}))`); advisory-lock on society-scoped chain; `Society.audit_tail_hash` maintained | 🟢 *(`modules/audit/audit.service.ts`; e2e-proven: chain links genesis→N correctly, 15 concurrent appends to the same society stay non-colliding and verify intact — see decisions log for the hash-scope note)* |
+| BE | `audit/verify` internal service (recomputes forward from genesis; reports first divergent row) — endpoint surfaced in Phase 10 | 🟢 *(`AuditService.verifyChain`; e2e test tampers a row via raw SQL and confirms it's caught, including a separate check that the cached `Society.auditTailHash` itself hasn't been tampered independently of the log rows)* |
+| BE | Seed updated: 90 flats, 1 committee, 2 owner-occupiers, 1 owner-absentee (with tenant delegation), 2 tenants | 🟢 *(committee member counted as one of the 2 owner-occupiers, consistent with the original seed's convention; delegate tenant holds their own TENANT occupancy on the absentee owner's flat)* |
 | BE | `GET /health` returns `{ok, db}` | 🟢 |
-| BE | Seed: 1 society, 90 flats, 1 committee, 3 owners, 2 tenants | 🟢 |
 | FE | Next.js 16 scaffold, TS strict | ⚪ |
 | FE | Tailwind + shadcn/ui primitives | ⚪ |
 | FE | Root layout + providers (theme, TanStack Query, toaster) | ⚪ |
@@ -55,7 +57,7 @@ Update this box on the last commit of every phase — it should read like a two-
 
 **DoD:** `pnpm dev` starts both; landing page shows backend health green; `SELECT count(*) FROM "Flat"` returns 90.
 
-**Backend status:** verified directly — `npm run dev:backend` boots, `curl localhost:4000/health` → `{"ok":true,"db":"up"}`, `SELECT count(*) FROM flats` → 90 (table name `flats` per `@@map`). Lint (`oxlint`), build (`nest build`), unit tests, and e2e test (hits `/health` through a real Prisma connection) all pass. Frontend not started — `pnpm dev` DoD can't be fully exercised yet.
+**Backend status:** verified directly — `npm run dev:backend` boots, `curl localhost:4000/health` → `{"ok":true,"db":"up"}`, `SELECT count(*) FROM flats` → 90 (table name `flats` per `@@map`). Lint (`oxlint`), build (`nest build`), unit tests (14, incl. canonical-JSON and SHA-256 hash-chain primitives), and e2e tests (5: health + audit-chain-intact + genesis-linkage + concurrent-append-safety + tamper-detection, all against a real Postgres) pass. Frontend not started — `pnpm dev` DoD can't be fully exercised yet.
 
 **Blockers / notes:** none currently blocking. Docker Desktop's engine needs to be running before `docker compose up -d` — noticed once during this phase, resolved by starting Docker Desktop manually.
 
@@ -102,14 +104,16 @@ Update this box on the last commit of every phase — it should read like a two-
 
 | Track | Task | Status |
 |---|---|---|
-| BE | `vendors/` — entity + geo + categories + tier state machine | ⚪ |
+| BE | `vendors/` — entity + geo + categories + tier state machine + `gstin` / `gstin_verified_at` | ⚪ |
 | BE | Access request records + rating table + aggregate | ⚪ |
+| BE | `infra/gstinapi/` client (free tier, retries, timeouts, feature-flagged) | ⚪ |
+| BE | Vendor onboarding: on approve → GSTIN lookup → auto-promote to `SOCIETY_ATTESTED` if `Active` | ⚪ |
 | BE | `kyc/` light — document upload stub | ⚪ |
 | BE | Endpoints: list, detail, onboard, approve, rate (stub) | ⚪ |
-| BE | E2E: onboard → list → detail → rate | ⚪ |
+| BE | E2E: onboard w/ valid test GSTIN → tier flips → list → detail → rate | ⚪ |
 | FE | `/marketplace` list with filters | ⚪ |
 | FE | `/marketplace/[vendorId]` record page | ⚪ |
-| FE | `(committee)/admin/vendors` onboarding form | ⚪ |
+| FE | `(committee)/admin/vendors` onboarding form (GSTIN field + verified badge) | ⚪ |
 | FE | `(vendor)` group login shell | ⚪ |
 | FE | Playwright happy path | ⚪ |
 
@@ -123,16 +127,17 @@ Update this box on the last commit of every phase — it should read like a two-
 
 | Track | Task | Status |
 |---|---|---|
-| BE | `polls/` — Poll + Commitment entities | ⚪ |
+| BE | `polls/` — Poll (with `poll_type: ADVISORY | BINDING | EVENT | BULK_BUY_RESIDENT`, `weight_mode`, `quorum_pct`, `passing_pct`) + Vote + Commitment entities | ⚪ |
 | BE | Min-commitments + deadline auto-fire / expire | ⚪ |
 | BE | Poll creator close-early | ⚪ |
-| BE | Notification hooks on join / fire / expire | ⚪ |
-| BE | E2E: create → join → fire → notify | ⚪ |
+| BE | Guards: binding polls reject `TENANT`; ownership-weighted votes multiply by `Flat.ownership_share`; flat with `OWNER_ABSENTEE`+`TENANT` counts only owner on binding | ⚪ |
+| BE | Notification hooks on join / vote / close / fire / expire | ⚪ |
+| BE | E2E: advisory (all vote, tally equal) / binding weighted (tenant rejected, owners tally with share) / event fires | ⚪ |
 | FE | `/polls` list | ⚪ |
-| FE | `/polls/new` (event only for now) | ⚪ |
-| FE | `/polls/[pollId]` detail with join & state | ⚪ |
+| FE | `/polls/new` with type picker (event / advisory / binding — binding is committee-only), quorum/passing/weight-mode fields | ⚪ |
+| FE | `/polls/[pollId]` detail with join or vote button, weighted-tally readout, eligibility copy for tenants | ⚪ |
 | FE | Query polling for near-real-time state | ⚪ |
-| FE | Playwright happy path | ⚪ |
+| FE | Playwright happy paths (advisory + binding + event) | ⚪ |
 
 **DoD:** event polls fire correctly; poll engine is reusable for Phase 5.
 
@@ -164,14 +169,14 @@ Update this box on the last commit of every phase — it should read like a two-
 ### 4C — Offer flow
 | Track | Task | Status |
 |---|---|---|
-| BE | `bulk-buy/` Offer entity + commit | ⚪ |
-| BE | Auto-fire on N reached → escrow-in | ⚪ |
-| BE | Booking + JobCard[] on fire | ⚪ |
+| BE | `bulk-buy/` Offer entity with `discount_ladder JSON` + commit; ladder DTO validation (non-empty, strictly increasing `minN`, monotonic `pct`) | ⚪ |
+| BE | Auto-fire on `min_commitments` reached; applied tier = ladder entry with highest `minN ≤ commitments_count` → escrow-in | ⚪ |
+| BE | Booking + JobCard[] on fire; `applied_discount_pct` snapshotted at fire | ⚪ |
 | BE | Per-flat sign-off endpoint | ⚪ |
 | BE | Payout dual-authorisation (system + treasurer) | ⚪ |
-| FE | `(vendor)/vendor/offers` list + new | ⚪ |
-| FE | `(resident)/offers` list + detail with Razorpay Checkout | ⚪ |
-| FE | Dashboard "My upcoming services" | ⚪ |
+| FE | `(vendor)/vendor/offers` list + new (ladder editor: dynamic rows minN → pct, sorted, live step-chart preview) | ⚪ |
+| FE | `(resident)/offers` list + detail with **discount-ladder step chart** + current tier + "next tier at N+K" hint; Razorpay Checkout | ⚪ |
+| FE | Dashboard "My upcoming services" with applied-tier badge | ⚪ |
 | FE | Sign-off dialog with rating capture | ⚪ |
 | FE | Treasurer payout authorise page | ⚪ |
 
@@ -247,13 +252,14 @@ Update this box on the last commit of every phase — it should read like a two-
 | Track | Task | Status |
 |---|---|---|
 | SIM | `simulation/` Python package (pyproject.toml) | ⚪ |
-| SIM | Synthetic society generator (90 flats, parameterised) | ⚪ |
+| SIM | Synthetic society generator (90 flats, parameterised); **emits ground-truth labels** for pool-formation + optimal-vendor-recommendation | ⚪ |
 | SIM | Discrete-day engine (3 months default) | ⚪ |
 | SIM | Three repayment strategies | ⚪ |
-| SIM | Sensitivity + Monte Carlo | ⚪ |
+| SIM | `analysis/sensitivity.py` + `analysis/monte_carlo.py` | ⚪ |
+| SIM | `analysis/functional.py` — pool-formation precision/recall/F1 + vendor-recommendation P/R/F1 across trust thresholds `{0.3–0.7}`; appends to `report.json.functional` | ⚪ |
 | SIM | CLI `python -m sim run --scenario X` | ⚪ |
 | SIM | 6 scenarios ship: baseline / low-optin / high-default / all-maint / all-voucher / mixed | ⚪ |
-| SIM | pytest for engine determinism + strategy invariants | ⚪ |
+| SIM | pytest: engine determinism + strategy invariants + functional-metric monotonicity | ⚪ |
 
 **DoD:** `python -m sim run --scenario baseline` produces reproducible artefacts.
 
@@ -291,6 +297,7 @@ Update this box on the last commit of every phase — it should read like a two-
 | BE | Read-endpoint that serves the JSON/CSV outputs safely | ⚪ |
 | FE | `/simulation` scenario picker | ⚪ |
 | FE | Charts: pool health, default sensitivity heatmap, repayment comparison | ⚪ |
+| FE | **Functional-accuracy panel** on `/simulation/report`: pool-formation P/R/F1 table + vendor-recommendation P/R/F1 threshold curve | ⚪ |
 | FE | `/simulation/report` embed-friendly view | ⚪ |
 | FE | Reproducibility panel (seed, params, run timestamp) | ⚪ |
 
@@ -306,9 +313,11 @@ Update this box on the last commit of every phase — it should read like a two-
 |---|---|---|
 | BE | Monthly financial statement generator | ⚪ |
 | BE | Audit-log query endpoint with filters | ⚪ |
+| BE | `GET /audit/verify` endpoint (backed by Phase 0 hash-chain infra): reports "intact" or first divergent row | ⚪ |
 | BE | Reconciliation dashboard endpoints | ⚪ |
 | FE | `(committee)/admin/reports` financial statement page | ⚪ |
 | FE | `(committee)/admin/audit` filterable log | ⚪ |
+| FE | `(committee)/admin/audit/verify` — displays tail hash + "Verify chain" button; green intact / red divergence readout | ⚪ |
 | FE | Empty states everywhere | ⚪ |
 | FE | Loading skeletons everywhere | ⚪ |
 | FE | Accessibility pass (keyboard, ARIA, contrast) | ⚪ |
@@ -337,6 +346,7 @@ Kept visible so they don't get lost between phases.
 
 Use this to keep the supervisor honest when reality forces a decision to change from the plan.
 
+- **2026-09-16 — Plan extension after reading an alternate design set ("CommunityFinance" trio, external).** Cross-checked the alternate design against our plan; imported six additions without changing scope or phase order: (1) explicit **novelty framing** with four claims (trust-graph substrate, escrow-through-society-account, maintenance-adjustment repayment [ours, unique], hash-chained audit) — see [DESIGN.md](DESIGN.md) §1a; (2) **hash-chained AuditLog** (SHA-256 previous-hash chain, tail-hash cached on Society, `GET /audit/verify` endpoint); (3) **OWNER_ABSENTEE** role variant on Occupancy with tenant delegation; (4) **advisory / binding poll types + ownership-weighted voting** (extends Phase 3 without adding a new phase); (5) **vendor discount ladder** on Offer + GSTIN sandbox verification via `gstinapi.in` free tier; (6) **functional-accuracy evaluation** (pool-formation + vendor-recommendation P/R/F1) in the Python sim. Deferred (kept in Future Plans): job referral engine + LinkedIn OAuth + coupon cash-out + inclusion layer + family-member sub-accounts.
 - **Package manager: npm workspaces, not pnpm.** ARCHITECTURE.md allowed either explicitly. pnpm wasn't installed; npm 11 already was. Root `package.json` declares `workspaces: ["backend", "shared"]`; `frontend` gets added when that workspace is scaffolded.
 - **Session model: DB-backed `Session` table, not stateless JWT.** ARCHITECTURE.md said "JWT in httpOnly cookie" without settling revocability. Chosen so logout / force-revoke is possible for committee/treasurer accounts. Not yet implemented — lands with Phase 1 auth.
 - **Lint/test tooling: oxlint + vitest, not ESLint + Jest.** The Nest CLI's current default scaffold (`@nestjs/cli` v12) ships oxlint and vitest, not the ESLint/Jest combo ARCHITECTURE.md assumed. Kept the modern defaults — same intent (lint + test), faster, less config. Revisit if a dependency needs a Jest-only feature.
@@ -344,6 +354,11 @@ Use this to keep the supervisor honest when reality forces a decision to change 
 - **Prisma 7 requires an explicit driver adapter.** No bundled query-engine binary anymore — `PrismaService` constructs the client with `@prisma/adapter-pg` (`pg` under the hood) rather than a bare `DATABASE_URL` on the datasource block. Functionally equivalent, just a newer wiring pattern.
 - **`GET /health` excluded from the `/api/v1` global prefix.** ARCHITECTURE.md §4.4 locks a global `/api/v1` prefix but also lists `GET /health` bare, and the Phase 0 DoD literally says `curl /health`. Resolved by excluding `health` from `setGlobalPrefix` — standard practice so infra probes don't need the versioned path. Every other route sits under `/api/v1`.
 - **Backend `package.json` uses `"type": "module"` (true ESM).** This is what the current Nest CLI scaffolds by default (NodeNext module resolution, `.js` extensions on relative imports even in `.ts` source). Not a deliberate choice against CommonJS — just noting it because it affects how every future file in `backend/src` must be written.
+- **Dev Postgres volume wiped and the migration regenerated clean, rather than adding a second migration on top.** The `OccupancyRole` enum change (`OWNER`/`TENANT` → `OWNER_OCCUPIER`/`OWNER_ABSENTEE`/`TENANT`) isn't a safe in-place cast — old `OWNER` rows have no target value in the new enum. The only data in the dev DB was our own synthetic seed (fully reproducible via `npm run prisma:seed`), the migration had never left localhost, and SUPERVISOR.md itself still had this line marked 🟡. Ran `docker compose down -v` + `docker compose up -d`, deleted `prisma/migrations/`, and regenerated one clean `init` migration reflecting the finished Phase 0 schema. Chose this over an honest two-migration history because the first migration modeled a schema that was, by the plan's own admission, incomplete — carrying it forward would document a wrong intermediate state for no benefit. Would not do this again once real (even synthetic-but-referenced) data or a second developer depends on the migration history.
+- **Hash-chain content is the full logical row, not literally just the `payload` column.** ARCHITECTURE.md's shorthand is `entryHash = SHA-256(previousHash || canonicalJson(payload))`. Implemented as `SHA-256(previousHash || canonicalJson({ts, societyId, actorId, action, subjectType, subjectId, payload}))` instead — hashing only the `payload` field would leave `action`/`subjectType`/`subjectId`/`actorId` unprotected, which defeats the point of the novelty claim ("any modification to any past row breaks the chain"). `ts` is included as an ISO string precisely because it's part of what "the row" means.
+- **`AuditLogInterceptor` resolves `societyId` from the route's `:sid` param, falling back to `request.user.societyId`.** Neither exists yet in Phase 0 (interceptor is dormant — no route carries `@AuditLog(...)` yet), but this is the contract Phase 1's `AuthGuard`/session must satisfy: the authenticated user object needs a `societyId` for routes that don't carry `:sid` in the URL. If neither is resolvable, the write is skipped and logged rather than guessed — assumes one user has exactly one active society membership in v1 (consistent with PRODUCT_PLAN.md's "no family-member sub-accounts" simplicity scope).
+- **Signup creates the Occupancy directly — no committee-approval step in v1.** ARCHITECTURE.md's route list shows `POST /societies/:sid/occupancies` as committee-only, which would otherwise leave a fresh signup with no society membership (blocking every society-scoped route, job-blog included). User confirmed: signup collects `{name, email, phone?, societyId, flatId, role}` and creates the `Occupancy` on OTP verification, self-attested, no approval gate — matching the "no KYC yet, placeholder identities" scope already set in the Phase 0 seed. The committee endpoint stays available for reassignment/correction. `OWNER_ABSENTEE` delegation itself (setting `delegatedToUserId`) is **not** a signup-time field or a Phase 1 endpoint — BACKEND_PLAN.md's Phase 1 checklist doesn't list one; only the seed sets it directly for now.
+- **OTP: 6-digit code, 10-minute expiry, 60-second resend cooldown.** User's explicit call for Phase 1 auth — standard parameters, no further discussion needed.
 
 ---
 
@@ -361,9 +376,11 @@ Live risks from [CRITIQUE.md](CRITIQUE.md) that we watch across the build:
 
 | Risk | Current mitigation | Status |
 |---|---|---|
-| NBFC-P2P regulation triggers | Simulation only in v1; live pathway documented | 🟢 mitigated by scope |
-| Payment Aggregator licensing | Razorpay sandbox in v1; society-account escrow model | 🟢 mitigated by scope |
+| NBFC-P2P regulation triggers | Simulation only in v1; live pathway documented; internal-welfare framing referenced but not relied on | 🟢 mitigated by scope |
+| Payment Aggregator licensing | Razorpay sandbox in v1; society-account escrow model (novelty claim §1a.3 documents why no PA licence is needed) | 🟢 mitigated by scope |
 | DPDP Act consent architecture | Consent ledger designed in from foundation | 🟡 verify each phase adds proper consent events |
-| Committee-fraud vector | Two-person authorisation + immutable audit log | 🟡 verify implementation in Phase 4 |
+| Committee-fraud vector | Two-person authorisation + hash-chained audit log (§1a.4) with committee-facing `/audit/verify` in Phase 10 | 🟡 verify implementation in Phase 4 and again in Phase 10 |
+| Audit-log tamper-evidence | SHA-256 previous-hash chain over every state change; Society-scoped advisory lock on append; tail hash cached | 🟡 verify chain intact after each phase's e2e run |
 | Job-blog impersonation | Real resident attribution + company-email verify + rate limit | 🟡 verify in Phase 1 |
 | Vendor circumvention | Anti-circumvention clause + platform-mediated warranty + rating penalty | 🟡 verify in Phase 4 |
+| Vendor identity fraud | GSTIN verification at onboarding via `gstinapi.in` free tier — an "Active" response auto-promotes to `SOCIETY_ATTESTED` | 🟡 verify in Phase 2 |

@@ -6,6 +6,7 @@ import { AppConfigService } from './config/config.service.js';
 import { ClockModule } from './infra/clock/clock.module.js';
 import { PrismaModule } from './infra/prisma/prisma.module.js';
 import { HealthModule } from './modules/health/health.module.js';
+import { AuditModule } from './modules/audit/audit.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor.js';
 
@@ -26,6 +27,7 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     }),
     ClockModule,
     PrismaModule,
+    AuditModule,
     HealthModule,
   ],
   providers: [

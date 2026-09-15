@@ -58,7 +58,8 @@ Phase numbering mirrors [BACKEND_PLAN.md](BACKEND_PLAN.md) so frontend and backe
   - Category chips, service radius map (static image or a lightweight Leaflet embed if trivial)
   - "Request access" / rating stub button (real ratings become active in Phase 4)
 - [ ] `(committee)/admin/vendors`:
-  - Vendor onboarding form: name, contact, geolocation, radius, categories, tier
+  - Vendor onboarding form: name, contact, geolocation, radius, categories, tier, **GSTIN**
+  - After committee approve → the vendor row shows a small "GSTIN: Active (verified via gstinapi.in)" badge if the backend lookup succeeded; a "GSTIN: Unverified" pill otherwise
   - Approve / suspend / audit-tier bump
 - [ ] `(vendor)` route group scaffolded (login shell) — full vendor tools come in Phase 4
 
@@ -70,11 +71,13 @@ Phase numbering mirrors [BACKEND_PLAN.md](BACKEND_PLAN.md) so frontend and backe
 
 **Goal:** any resident can create an event poll; neighbours can join; the poll fires on minimum or expires.
 
-- [ ] `(resident)/polls` list view (event polls only at this stage)
-- [ ] `/polls/new`: type = event; fields — title, description, min-commitments, deadline
-- [ ] `[pollId]` detail: joiners list, join button, close-early button (creator only), state chip (open / fired / expired)
+- [ ] `(resident)/polls` list view (event polls only at this stage; advisory + binding poll types coexist visually)
+- [ ] `/polls/new`: type picker — `EVENT` (default) / `ADVISORY` / `BINDING` (binding is committee-role-gated); fields — title, description, min-commitments (event only), quorum-%, passing-%, deadline, weight-mode (binding only: UNIFORM / OWNERSHIP_WEIGHTED)
+- [ ] `[pollId]` detail: joiners/voters list, join or vote button, close-early button (creator/committee only), state chip (open / fired / passed / failed / expired)
+- [ ] Vote-eligibility copy: for a binding poll a tenant sees "Binding polls are open to owners only" (their vote is disabled with tooltip)
+- [ ] Weighted-tally readout on binding polls: shows each option's raw count *and* weighted total
 - [ ] Real-time-ish polling: TanStack Query with polling on the detail page
-- [ ] Notifications shown in-app on join, fire, expire
+- [ ] Notifications shown in-app on join, vote, close, fire, expire
 
 **Definition of done:** the poll UX is complete and reusable. Adding bulk-buy Flow B in Phase 5 will slot in.
 
@@ -94,10 +97,10 @@ Phase numbering mirrors [BACKEND_PLAN.md](BACKEND_PLAN.md) so frontend and backe
 
 ### 4C — Vendor offer flow
 - [ ] `(vendor)/vendor/offers` list
-- [ ] `(vendor)/vendor/offers/new`: category, unit price, discount %, min N, deadline, recurring toggle
-- [ ] `(resident)/offers` list (Flow A visible)
-- [ ] `(resident)/offers/[offerId]`: commit button opens Razorpay Checkout
-- [ ] On success: commitment card appears in the resident's dashboard with status chip
+- [ ] `(vendor)/vendor/offers/new`: category, unit price, **discount ladder editor** (dynamic rows: `minN → pct`, sorted, non-empty), base minimum N, deadline, recurring toggle. Live preview of the ladder as a step chart
+- [ ] `(resident)/offers` list (Flow A visible) — each card shows "next tier at N+K residents"
+- [ ] `(resident)/offers/[offerId]`: **discount-ladder visualisation** (step chart with the current tier highlighted, and a marker showing how many more commitments unlock the next tier); commit button opens Razorpay Checkout
+- [ ] On success: commitment card appears in the resident's dashboard with status chip + applied-tier badge (snapshotted at fire time)
 
 ### 4D — Job cards, sign-off, payout
 - [ ] `(resident)/dashboard`: "My upcoming services" card list — each with sign-off action
@@ -162,6 +165,7 @@ Phase numbering mirrors [BACKEND_PLAN.md](BACKEND_PLAN.md) so frontend and backe
   - Repayment-option comparison
   - Aggregate KPIs
 - [ ] `/simulation/report` renders a fuller report view suitable for embedding in dissertation screenshots
+- [ ] **Functional-accuracy panel** (new section in `/simulation/report`): renders the `functional` block of `report.json` — pool-formation precision/recall/F1 as a single table; vendor-recommendation precision/recall/F1 as a threshold-vs-metric line chart at trust weights {0.3, 0.4, 0.5, 0.6, 0.7}. Both use the same Recharts styling as the rest.
 - [ ] "Reproducibility" panel: shows scenario seed, parameters, and timestamp of the underlying run
 
 **Definition of done:** the dashboard reads real output from `simulation/outputs/report.json` and renders every chart the dissertation will cite.
@@ -190,6 +194,7 @@ Phase numbering mirrors [BACKEND_PLAN.md](BACKEND_PLAN.md) so frontend and backe
 
 - [ ] `(committee)/admin/reports`: monthly financial statement generator (renders + downloads PDF stub)
 - [ ] `(committee)/admin/audit`: filterable audit log view
+- [ ] `(committee)/admin/audit/verify`: **hash-chain verification** page — shows the society's current tail hash, a "Verify chain" button that hits `GET /audit/verify`, and renders either a green "Chain intact through row N (tail: 0x…)" or a red "First divergence at row K — payload hash mismatch"
 - [ ] Empty states for every list (no offers, no vendors, no disputes)
 - [ ] Loading skeletons everywhere; no bare spinners
 - [ ] Accessibility: keyboard navigation on all critical flows; ARIA labels on charts; contrast checks

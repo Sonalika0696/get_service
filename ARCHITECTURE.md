@@ -1,4 +1,4 @@
-# Architecture — Society FinTech Platform v0.1
+# Architecture — Society FinTech Platform v0.2
 
 Companion to [PRODUCT_PLAN.md](PRODUCT_PLAN.md) and [DESIGN.md](DESIGN.md). This document commits to a stack, a repository layout, and a code split between backend and frontend.
 
@@ -88,6 +88,7 @@ backend/
 │   ├── infra/
 │   │   ├── prisma/              # PrismaService, unit-of-work helpers
 │   │   ├── razorpay/            # Razorpay client wrapper (sandbox-only)
+│   │   ├── gstinapi/            # gstinapi.in free-tier GSTIN lookup client
 │   │   ├── mailer/              # OTP + notifications
 │   │   ├── sms/                 # optional gateway abstraction
 │   │   └── clock/               # injectable Clock for deterministic tests
@@ -137,15 +138,17 @@ backend/
 
 **`vendors/`**
 - Geolocation + service radius + categories.
-- Verification tier state machine.
+- Verification tier state machine: `UNVERIFIED → SOCIETY_ATTESTED → PLATFORM_AUDITED`.
+- **GSTIN lookup** at onboarding via `gstinapi.in` free tier (`infra/gstinapi/`): if the response is `"Active"`, the vendor is auto-promoted from `UNVERIFIED` to `SOCIETY_ATTESTED`; failures are logged, not fatal.
 - Access-request per transaction (a poll join implies consent).
 - Rating aggregate maintained lazily on every signed-off job card.
 
 **`bulk-buy/`** *(the biggest module)*
 - One entity model covers both flows:
-  - `Offer`: vendor-initiated. Fields: min_commitments `N`, deadline `T`.
+  - `Offer`: vendor-initiated. Fields: `unitPrice`, `discountLadder: Json` (e.g. `[{minN: 5, pct: 5}, {minN: 10, pct: 10}, {minN: 20, pct: 15}]`), `minCommitments` (equal to the ladder's lowest `minN`), `deadline`.
   - `Poll`: resident-initiated. Fields: tagged vendor, proposed slot, vendor-confirmed minimum.
   - Both fire the same `Booking → JobCard[] → Escrow → Payout` sequence.
+- **Discount-ladder resolution:** on fire, the applied tier is the ladder entry with the highest `minN ≤ commitments_count`; each `JobCard.appliedDiscountPct` is snapshotted at fire time so later commitments can't retroactively change the price.
 - Weekly-recurring subscription is a variant of Offer with `recurring: WEEKLY`.
 - Two-tier flow: `JobCard.tier: SMALL | LARGE` — LARGE uses milestone payouts and defect-liability retention.
 
@@ -181,6 +184,8 @@ backend/
 
 **`polls/`**
 - Event-poll engine, shared with bulk-buy poll (same base entity, different money-flow rules).
+- `Poll.pollType: ADVISORY | BINDING | BULK_BUY | EVENT`. Advisory/binding types don't move money and are the primary governance surface; bulk-buy/event types move money via the Booking path.
+- `Poll.weightMode: UNIFORM | OWNERSHIP_WEIGHTED` (only meaningful for `BINDING`). Binding polls enforce owner-only voting in the guard layer; ownership-weighted votes multiply the tally by `Flat.ownershipShare` (defaults to 1.0).
 
 **`governance/`** and **`disputes/`**
 - Proposal + vote workflow.
@@ -193,7 +198,9 @@ backend/
 
 **`audit/`**
 - One append-only table. Every state change writes here via `AuditLogInterceptor`.
-- Consent ledger is a sub-view of audit filtered to `type = CONSENT`.
+- **Hash-chained.** Each row carries `previousHash` (bytea) and `entryHash = SHA-256(previousHash || canonicalJson(payload))`. The chain's genesis row has `previousHash = 0x00…00`. Writes take a Postgres advisory lock on a well-known key so no two rows can share a `previousHash` (concurrency-safe append). The tail hash is cached in `SocietyMeta.auditTailHash` for O(1) reads.
+- **Verification service** (`audit/verify`): recomputes the chain forward from any point and returns the first divergent row (or `null` if the chain is intact). Exposed to committee via `GET /audit/verify`.
+- Consent ledger is a sub-view of audit filtered to `action LIKE 'CONSENT_*'`.
 
 **`admin/`**
 - Endpoints backing committee and treasurer dashboards.
@@ -203,21 +210,24 @@ backend/
 
 ```
 User(id, name, email, phone, kyc_tier, created_at)
-Society(id, name, address, geolocation, config)
-Flat(id, society_id, unit_no, maintenance_amount)
-Occupancy(id, flat_id, user_id, role[OWNER|TENANT], tenure_started_at, tenure_ended_at)
+Society(id, name, address, geolocation, config, audit_tail_hash)
+Flat(id, society_id, unit_no, maintenance_amount, ownership_share)
+Occupancy(id, flat_id, user_id, role[OWNER_OCCUPIER|OWNER_ABSENTEE|TENANT], tenure_started_at, tenure_ended_at, delegated_to_user_id NULL)
 Role(id, society_id, user_id, kind[COMMITTEE|TREASURER|DEPUTY_TREASURER])
 
-Vendor(id, name, geolocation, radius_km, verification_tier, contact)
+Vendor(id, name, geolocation, radius_km, verification_tier, gstin, gstin_verified_at, contact)
 VendorCategory(vendor_id, category)
 VendorRating(id, vendor_id, job_card_id, rating, comment, source[RESIDENT|COMMITTEE])
 VendorAccessRequest(id, vendor_id, resident_id, purpose, granted_at, revoked_at)
 
-Offer(id, vendor_id, society_id, category, unit_price, discount_pct, min_commitments, deadline, recurring)
-Poll(id, society_id, creator_id, tagged_vendor_id, category, proposed_slot, min_commitments, deadline, kind[BULK_BUY|EVENT])
+Offer(id, vendor_id, society_id, category, unit_price, discount_ladder JSON, min_commitments, deadline, recurring)
+Poll(id, society_id, creator_id, tagged_vendor_id, category, proposed_slot, min_commitments, deadline,
+     poll_type[ADVISORY|BINDING|BULK_BUY|EVENT], weight_mode[UNIFORM|OWNERSHIP_WEIGHTED],
+     quorum_pct, passing_pct, closes_at)
 Commitment(id, offer_id?, poll_id?, user_id, amount, status)
+Vote(id, poll_id, voter_hash, choice, weight)
 Booking(id, source_type, source_id, vendor_id, society_id, status, tier[SMALL|LARGE])
-JobCard(id, booking_id, resident_id, scope, price, sla, status, signed_off_at)
+JobCard(id, booking_id, resident_id, scope, unit_price, applied_discount_pct, sla, status, signed_off_at)
 
 Account(id, society_id, kind[SOCIETY_MASTER|BULK_BUY|VOUCHER|DISPUTE|LENDING_SIM|COMMISSION_SINK])
 LedgerEntry(id, ts, debit_account_id, credit_account_id, amount, reason_code, linked_entity_type, linked_entity_id)
@@ -231,14 +241,14 @@ MaintenanceAdjustment(id, loan_id, user_id, month, delta)  -- SIM
 
 JobBlogPost(id, poster_id, kind[HIRING|SEEKING], title, body, company_email_verified, expires_at)
 Proposal(id, society_id, kind, body, status)
-Vote(id, proposal_id, user_id, choice)
 Dispute(id, case_type, opener_id, subject_type, subject_id, status, triage_recommendation, resolution)
 
-AuditLog(id, ts, actor_id, action, subject_type, subject_id, payload_json)
+AuditLog(id, ts, society_id, actor_id, action, subject_type, subject_id, payload_json,
+         previous_hash BYTEA, entry_hash BYTEA)
 Notification(id, user_id, category, payload, seen_at)
 ```
 
-Every entity except `AuditLog` and `LedgerEntry` is mutable; those two are append-only.
+Every entity except `AuditLog` and `LedgerEntry` is mutable; those two are append-only. `AuditLog.entry_hash` is `SHA-256(previous_hash || canonical_json(payload))`; `Society.audit_tail_hash` is the tail hash for O(1) verification. `Occupancy.role` distinguishes `OWNER_OCCUPIER` (lives in the flat), `OWNER_ABSENTEE` (owner not resident; may delegate ops via `delegated_to_user_id`), and `TENANT`. `Flat.ownership_share` defaults to 1.0 and is only consulted when a binding poll has `weight_mode = OWNERSHIP_WEIGHTED`.
 
 ### 4.4 API surface (headline routes)
 
@@ -292,6 +302,7 @@ GET    /disputes/:did                       triage recommendation + status
 POST   /disputes/:did/resolve               committee decision
 
 GET    /audit                               committee: audit log view
+GET    /audit/verify                         committee: recompute chain, report first divergent row (or ok)
 GET    /notifications/me
 ```
 
@@ -446,6 +457,7 @@ simulation/
 │   ├── analysis/
 │   │   ├── sensitivity.py            # sweeps over parameters
 │   │   ├── monte_carlo.py            # N-run averaging + confidence bands
+│   │   ├── functional.py             # pool-formation + vendor-recommendation F1 evaluation
 │   │   └── report.py                 # writes JSON/CSV + matplotlib PNGs
 │   └── cli.py                        # entrypoint: `python -m sim run --scenario X`
 ├── notebooks/
@@ -482,6 +494,15 @@ simulation/
 4. **All-maintenance-adjustment** — every loan repaid via maintenance strategy.
 5. **All-voucher** — every loan repaid via voucher.
 6. **Mixed** — realistic distribution across the three strategies.
+
+### 6.4 Functional-accuracy evaluation (non-lending)
+
+The synthetic society ships with **ground-truth** labels for two coordination problems:
+
+- **Pool-formation ground truth.** For each generated service request, the "correct" pool it should aggregate into (based on category + time-window overlap + geographic radius) is stored alongside the request. `analysis/functional.py` runs the aggregation engine over the synthetic requests and reports **precision / recall / F1** for whether the platform correctly grouped requests together.
+- **Vendor-recommendation ground truth.** For each generated service request, the "optimal" vendor(s) — those matching category, radius, rating tier, and availability — are labelled. The recommender runs at trust-weight thresholds `{0.3, 0.4, 0.5, 0.6, 0.7}` and reports **precision / recall / F1** at each threshold, producing a curve suitable for Chapter 5.
+
+These results are appended to `outputs/report.json` under the `functional` key and rendered on the frontend simulation dashboard.
 
 ---
 

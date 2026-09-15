@@ -4,10 +4,11 @@ import { PrismaClient } from '../../src/generated/prisma/client.js';
 
 /**
  * Deterministic Phase 0 dev seed: one society, 90 flats, one committee
- * member, three owner-residents (the committee member is one of them),
- * two tenants. Not the parameterised synthetic-society generator used by
- * the Python simulation harness (Phase 8) — this is just enough to develop
- * and demo against.
+ * member (an owner-occupier), one plain owner-occupier, one owner-absentee
+ * who delegates operational rights to their tenant, and one independent
+ * tenant. Not the parameterised synthetic-society generator used by the
+ * Python simulation harness (Phase 8) — this is just enough to develop and
+ * demo against. Role mix matches BACKEND_PLAN.md's Phase 0 spec (DESIGN.md v0.4).
  */
 
 const FLAT_COUNT = 90;
@@ -72,48 +73,57 @@ async function main() {
       create: { name: 'Vikram Shah', email: 'owner2@test-society.local', kycTier: 'STANDARD' },
       update: {},
     });
-    const owner3 = await prisma.user.upsert({
-      where: { email: 'owner3@test-society.local' },
-      create: { name: 'Meera Iyer', email: 'owner3@test-society.local', kycTier: 'STANDARD' },
+    const absenteeOwner = await prisma.user.upsert({
+      where: { email: 'absentee-owner@test-society.local' },
+      create: { name: 'Meera Iyer (lives abroad)', email: 'absentee-owner@test-society.local', kycTier: 'STANDARD' },
       update: {},
     });
-    const tenant1 = await prisma.user.upsert({
+    const delegateTenant = await prisma.user.upsert({
       where: { email: 'tenant1@test-society.local' },
       create: { name: 'Rahul Nair', email: 'tenant1@test-society.local', kycTier: 'LIGHT' },
       update: {},
     });
-    const tenant2 = await prisma.user.upsert({
+    const independentTenant = await prisma.user.upsert({
       where: { email: 'tenant2@test-society.local' },
       create: { name: 'Priya Menon', email: 'tenant2@test-society.local', kycTier: 'LIGHT' },
       update: {},
     });
 
-    const [flatForCommittee, flatForOwner2, flatForOwner3, flatForTenant1, flatForTenant2] = createdFlats;
+    const [flatForCommittee, flatForOwner2, flatForAbsentee, flatForTenant2] = createdFlats;
 
     await Promise.all([
       prisma.occupancy.upsert({
         where: { id: 'seed-occ-committee' },
-        create: { id: 'seed-occ-committee', flatId: flatForCommittee.id, userId: committeeOwner.id, role: 'OWNER' },
+        create: { id: 'seed-occ-committee', flatId: flatForCommittee.id, userId: committeeOwner.id, role: 'OWNER_OCCUPIER' },
         update: {},
       }),
       prisma.occupancy.upsert({
         where: { id: 'seed-occ-owner2' },
-        create: { id: 'seed-occ-owner2', flatId: flatForOwner2.id, userId: owner2.id, role: 'OWNER' },
+        create: { id: 'seed-occ-owner2', flatId: flatForOwner2.id, userId: owner2.id, role: 'OWNER_OCCUPIER' },
         update: {},
       }),
+      // Owner-absentee: owns flatForAbsentee, delegates operational rights to delegateTenant.
       prisma.occupancy.upsert({
-        where: { id: 'seed-occ-owner3' },
-        create: { id: 'seed-occ-owner3', flatId: flatForOwner3.id, userId: owner3.id, role: 'OWNER' },
+        where: { id: 'seed-occ-absentee-owner' },
+        create: {
+          id: 'seed-occ-absentee-owner',
+          flatId: flatForAbsentee.id,
+          userId: absenteeOwner.id,
+          role: 'OWNER_ABSENTEE',
+          delegatedToUserId: delegateTenant.id,
+        },
         update: {},
       }),
+      // The delegate tenant's own occupancy record on the same flat.
       prisma.occupancy.upsert({
-        where: { id: 'seed-occ-tenant1' },
-        create: { id: 'seed-occ-tenant1', flatId: flatForTenant1.id, userId: tenant1.id, role: 'TENANT' },
+        where: { id: 'seed-occ-delegate-tenant' },
+        create: { id: 'seed-occ-delegate-tenant', flatId: flatForAbsentee.id, userId: delegateTenant.id, role: 'TENANT' },
         update: {},
       }),
+      // Independent tenant, unrelated flat, no delegation involved.
       prisma.occupancy.upsert({
-        where: { id: 'seed-occ-tenant2' },
-        create: { id: 'seed-occ-tenant2', flatId: flatForTenant2.id, userId: tenant2.id, role: 'TENANT' },
+        where: { id: 'seed-occ-independent-tenant' },
+        create: { id: 'seed-occ-independent-tenant', flatId: flatForTenant2.id, userId: independentTenant.id, role: 'TENANT' },
         update: {},
       }),
     ]);
@@ -125,11 +135,12 @@ async function main() {
     });
 
     console.log('Seed complete:');
-    console.log(`  society:   ${society.name} (${society.id})`);
-    console.log(`  flats:     ${createdFlats.length}`);
-    console.log(`  committee: ${committeeOwner.email}`);
-    console.log(`  owners:    ${[committeeOwner, owner2, owner3].map((u) => u.email).join(', ')}`);
-    console.log(`  tenants:   ${[tenant1, tenant2].map((u) => u.email).join(', ')}`);
+    console.log(`  society:          ${society.name} (${society.id})`);
+    console.log(`  flats:            ${createdFlats.length}`);
+    console.log(`  committee:        ${committeeOwner.email} (OWNER_OCCUPIER)`);
+    console.log(`  owner-occupier:   ${owner2.email}`);
+    console.log(`  owner-absentee:   ${absenteeOwner.email} -> delegates to ${delegateTenant.email}`);
+    console.log(`  tenants:          ${[delegateTenant, independentTenant].map((u) => u.email).join(', ')}`);
   } finally {
     await prisma.$disconnect();
   }
