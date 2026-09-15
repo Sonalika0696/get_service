@@ -22,40 +22,63 @@ export interface IdempotentResult<T> {
  * side effect twice: the whole "check -> run -> record" sequence is one
  * atomic unit of work, serialized per (scope, key) by a Postgres advisory
  * lock (mirrors AuditService.append's use of pg_advisory_xact_lock).
+ *
+ * Unit-of-work contract mirrors LedgerService.post: pass `tx` to enlist this
+ * call in a transaction your own service already opened (e.g. Phase 4C's
+ * BulkBuyService creating a Booking/JobCard/Payment together atomically at
+ * offer-fire time). Omit `tx` and `runOnce` opens its own transaction, as
+ * before.
  */
 @Injectable()
 export class IdempotencyService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async runOnce<T>(scope: string, key: string, societyId: string | null, fn: (tx: Prisma.TransactionClient) => Promise<{ status: number; body: T }>): Promise<IdempotentResult<T>> {
-    return this.prisma.$transaction(async (tx) => {
-      // Advisory lock namespace 51 = "idempotency key"; released automatically
-      // at transaction end. Serializes concurrent replays of the same
-      // (scope, key) so the check-then-insert below can't race.
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(51, hashtext(${`${scope}:${key}`}))`;
+  async runOnce<T>(
+    scope: string,
+    key: string,
+    societyId: string | null,
+    fn: (tx: Prisma.TransactionClient) => Promise<{ status: number; body: T }>,
+    tx?: Prisma.TransactionClient,
+  ): Promise<IdempotentResult<T>> {
+    if (tx) {
+      return this.runWithin(tx, scope, key, societyId, fn);
+    }
+    return this.prisma.$transaction((innerTx) => this.runWithin(innerTx, scope, key, societyId, fn));
+  }
 
-      const existing = await tx.idempotencyKey.findUnique({ where: { scope_key: { scope, key } } });
-      if (existing) {
-        return { status: existing.responseStatus, body: existing.responseBody as T, replayed: true };
-      }
+  private async runWithin<T>(
+    tx: Prisma.TransactionClient,
+    scope: string,
+    key: string,
+    societyId: string | null,
+    fn: (tx: Prisma.TransactionClient) => Promise<{ status: number; body: T }>,
+  ): Promise<IdempotentResult<T>> {
+    // Advisory lock namespace 51 = "idempotency key"; released automatically
+    // at transaction end. Serializes concurrent replays of the same
+    // (scope, key) so the check-then-insert below can't race.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(51, hashtext(${`${scope}:${key}`}))`;
 
-      const result = await fn(tx);
+    const existing = await tx.idempotencyKey.findUnique({ where: { scope_key: { scope, key } } });
+    if (existing) {
+      return { status: existing.responseStatus, body: existing.responseBody as T, replayed: true };
+    }
 
-      await tx.idempotencyKey.create({
-        data: {
-          scope,
-          key,
-          societyId,
-          responseStatus: result.status,
-          // Normalize through JSON so what's stored is exactly what a JSON
-          // HTTP response would carry (Decimal/Date -> string), matching what
-          // a fresh (non-replayed) call returns to the client — see
-          // AuditLogInterceptor's safeJson() for the same pattern.
-          responseBody: JSON.parse(JSON.stringify(result.body)) as never,
-        },
-      });
+    const result = await fn(tx);
 
-      return { ...result, replayed: false };
+    await tx.idempotencyKey.create({
+      data: {
+        scope,
+        key,
+        societyId,
+        responseStatus: result.status,
+        // Normalize through JSON so what's stored is exactly what a JSON
+        // HTTP response would carry (Decimal/Date -> string), matching what
+        // a fresh (non-replayed) call returns to the client — see
+        // AuditLogInterceptor's safeJson() for the same pattern.
+        responseBody: JSON.parse(JSON.stringify(result.body)) as never,
+      },
     });
+
+    return { ...result, replayed: false };
   }
 }

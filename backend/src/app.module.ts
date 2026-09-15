@@ -19,6 +19,7 @@ import { KycModule } from './modules/kyc/kyc.module.js';
 import { PollsModule } from './modules/polls/polls.module.js';
 import { LedgerModule } from './modules/ledger/ledger.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
+import { BulkBuyModule } from './modules/bulk-buy/bulk-buy.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor.js';
 
@@ -52,6 +53,7 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     PollsModule,
     LedgerModule,
     PaymentsModule,
+    BulkBuyModule,
     HealthModule,
   ],
   providers: [

@@ -44,6 +44,8 @@ model User {
   createdPolls         Poll[]
   pollCommitments      PollCommitment[]
   payments             Payment[]
+  bulkBuyCommitments   Commitment[]
+  jobCards             JobCard[]
 
   @@map("users")
 }
@@ -108,6 +110,8 @@ model Society {
   accounts      Account[]
   ledgerEntries LedgerEntry[]
   payments      Payment[]
+  offers        Offer[]
+  bookings      Booking[]
 
   @@map("societies")
 }
@@ -125,6 +129,8 @@ model Flat {
 
   society     Society     @relation(fields: [societyId], references: [id], onDelete: Cascade)
   occupancies Occupancy[]
+  bulkBuyCommitments Commitment[]
+  jobCards           JobCard[]
 
   @@unique([societyId, unitNo])
   @@map("flats")
@@ -320,6 +326,8 @@ model Vendor {
   categories     VendorCategory[]
   ratings        VendorRating[]
   accessRequests VendorAccessRequest[]
+  offers         Offer[]
+  bookings       Booking[]
 
   @@index([societyId])
   @@map("vendors")
@@ -552,6 +560,12 @@ enum AccountKind {
   LENDING_SIM
   COMMISSION_SINK
   EXTERNAL
+  /// Phase 4C: reserved vendor payable/settlement account. Not used by the
+  /// v1 payout flow (which posts BULK_BUY -> EXTERNAL directly for the
+  /// vendor's net share — see bulk-buy.service.ts's doc comment), but added
+  /// now so a future phase that needs a real per-vendor settlement ledger
+  /// doesn't require another migration.
+  VENDOR
 }
 
 model Account {
@@ -694,4 +708,215 @@ model WebhookEvent {
   receivedAt DateTime @default(now())
 
   @@map("webhook_events")
+}
+
+// ---------------------------------------------------------------------------
+// Bulk-buy Flow A — Phase 4C. Vendor-initiated bulk-buy: a committee member
+// posts an Offer with a quantity discount ladder on a vendor's behalf (see
+// src/modules/bulk-buy for the "no vendor login yet" assumption); residents
+// commit; the offer auto-fires once minCommitments is reached, snapshotting
+// the discount tier into one Booking + one JobCard per commitment; each
+// resident's escrow-in is a Payment (Phase 4B) linked to their Commitment;
+// once every JobCard is signed off and every Commitment is FUNDED, a
+// TREASURER's dual-authorised payout releases the vendor's net share (minus
+// platform commission) — see bulk-buy.service.ts for the exact money flow
+// and ledger postings. No 4D (large-job milestones/defect retention) or
+// Phase 5 (resident-initiated polls/weekly-recurring) concepts live here.
+// ---------------------------------------------------------------------------
+
+enum OfferStatus {
+  OPEN
+  FIRED
+  EXPIRED
+  CANCELLED
+}
+
+/// PENDING: committed, escrow order created but not yet captured.
+/// FUNDED: the linked Payment has been captured (see PaymentsService.applyCapture's
+///   small Commitment-flip hook) — the resident's money is in escrow.
+/// CANCELLED: not used by Flow A's happy path; reserved for a future
+///   cancel/withdraw route.
+enum CommitmentStatus {
+  PENDING
+  FUNDED
+  CANCELLED
+}
+
+enum BookingStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum JobCardStatus {
+  PENDING
+  SIGNED_OFF
+  DISPUTED
+}
+
+/// Only SMALL is produced by Flow A (Phase 4C). LARGE is reserved for Phase
+/// 4D's large-job milestone/defect-retention flow — out of scope here.
+enum JobCardTier {
+  SMALL
+  LARGE
+}
+
+enum PayoutStatus {
+  PENDING
+  AUTHORISED
+  PAID
+}
+
+enum PayoutAuthKind {
+  SYSTEM
+  TREASURER
+}
+
+model Offer {
+  id          String  @id @default(cuid())
+  societyId   String
+  vendorId    String
+  category    String
+  title       String
+  description String?
+
+  /// Major units (rupees), pre-discount — matches Payment.amount's convention.
+  unitPrice Decimal @db.Decimal(14, 2)
+  /// Non-empty array of {minN: number, pct: number}, validated by
+  /// discount-ladder.util.ts's validateLadder (strictly increasing minN,
+  /// non-decreasing pct, no duplicates) before this row is ever written.
+  discountLadder Json
+  /// Snapshotted from discountLadder's lowest rung at creation time — the
+  /// commitment count that auto-fires this offer.
+  minCommitments Int
+
+  deadline DateTime
+  status   OfferStatus @default(OPEN)
+
+  /// Snapshotted at fire time — the ladder tier resolved for the
+  /// commitment count that triggered auto-fire. Null until fired.
+  appliedDiscountPct Decimal? @db.Decimal(5, 2)
+  firedAt            DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  society     Society      @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  vendor      Vendor       @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  commitments Commitment[]
+
+  @@index([societyId, status])
+  @@map("offers")
+}
+
+/// A resident's opt-in to an Offer. Not anonymous (unlike Vote) — this is a
+/// financial commitment, not a ballot.
+model Commitment {
+  id         String            @id @default(cuid())
+  offerId    String
+  residentId String
+  flatId     String
+  status     CommitmentStatus  @default(PENDING)
+  /// The escrow-in Payment (Phase 4B) created for this commitment at fire
+  /// time — see BulkBuyService.commit's fire branch. Null until fired.
+  paymentId  String?
+  createdAt  DateTime          @default(now())
+
+  offer    Offer    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  resident User     @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  flat     Flat     @relation(fields: [flatId], references: [id], onDelete: Cascade)
+  jobCard  JobCard?
+
+  @@unique([offerId, residentId])
+  @@index([offerId])
+  @@map("commitments")
+}
+
+/// One Booking per fired Offer in Flow A (sourceType = 'OFFER', sourceId =
+/// the Offer's id) — sourceType/sourceId are a loose pointer rather than an
+/// FK, matching LedgerEntry.linkedEntityType's pattern, so a later phase
+/// (Phase 5 resident-initiated bulk-buy) can reuse Booking/JobCard/Payout
+/// against a Poll instead of an Offer without a schema change.
+model Booking {
+  id         String        @id @default(cuid())
+  societyId  String
+  vendorId   String
+  sourceType String
+  sourceId   String
+  status     BookingStatus @default(ACTIVE)
+  tier       JobCardTier   @default(SMALL)
+  createdAt  DateTime      @default(now())
+
+  society  Society   @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  vendor   Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  jobCards JobCard[]
+  payout   Payout?
+
+  @@index([societyId])
+  @@map("bookings")
+}
+
+model JobCard {
+  id           String @id @default(cuid())
+  bookingId    String
+  commitmentId String
+  residentId   String
+  flatId       String
+  scope        String
+  /// Discounted price snapshot (offer.unitPrice * (1 - appliedDiscountPct/100),
+  /// rounded to 2dp) — what this resident actually owes.
+  unitPrice          Decimal       @db.Decimal(14, 2)
+  appliedDiscountPct Decimal       @db.Decimal(5, 2)
+  status             JobCardStatus @default(PENDING)
+  tier               JobCardTier   @default(SMALL)
+  signedOffAt        DateTime?
+  createdAt          DateTime      @default(now())
+
+  booking    Booking    @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  commitment Commitment @relation(fields: [commitmentId], references: [id], onDelete: Cascade)
+  resident   User       @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  flat       Flat       @relation(fields: [flatId], references: [id], onDelete: Cascade)
+
+  @@unique([commitmentId])
+  @@index([bookingId])
+  @@map("job_cards")
+}
+
+/// One Payout per Booking in Flow A (4C doesn't support partial/staged
+/// payouts — that's 4D's milestone model).
+model Payout {
+  id                String       @id @default(cuid())
+  bookingId         String       @unique
+  amount            Decimal      @db.Decimal(14, 2)
+  commission        Decimal      @db.Decimal(14, 2)
+  vendorNet         Decimal      @db.Decimal(14, 2)
+  status            PayoutStatus @default(PENDING)
+  /// The STUBBED RazorpayService.payout() reference — see its doc comment.
+  /// Never a real RazorpayX transfer id in this phase.
+  razorpayPayoutRef String?
+  paidAt            DateTime?
+  createdAt         DateTime     @default(now())
+
+  booking         Booking               @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  authorisations  PayoutAuthorisation[]
+
+  @@map("payouts")
+}
+
+/// Two rows per Payout in the happy path: one SYSTEM (auto, authoriserId
+/// null — the automated rule-check: all job cards signed off, all
+/// commitments funded, escrow covers the amount) and one TREASURER (a real
+/// user). See BulkBuyService.authorisePayout's doc comment for exactly when
+/// each row is written and why both are created together in v1.
+model PayoutAuthorisation {
+  id           String         @id @default(cuid())
+  payoutId     String
+  kind         PayoutAuthKind
+  authoriserId String?
+  createdAt    DateTime       @default(now())
+
+  payout Payout @relation(fields: [payoutId], references: [id], onDelete: Cascade)
+
+  @@unique([payoutId, kind])
+  @@map("payout_authorisations")
 }

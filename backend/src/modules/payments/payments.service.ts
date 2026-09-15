@@ -3,7 +3,7 @@ import { PrismaService } from '../../infra/prisma/prisma.service.js';
 import { RazorpayService } from '../../infra/razorpay/razorpay.service.js';
 import { LedgerService } from '../ledger/ledger.service.js';
 import { IdempotencyService } from '../ledger/idempotency.service.js';
-import { AccountKind, PaymentStatus } from '../../generated/prisma/enums.js';
+import { AccountKind, CommitmentStatus, PaymentStatus } from '../../generated/prisma/enums.js';
 import type { Prisma } from '../../generated/prisma/client.js';
 import type { PaymentModel } from '../../generated/prisma/models.js';
 import type { CreateOrderDto } from './dto/create-order.dto.js';
@@ -13,6 +13,18 @@ export interface CreateOrderResult {
   amount: number;
   currency: string;
   keyId: string;
+}
+
+export interface CreateOrderForLinkInput {
+  societyId: string;
+  residentId: string;
+  /** Major units (rupees) — see rupeesToPaise's doc comment for the conversion boundary. */
+  amount: number | Prisma.Decimal;
+  purpose?: string;
+  /** e.g. 'Commitment' — a loose pointer, same pattern as LedgerEntry.linkedEntityType. */
+  linkedEntityType: string;
+  linkedEntityId: string;
+  idempotencyKey: string;
 }
 
 export interface RefundInitiatedResult {
@@ -78,6 +90,53 @@ export class PaymentsService {
         body: { orderId: order.id, amount: dto.amount, currency: order.currency, keyId: this.razorpay.keyId },
       };
     });
+    return body;
+  }
+
+  /**
+   * Phase 4C's entry point into escrow-in: creates the same
+   * Razorpay-order-then-CREATED-Payment pair as createOrder, but
+   * (a) is keyed by a caller-supplied linkedEntityType/linkedEntityId
+   * (a Commitment, in bulk-buy's case) rather than being resident-initiated
+   * over HTTP, and (b) optionally joins the caller's own transaction — see
+   * IdempotencyService.runOnce's tx-optional contract — so BulkBuyService
+   * can create a Booking + JobCards + one escrow order per Commitment
+   * atomically when an Offer auto-fires. Still posts nothing to the ledger:
+   * that only happens when the resulting order's payment.captured webhook
+   * arrives (applyCapture below), exactly like createOrder's own contract.
+   */
+  async createOrderForLink(input: CreateOrderForLinkInput, tx?: Prisma.TransactionClient): Promise<PaymentModel> {
+    const { body } = await this.idempotency.runOnce<PaymentModel>(
+      'payments:create-order-for-link',
+      input.idempotencyKey,
+      input.societyId,
+      async (innerTx) => {
+        const receipt = `${input.societyId}:${input.idempotencyKey}`;
+        const order = await this.razorpay.createOrder({
+          amount: rupeesToPaise(input.amount),
+          currency: 'INR',
+          receipt,
+          notes: input.purpose ? { purpose: input.purpose } : undefined,
+        });
+
+        const payment = await innerTx.payment.create({
+          data: {
+            societyId: input.societyId,
+            residentId: input.residentId,
+            orderId: order.id,
+            amount: input.amount,
+            currency: order.currency,
+            status: PaymentStatus.CREATED,
+            purpose: input.purpose,
+            linkedEntityType: input.linkedEntityType,
+            linkedEntityId: input.linkedEntityId,
+          },
+        });
+
+        return { status: 201, body: payment };
+      },
+      tx,
+    );
     return body;
   }
 
@@ -191,6 +250,20 @@ export class PaymentsService {
       },
       tx,
     );
+
+    // Phase 4C hook: a Commitment becomes FUNDED reactively, the moment its
+    // linked Payment is captured — this is the ONLY place Commitment.status
+    // ever flips to FUNDED (BulkBuyService never sets it directly). Kept
+    // minimal and guarded: updateMany + a PENDING-only where clause is a
+    // silent no-op for every non-bulk-buy Payment (no Commitment row to
+    // match) and can't clobber a Commitment that's already FUNDED or was
+    // CANCELLED out from under it.
+    if (payment.linkedEntityType === 'Commitment' && payment.linkedEntityId) {
+      await tx.commitment.updateMany({
+        where: { id: payment.linkedEntityId, status: CommitmentStatus.PENDING },
+        data: { status: CommitmentStatus.FUNDED },
+      });
+    }
   }
 
   private async applyRefund(tx: Prisma.TransactionClient, rawEvent: RazorpayWebhookEvent): Promise<void> {

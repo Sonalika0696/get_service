@@ -34,6 +34,19 @@ export interface RazorpayRefund {
   status: string;
 }
 
+export interface PayoutInput {
+  vendorId: string;
+  /** Paise — see CreateOrderInput's doc comment for the convention. */
+  amount: number;
+}
+
+export interface RazorpayPayout {
+  id: string;
+  vendorId: string;
+  amount: number;
+  status: string;
+}
+
 /**
  * Thin client for the Razorpay Orders/Payments/Refunds APIs, feature-flagged
  * exactly like GstinApiService (see src/infra/gstinapi/gstinapi.service.ts):
@@ -106,6 +119,27 @@ export class RazorpayService {
       this.logger.warn(`Razorpay refund failed for payment ${input.paymentId}: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
+  }
+
+  /**
+   * ALWAYS stubbed — deliberately NOT gated on RAZORPAY_ENABLED, unlike
+   * createOrder/refund above. Phase 4C (bulk-buy vendor payouts) has a hard
+   * project constraint: no real money ever moves and no real RazorpayX
+   * (payout) API is ever called, even if RAZORPAY_ENABLED were somehow
+   * flipped on for sandbox order/webhook testing. A real vendor payout
+   * integration is explicitly out of scope; this only produces a
+   * deterministic fake reference id so BulkBuyService has something to
+   * stamp on Payout.razorpayPayoutRef. The actual money movement for a
+   * payout is recorded entirely in the internal ledger (see
+   * bulk-buy.service.ts's authorisePayout).
+   */
+  async payout(input: PayoutInput): Promise<RazorpayPayout> {
+    return this.stubPayout(input.vendorId, Math.round(input.amount));
+  }
+
+  private stubPayout(vendorId: string, amountPaise: number): RazorpayPayout {
+    const shortHash = createHash('sha256').update(`${vendorId}:${amountPaise}:${Date.now()}:${Math.random()}`).digest('hex').slice(0, 16);
+    return { id: `payout_stub_${shortHash}`, vendorId, amount: amountPaise, status: 'processed' };
   }
 
   /**

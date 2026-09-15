@@ -1,0 +1,503 @@
+import { randomUUID, createHmac } from 'node:crypto';
+import { INestApplication } from '@nestjs/common';
+import { Test, TestingModule } from '@nestjs/testing';
+import cookieParser from 'cookie-parser';
+import request from 'supertest';
+import type { App } from 'supertest/types';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { AppModule } from '../src/app.module.js';
+import { PrismaService } from '../src/infra/prisma/prisma.service.js';
+import { AppConfigService } from '../src/config/config.service.js';
+import { MailerService, type SendMailInput } from '../src/infra/mailer/mailer.service.js';
+import { createGlobalValidationPipe } from '../src/common/pipes/validation.pipe.js';
+import { AccountKind, OccupancyRole, RoleKind } from '../src/generated/prisma/enums.js';
+
+/**
+ * Phase 4C (bulk-buy Flow A) Definition of Done, end-to-end against real
+ * Postgres, RAZORPAY_ENABLED=false (the deterministic stub used by both
+ * Phase 4B payments AND this phase's vendor payout — see
+ * src/infra/razorpay/razorpay.service.ts's payout() doc comment: it is
+ * ALWAYS stubbed, never gated on RAZORPAY_ENABLED, so no real money ever
+ * moves in this suite):
+ *  - a committee member creates an Offer with a 3-rung discount ladder;
+ *    malformed ladders (empty / non-increasing minN / decreasing pct /
+ *    duplicate minN) are rejected with 400;
+ *  - two residents commit; the 2nd commit auto-fires the offer in the same
+ *    request: status FIRED, appliedDiscountPct snapshotted from the ladder,
+ *    one Booking + one JobCard per commitment (discounted unitPrice), and
+ *    each commitment has its own escrow-in Payment(CREATED);
+ *  - signing off a job card before its commitment is FUNDED is rejected
+ *    (400) — the payment-before-sign-off gate;
+ *  - each resident "pays" via a signed payment.captured webhook (the same
+ *    Phase 4B webhook path, unmodified): BULK_BUY is credited, and the
+ *    linked Commitment flips PENDING -> FUNDED reactively;
+ *  - each resident signs off their own job card (a resident signing off
+ *    someone else's card gets 403); the booking flips to COMPLETED only
+ *    once every job card is signed off;
+ *  - authorising a payout before the booking is COMPLETED is rejected
+ *    (400) — the sign-off-before-payout gate; a non-treasurer gets 403;
+ *  - a treasurer's authorisation call both records the dual authorisation
+ *    (SYSTEM + TREASURER) AND executes the payout in the same call, exactly
+ *    once: commission (10% of the escrowed amount) to COMMISSION_SINK,
+ *    vendorNet to EXTERNAL, BULK_BUY back to (its pre-booking level).
+ *    Re-calling authorise does NOT double-pay;
+ *  - committing to an already-FIRED offer is rejected (400);
+ *  - conservation holds throughout: GET /ledger's balancesIntact stays true.
+ *
+ * No 4D (large-job milestones/defect retention) or Phase 5 (resident-
+ * initiated polls/weekly-recurring bulk-buy) concepts are exercised here.
+ */
+
+class CapturingMailer {
+  sent: SendMailInput[] = [];
+  async send(input: SendMailInput): Promise<void> {
+    this.sent.push(input);
+  }
+}
+
+function extractOtpCode(mail: SendMailInput): string {
+  const match = mail.text.match(/verification code is (\d{6})/);
+  if (!match) throw new Error(`Could not find a 6-digit OTP code in captured mail: ${mail.text}`);
+  return match[1];
+}
+
+interface OfferBody {
+  id: string;
+  status: 'OPEN' | 'FIRED' | 'EXPIRED' | 'CANCELLED';
+  minCommitments: number;
+  commitmentCount: number;
+  currentTierPct: number | string | null;
+  nextTierAt: number | null;
+  appliedDiscountPct: string | number | null;
+  hasCommitted?: boolean;
+}
+
+interface JobCardBody {
+  id: string;
+  bookingId: string;
+  commitmentId: string;
+  residentId: string;
+  unitPrice: string | number;
+  appliedDiscountPct: string | number;
+  status: 'PENDING' | 'SIGNED_OFF' | 'DISPUTED';
+}
+
+interface PayoutBody {
+  id: string;
+  bookingId: string;
+  amount: string | number;
+  commission: string | number;
+  vendorNet: string | number;
+  status: 'PENDING' | 'AUTHORISED' | 'PAID';
+  razorpayPayoutRef: string | null;
+}
+
+interface BookingBody {
+  id: string;
+  status: 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+  jobCards: JobCardBody[];
+  payout: PayoutBody | null;
+}
+
+interface LedgerAggregateBody {
+  balances: { kind: AccountKind; accountId: string; balance: string }[];
+  balancesIntact: boolean;
+}
+
+describe('Bulk-buy Flow A (e2e)', () => {
+  let app: INestApplication<App>;
+  let prisma: PrismaService;
+  let mailer: CapturingMailer;
+  let cookieName: string;
+  let webhookSecret: string;
+
+  let societyId: string;
+  let vendorId: string;
+  const flatIds: string[] = [];
+  const userIds: string[] = [];
+  const webhookEventIds: string[] = [];
+
+  async function latestMailTo(email: string, subject: string): Promise<SendMailInput> {
+    const matches = mailer.sent.filter((m) => m.to === email && m.subject === subject);
+    const last = matches.at(-1);
+    if (!last) throw new Error(`No mail captured for ${email} / "${subject}"`);
+    return last;
+  }
+
+  async function signupAndLogin(email: string, flatId: string, role: OccupancyRole) {
+    const signupRes = await request(app.getHttpServer())
+      .post('/api/v1/auth/signup')
+      .send({ name: `Test User ${email}`, email, societyId, flatId, role })
+      .expect(201);
+
+    const userId = (signupRes.body as { userId: string }).userId;
+    userIds.push(userId);
+
+    const otpMail = await latestMailTo(email, 'Your verification code');
+    const code = extractOtpCode(otpMail);
+
+    const agent = request.agent(app.getHttpServer());
+    const verifyRes = await agent.post('/api/v1/auth/verify').send({ email, code }).expect(201);
+    expect((verifyRes.body as { id: string }).id).toBe(userId);
+    expect(verifyRes.headers['set-cookie']?.some((c: string) => c.startsWith(`${cookieName}=`))).toBe(true);
+
+    return { userId, agent, email };
+  }
+
+  async function makeRole(userId: string, kind: RoleKind) {
+    await prisma.role.create({ data: { societyId, userId, kind } });
+  }
+
+  function signWebhook(body: string): string {
+    return createHmac('sha256', webhookSecret).update(body).digest('hex');
+  }
+
+  function postWebhook(body: string, signature: string) {
+    return request(app.getHttpServer()).post('/api/v1/payments/webhook').set('content-type', 'application/json').set('x-razorpay-signature', signature).send(body);
+  }
+
+  function capturedEvent(eventId: string, orderId: string, razorpayPaymentId: string, amountRupees: number) {
+    webhookEventIds.push(eventId);
+    return {
+      id: eventId,
+      event: 'payment.captured',
+      payload: { payment: { entity: { id: razorpayPaymentId, order_id: orderId, amount: Math.round(amountRupees * 100), status: 'captured' } } },
+    };
+  }
+
+  async function payCommitment(commitmentId: string, amountRupees: number): Promise<void> {
+    const commitment = await prisma.commitment.findUniqueOrThrow({ where: { id: commitmentId } });
+    if (!commitment.paymentId) throw new Error(`Commitment ${commitmentId} has no linked Payment`);
+    const payment = await prisma.payment.findUniqueOrThrow({ where: { id: commitment.paymentId } });
+
+    const razorpayPaymentId = `pay_stub_${randomUUID().slice(0, 8)}`;
+    const event = capturedEvent(`evt_${randomUUID()}`, payment.orderId, razorpayPaymentId, amountRupees);
+    const bodyStr = JSON.stringify(event);
+    await postWebhook(bodyStr, signWebhook(bodyStr)).expect(200);
+  }
+
+  async function ledgerBalances(agent: ReturnType<typeof request.agent>): Promise<LedgerAggregateBody> {
+    return (await agent.get('/api/v1/ledger').expect(200)).body as LedgerAggregateBody;
+  }
+
+  function balanceOf(ledger: LedgerAggregateBody, kind: AccountKind): number {
+    return Number(ledger.balances.find((b) => b.kind === kind)?.balance ?? 0);
+  }
+
+  beforeAll(async () => {
+    mailer = new CapturingMailer();
+    const moduleFixture: TestingModule = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(MailerService)
+      .useValue(mailer)
+      .compile();
+
+    app = moduleFixture.createNestApplication({ rawBody: true });
+    app.use(cookieParser());
+    app.useGlobalPipes(createGlobalValidationPipe());
+    app.setGlobalPrefix('api/v1', { exclude: ['health'] });
+    await app.init();
+
+    prisma = app.get(PrismaService);
+    const config = app.get(AppConfigService);
+    cookieName = config.env.SESSION_COOKIE_NAME;
+    webhookSecret = config.env.RAZORPAY_WEBHOOK_SECRET;
+    expect(config.env.RAZORPAY_ENABLED).toBe(false); // this whole suite assumes the deterministic stub
+
+    const society = await prisma.society.create({ data: { name: 'Bulk-Buy Test Society', address: 'n/a' } });
+    societyId = society.id;
+    // flats 0-4 are used by the main sequential-flow test; 5-8 by the
+    // concurrent-payout-authorisation test below (kept separate so the two
+    // tests' users/bookings never overlap).
+    for (let i = 0; i < 9; i++) {
+      const flat = await prisma.flat.create({
+        data: { societyId, unitNo: `B-${i}-${randomUUID().slice(0, 8)}`, maintenanceAmount: 1000 },
+      });
+      flatIds.push(flat.id);
+    }
+
+    const vendor = await prisma.vendor.create({ data: { societyId, name: 'Bulk-Buy Test Vendor', contactEmail: 'vendor@example.com' } });
+    vendorId = vendor.id;
+  });
+
+  afterAll(async () => {
+    await prisma.webhookEvent.deleteMany({ where: { eventId: { in: webhookEventIds } } });
+    await prisma.payoutAuthorisation.deleteMany({ where: { payout: { booking: { societyId } } } });
+    await prisma.payout.deleteMany({ where: { booking: { societyId } } });
+    await prisma.jobCard.deleteMany({ where: { booking: { societyId } } });
+    await prisma.booking.deleteMany({ where: { societyId } });
+    await prisma.commitment.deleteMany({ where: { offer: { societyId } } });
+    await prisma.offer.deleteMany({ where: { societyId } });
+    await prisma.payment.deleteMany({ where: { societyId } });
+    await prisma.ledgerEntry.deleteMany({ where: { societyId } });
+    await prisma.account.deleteMany({ where: { societyId } });
+    await prisma.idempotencyKey.deleteMany({ where: { societyId } });
+    await prisma.vendor.deleteMany({ where: { societyId } });
+    await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.otp.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.role.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.occupancy.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+    await prisma.auditLog.deleteMany({ where: { societyId } });
+    await prisma.flat.deleteMany({ where: { societyId } });
+    await prisma.society.deleteMany({ where: { id: societyId } });
+
+    await app.close();
+  });
+
+  it('runs the full offer -> commit -> fire -> escrow -> sign-off -> dual-auth payout chain', async () => {
+    const committee = await signupAndLogin(`bb-committee-${randomUUID()}@example.com`, flatIds[0], OccupancyRole.OWNER_OCCUPIER);
+    await makeRole(committee.userId, RoleKind.COMMITTEE);
+    const treasurer = await signupAndLogin(`bb-treasurer-${randomUUID()}@example.com`, flatIds[1], OccupancyRole.OWNER_OCCUPIER);
+    await makeRole(treasurer.userId, RoleKind.TREASURER);
+    const resident1 = await signupAndLogin(`bb-resident1-${randomUUID()}@example.com`, flatIds[2], OccupancyRole.OWNER_OCCUPIER);
+    const resident2 = await signupAndLogin(`bb-resident2-${randomUUID()}@example.com`, flatIds[3], OccupancyRole.OWNER_OCCUPIER);
+    const resident3 = await signupAndLogin(`bb-resident3-${randomUUID()}@example.com`, flatIds[4], OccupancyRole.OWNER_OCCUPIER);
+
+    // Snapshot ledger before any money moves, so this suite's assertions are
+    // independent of anything another suite left behind in a shared account.
+    const startLedger = await ledgerBalances(committee.agent);
+    const bulkBuyStart = balanceOf(startLedger, AccountKind.BULK_BUY);
+    const commissionStart = balanceOf(startLedger, AccountKind.COMMISSION_SINK);
+    const externalStart = balanceOf(startLedger, AccountKind.EXTERNAL);
+
+    // --- 1. Offer creation: bad ladders rejected with 400 ---
+    const baseOffer = { vendorId, category: 'Groceries', title: 'Bulk rice order', description: 'Bulk-buy of rice sacks', unitPrice: 1000, deadline: new Date(Date.now() + 86_400_000).toISOString() };
+
+    await committee.agent.post('/api/v1/offers').send({ ...baseOffer, discountLadder: [] }).expect(400);
+    await committee.agent.post('/api/v1/offers').send({ ...baseOffer, discountLadder: [{ minN: 4, pct: 5 }, { minN: 2, pct: 10 }] }).expect(400);
+    await committee.agent.post('/api/v1/offers').send({ ...baseOffer, discountLadder: [{ minN: 2, pct: 10 }, { minN: 4, pct: 5 }] }).expect(400);
+    await committee.agent.post('/api/v1/offers').send({ ...baseOffer, discountLadder: [{ minN: 2, pct: 5 }, { minN: 2, pct: 8 }] }).expect(400);
+
+    // Non-committee residents can't create offers.
+    await resident1.agent.post('/api/v1/offers').send({ ...baseOffer, discountLadder: [{ minN: 2, pct: 5 }] }).expect(403);
+
+    const ladder = [
+      { minN: 2, pct: 5 },
+      { minN: 4, pct: 10 },
+      { minN: 6, pct: 15 },
+    ];
+    const createRes = await committee.agent.post('/api/v1/offers').send({ ...baseOffer, discountLadder: ladder }).expect(201);
+    const offer = createRes.body as OfferBody;
+    expect(offer.status).toBe('OPEN');
+    expect(offer.minCommitments).toBe(2);
+
+    // --- 2. Two residents commit; the 2nd fires the offer ---
+    const firstCommitRes = await resident1.agent.post(`/api/v1/offers/${offer.id}/commit`).expect(201);
+    const afterFirstCommit = firstCommitRes.body as OfferBody;
+    expect(afterFirstCommit.status).toBe('OPEN');
+    expect(afterFirstCommit.commitmentCount).toBe(1);
+
+    const secondCommitRes = await resident2.agent.post(`/api/v1/offers/${offer.id}/commit`).expect(201);
+    const firedOffer = secondCommitRes.body as OfferBody;
+    expect(firedOffer.status).toBe('FIRED');
+    expect(firedOffer.commitmentCount).toBe(2);
+    expect(Number(firedOffer.appliedDiscountPct)).toBe(5);
+
+    const booking = await prisma.booking.findFirstOrThrow({ where: { societyId, sourceType: 'OFFER', sourceId: offer.id } });
+    expect(booking.status).toBe('ACTIVE');
+
+    const jobCards = await prisma.jobCard.findMany({ where: { bookingId: booking.id }, orderBy: { createdAt: 'asc' } });
+    expect(jobCards).toHaveLength(2);
+    for (const jc of jobCards) {
+      expect(Number(jc.unitPrice)).toBe(950);
+      expect(Number(jc.appliedDiscountPct)).toBe(5);
+      expect(jc.status).toBe('PENDING');
+    }
+
+    const commitments = await prisma.commitment.findMany({ where: { offerId: offer.id } });
+    expect(commitments).toHaveLength(2);
+    for (const c of commitments) {
+      expect(c.paymentId).toBeTruthy();
+      const payment = await prisma.payment.findUniqueOrThrow({ where: { id: c.paymentId! } });
+      expect(payment.status).toBe('CREATED');
+      expect(payment.linkedEntityType).toBe('Commitment');
+      expect(payment.linkedEntityId).toBe(c.id);
+      expect(c.status).toBe('PENDING');
+    }
+
+    // --- Guard: committing to an already-FIRED offer is rejected ---
+    await resident3.agent.post(`/api/v1/offers/${offer.id}/commit`).expect(400);
+
+    const resident1Commitment = commitments.find((c) => c.residentId === resident1.userId)!;
+    const resident2Commitment = commitments.find((c) => c.residentId === resident2.userId)!;
+    const resident1JobCard = jobCards.find((jc) => jc.commitmentId === resident1Commitment.id)!;
+    const resident2JobCard = jobCards.find((jc) => jc.commitmentId === resident2Commitment.id)!;
+
+    // --- Guard: sign-off before payment is rejected ---
+    await resident1.agent.post(`/api/v1/job-cards/${resident1JobCard.id}/sign-off`).expect(400);
+
+    // --- Guard: payout authorisation before the booking is COMPLETED is rejected ---
+    await treasurer.agent.post(`/api/v1/bookings/${booking.id}/payout/authorise`).expect(400);
+
+    // --- 3. Each resident pays: escrow BULK_BUY credited, commitment FUNDED ---
+    await payCommitment(resident1Commitment.id, 950);
+    const resident1CommitmentAfterPay = await prisma.commitment.findUniqueOrThrow({ where: { id: resident1Commitment.id } });
+    expect(resident1CommitmentAfterPay.status).toBe('FUNDED');
+
+    await payCommitment(resident2Commitment.id, 950);
+    const resident2CommitmentAfterPay = await prisma.commitment.findUniqueOrThrow({ where: { id: resident2Commitment.id } });
+    expect(resident2CommitmentAfterPay.status).toBe('FUNDED');
+
+    const afterEscrowLedger = await ledgerBalances(committee.agent);
+    expect(afterEscrowLedger.balancesIntact).toBe(true);
+    expect(balanceOf(afterEscrowLedger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(1900, 6);
+
+    // --- 4. Sign-off: own card only; booking completes once both are signed off ---
+    await resident2.agent.post(`/api/v1/job-cards/${resident1JobCard.id}/sign-off`).expect(403);
+
+    const signOff1 = await resident1.agent.post(`/api/v1/job-cards/${resident1JobCard.id}/sign-off`).expect(201);
+    expect((signOff1.body as JobCardBody).status).toBe('SIGNED_OFF');
+
+    const bookingMidSignOff = (await committee.agent.get(`/api/v1/bookings/${booking.id}`).expect(200)).body as BookingBody;
+    expect(bookingMidSignOff.status).toBe('ACTIVE'); // not yet COMPLETED — resident2 hasn't signed off
+
+    // Payout attempted before booking is fully COMPLETED still 400.
+    await treasurer.agent.post(`/api/v1/bookings/${booking.id}/payout/authorise`).expect(400);
+
+    const signOff2 = await resident2.agent.post(`/api/v1/job-cards/${resident2JobCard.id}/sign-off`).expect(201);
+    expect((signOff2.body as JobCardBody).status).toBe('SIGNED_OFF');
+
+    const bookingCompleted = (await committee.agent.get(`/api/v1/bookings/${booking.id}`).expect(200)).body as BookingBody;
+    expect(bookingCompleted.status).toBe('COMPLETED');
+    expect(bookingCompleted.payout).toBeNull(); // no Payout row exists until a treasurer authorises
+
+    // --- 5. Dual-authorised payout ---
+    await resident1.agent.post(`/api/v1/bookings/${booking.id}/payout/authorise`).expect(403);
+
+    const authRes = await treasurer.agent.post(`/api/v1/bookings/${booking.id}/payout/authorise`).expect(201);
+    const paidBooking = authRes.body as BookingBody;
+    expect(paidBooking.payout).not.toBeNull();
+    expect(paidBooking.payout!.status).toBe('PAID');
+    expect(Number(paidBooking.payout!.amount)).toBe(1900);
+    expect(Number(paidBooking.payout!.commission)).toBe(190);
+    expect(Number(paidBooking.payout!.vendorNet)).toBe(1710);
+    expect(paidBooking.payout!.razorpayPayoutRef).toMatch(/^payout_stub_/);
+
+    const authorisations = await prisma.payoutAuthorisation.findMany({ where: { payoutId: paidBooking.payout!.id } });
+    expect(authorisations).toHaveLength(2);
+    expect(authorisations.some((a) => a.kind === 'SYSTEM' && a.authoriserId === null)).toBe(true);
+    expect(authorisations.some((a) => a.kind === 'TREASURER' && a.authoriserId === treasurer.userId)).toBe(true);
+
+    const afterPayoutLedger = await ledgerBalances(committee.agent);
+    expect(afterPayoutLedger.balancesIntact).toBe(true);
+    expect(balanceOf(afterPayoutLedger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(0, 6);
+    expect(balanceOf(afterPayoutLedger, AccountKind.COMMISSION_SINK) - commissionStart).toBeCloseTo(190, 6);
+    // EXTERNAL was debited 1900 at capture (money coming in) and credited
+    // 1710 at payout (money going back out to the vendor) — net -190.
+    expect(balanceOf(afterPayoutLedger, AccountKind.EXTERNAL) - externalStart).toBeCloseTo(-190, 6);
+
+    const commissionEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Payout', linkedEntityId: paidBooking.payout!.id, reasonCode: 'BULK_BUY_PAYOUT_COMMISSION' } });
+    const vendorEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Payout', linkedEntityId: paidBooking.payout!.id, reasonCode: 'BULK_BUY_PAYOUT_VENDOR' } });
+    expect(commissionEntryCount).toBe(1);
+    expect(vendorEntryCount).toBe(1);
+
+    // --- Re-calling authorise does NOT double-pay ---
+    const replayRes = await treasurer.agent.post(`/api/v1/bookings/${booking.id}/payout/authorise`).expect(201);
+    const replayBooking = replayRes.body as BookingBody;
+    expect(replayBooking.payout!.status).toBe('PAID');
+    expect(replayBooking.payout!.razorpayPayoutRef).toBe(paidBooking.payout!.razorpayPayoutRef);
+
+    const commissionEntryCountAfterReplay = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Payout', linkedEntityId: paidBooking.payout!.id, reasonCode: 'BULK_BUY_PAYOUT_COMMISSION' } });
+    const vendorEntryCountAfterReplay = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Payout', linkedEntityId: paidBooking.payout!.id, reasonCode: 'BULK_BUY_PAYOUT_VENDOR' } });
+    expect(commissionEntryCountAfterReplay).toBe(1); // still exactly one — no double payout
+    expect(vendorEntryCountAfterReplay).toBe(1);
+
+    const finalLedger = await ledgerBalances(committee.agent);
+    expect(finalLedger.balancesIntact).toBe(true);
+    expect(balanceOf(finalLedger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(0, 6);
+  });
+
+  /**
+   * Concurrency hardening: authorisePayout takes a per-booking Postgres
+   * advisory lock (namespace 52, hashtext(bookingId)) as the FIRST statement
+   * inside its transaction, precisely so two treasurer requests racing on
+   * the SAME booking can't both observe a pre-payout snapshot and both post
+   * the payout ledger entries. Without that lock, this test reproduces the
+   * exact double-pay: two `$transaction` calls opened on separate pool
+   * connections both read Payout as PENDING (or absent) before either
+   * commits, both pass the authCount>=2 guard, and both credit
+   * COMMISSION_SINK/EXTERNAL — draining BULK_BUY twice for one booking. With
+   * the lock, the second transaction blocks on pg_advisory_xact_lock until
+   * the first commits, then re-reads and finds Payout.status already PAID,
+   * making its own guard a true no-op.
+   *
+   * Fires both HTTP requests via Promise.all (neither awaited before the
+   * other starts) so the two `authorisePayout` transactions are genuinely
+   * concurrent at the Postgres connection-pool level, not just sequential
+   * awaits serialized by Node's single-threaded event loop.
+   */
+  it('serializes concurrent payout-authorisation calls on the same booking so the vendor is paid exactly once', async () => {
+    const committee2 = await signupAndLogin(`bb-committee2-${randomUUID()}@example.com`, flatIds[5], OccupancyRole.OWNER_OCCUPIER);
+    await makeRole(committee2.userId, RoleKind.COMMITTEE);
+    const treasurer2 = await signupAndLogin(`bb-treasurer2-${randomUUID()}@example.com`, flatIds[6], OccupancyRole.OWNER_OCCUPIER);
+    await makeRole(treasurer2.userId, RoleKind.TREASURER);
+    const residentA = await signupAndLogin(`bb-residentA-${randomUUID()}@example.com`, flatIds[7], OccupancyRole.OWNER_OCCUPIER);
+    const residentB = await signupAndLogin(`bb-residentB-${randomUUID()}@example.com`, flatIds[8], OccupancyRole.OWNER_OCCUPIER);
+
+    const startLedger = await ledgerBalances(committee2.agent);
+    const bulkBuyStart = balanceOf(startLedger, AccountKind.BULK_BUY);
+    const commissionStart = balanceOf(startLedger, AccountKind.COMMISSION_SINK);
+    const externalStart = balanceOf(startLedger, AccountKind.EXTERNAL);
+
+    const ladder = [{ minN: 2, pct: 5 }];
+    const createRes = await committee2.agent
+      .post('/api/v1/offers')
+      .send({ vendorId, category: 'Groceries', title: 'Concurrency test order', unitPrice: 1000, deadline: new Date(Date.now() + 86_400_000).toISOString(), discountLadder: ladder })
+      .expect(201);
+    const offer = createRes.body as OfferBody;
+
+    await residentA.agent.post(`/api/v1/offers/${offer.id}/commit`).expect(201);
+    const fireRes = await residentB.agent.post(`/api/v1/offers/${offer.id}/commit`).expect(201);
+    expect((fireRes.body as OfferBody).status).toBe('FIRED');
+
+    const booking = await prisma.booking.findFirstOrThrow({ where: { societyId, sourceType: 'OFFER', sourceId: offer.id } });
+    const commitments = await prisma.commitment.findMany({ where: { offerId: offer.id } });
+    expect(commitments).toHaveLength(2);
+    for (const c of commitments) {
+      await payCommitment(c.id, 950);
+    }
+
+    const jobCards = await prisma.jobCard.findMany({ where: { bookingId: booking.id } });
+    for (const jc of jobCards) {
+      const resident = jc.residentId === residentA.userId ? residentA : residentB;
+      await resident.agent.post(`/api/v1/job-cards/${jc.id}/sign-off`).expect(201);
+    }
+
+    const bookingReady = (await committee2.agent.get(`/api/v1/bookings/${booking.id}`).expect(200)).body as BookingBody;
+    expect(bookingReady.status).toBe('COMPLETED');
+    expect(bookingReady.payout).toBeNull(); // no Payout row exists yet — created by the first authorise call below
+
+    // --- The actual race: two authorise calls in flight at once ---
+    const [res1, res2] = await Promise.all([
+      treasurer2.agent.post(`/api/v1/bookings/${booking.id}/payout/authorise`),
+      treasurer2.agent.post(`/api/v1/bookings/${booking.id}/payout/authorise`),
+    ]);
+    expect(res1.status).toBe(201);
+    expect(res2.status).toBe(201);
+
+    const body1 = res1.body as BookingBody;
+    const body2 = res2.body as BookingBody;
+    expect(body1.payout).not.toBeNull();
+    expect(body2.payout).not.toBeNull();
+    expect(body1.payout!.status).toBe('PAID');
+    expect(body2.payout!.status).toBe('PAID');
+    expect(body1.payout!.id).toBe(body2.payout!.id); // both calls resolved the same Payout row
+
+    const payoutId = body1.payout!.id;
+    const authorisations = await prisma.payoutAuthorisation.findMany({ where: { payoutId } });
+    expect(authorisations).toHaveLength(2); // SYSTEM + TREASURER — the race didn't duplicate either row (upsert + unique [payoutId, kind])
+
+    const vendorEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Payout', linkedEntityId: payoutId, reasonCode: 'BULK_BUY_PAYOUT_VENDOR' } });
+    const commissionEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Payout', linkedEntityId: payoutId, reasonCode: 'BULK_BUY_PAYOUT_COMMISSION' } });
+    expect(vendorEntryCount).toBe(1); // paid exactly once, despite the race
+    expect(commissionEntryCount).toBe(1);
+
+    const finalLedger = await ledgerBalances(committee2.agent);
+    expect(finalLedger.balancesIntact).toBe(true);
+    // amount = 1900 (2 x 950), commission = 190 (10%), vendorNet = 1710 —
+    // drained from BULK_BUY exactly once, not twice.
+    expect(balanceOf(finalLedger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(0, 6);
+    expect(balanceOf(finalLedger, AccountKind.COMMISSION_SINK) - commissionStart).toBeCloseTo(190, 6);
+    expect(balanceOf(finalLedger, AccountKind.EXTERNAL) - externalStart).toBeCloseTo(-190, 6);
+  });
+});
