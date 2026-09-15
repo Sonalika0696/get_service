@@ -24,6 +24,9 @@ export class AppConfigService {
       SMTP_PORT: configService.get('SMTP_PORT', { infer: true }),
       SMTP_FROM: configService.get('SMTP_FROM', { infer: true }),
       API_BASE_URL: configService.get('API_BASE_URL', { infer: true }),
+      GSTIN_API_ENABLED: configService.get('GSTIN_API_ENABLED', { infer: true }),
+      GSTIN_API_URL: configService.get('GSTIN_API_URL', { infer: true }),
+      GSTIN_API_KEY: configService.get('GSTIN_API_KEY', { infer: true }),
     };
   }
 

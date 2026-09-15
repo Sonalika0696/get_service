@@ -9,14 +9,14 @@ Single source of truth for **what's shipped, what's in flight, what's blocked**.
 - The **Demo bar** at the top says what a demo shows *right now*, if the project stops today.
 - Refresh timestamps at the top of the file on each update.
 
-Last updated: *2026-09-16 (Phase 1 backend complete + e2e-verified: auth/OTP/session, job-blog CRUD, company-email verify, rate limit, committee moderation; Phase 1 frontend not started)*
-Current active phase: *Phase 1 — Auth + Job Blog (backend 🟢 done & e2e-green; frontend ⚪ not started). Phase 2 backend next.*
+Last updated: *2026-09-16 (Phase 2 backend complete + e2e-verified: vendor directory, GSTIN-gated tier promotion, ratings aggregate, access requests, KYC stub; Phase 1+2 frontend not started)*
+Current active phase: *Phase 2 — Vendor Marketplace (backend 🟢 done & e2e-green; frontend ⚪ not started). Phase 3 backend next.*
 
 ---
 
 ## Demo bar *(what the project can show today)*
 
-> `docker compose up -d` + `npm run prisma:migrate` + `npm run prisma:seed` + `npm run dev:backend` brings up the NestJS API. Over HTTP you can now sign up a resident, receive an OTP email (Maildev at :1080), verify it for a session cookie, post a job (SEEKING or HIRING), verify a hiring post's company email, browse the society's visible jobs, and — as a committee member — flag/remove a post (which writes a hash-chained audit row). Auth, rate limiting (1 post/resident/month), and the full Phase 1 flow are e2e-tested against real Postgres. Still no frontend — this is all API-level (curl / the e2e suite).
+> `docker compose up -d` + `npm run prisma:migrate` + `npm run prisma:seed` + `npm run dev:backend` brings up the NestJS API. Over HTTP you can now sign up a resident, receive an OTP email (Maildev at :1080), verify it for a session cookie, post a job (SEEKING or HIRING), verify a hiring post's company email, browse the society's visible jobs, and — as a committee member — flag/remove a post (which writes a hash-chained audit row). Auth, rate limiting (1 post/resident/month), and the full Phase 1 flow are e2e-tested against real Postgres. A committee can also onboard vendors (with offline GSTIN verification that auto-promotes an Active GSTIN to `SOCIETY_ATTESTED`), residents can browse the society's vendor directory (category/name filters) and rate vendors (running aggregate). Still no frontend — this is all API-level (curl / the e2e suite).
 
 Update this box on the last commit of every phase — it should read like a two-sentence pitch of what a supervisor would see if they opened the app right now.
 
@@ -100,19 +100,19 @@ Update this box on the last commit of every phase — it should read like a two-
 
 ---
 
-## Phase 2 — Vendor Marketplace ⚪
+## Phase 2 — Vendor Marketplace 🟡
 
 **Deliverable:** committee onboards vendors; residents browse directory; vendor record page with ratings aggregate.
 
 | Track | Task | Status |
 |---|---|---|
-| BE | `vendors/` — entity + geo + categories + tier state machine + `gstin` / `gstin_verified_at` | ⚪ |
-| BE | Access request records + rating table + aggregate | ⚪ |
-| BE | `infra/gstinapi/` client (free tier, retries, timeouts, feature-flagged) | ⚪ |
-| BE | Vendor onboarding: on approve → GSTIN lookup → auto-promote to `SOCIETY_ATTESTED` if `Active` | ⚪ |
-| BE | `kyc/` light — document upload stub | ⚪ |
-| BE | Endpoints: list, detail, onboard, approve, rate (stub) | ⚪ |
-| BE | E2E: onboard w/ valid test GSTIN → tier flips → list → detail → rate | ⚪ |
+| BE | `vendors/` — entity + geo + categories + tier state machine + `gstin` / `gstin_verified_at` | 🟢 *(society-scoped Vendor; `VendorCategory` child table; `verification-tier.util.ts` allows only forward single-step transitions)* |
+| BE | Access request records + rating table + aggregate | 🟢 *(`VendorAccessRequest`; `VendorRating` + lazy `ratingAvg`/`ratingCount` recomputed in-tx on each rate)* |
+| BE | `infra/gstinapi/` client (free tier, retries, timeouts, feature-flagged) | 🟢 *(`GSTIN_API_ENABLED` off by default → deterministic offline stub; when on: 5s timeout + 1 retry, non-throwing)* |
+| BE | Vendor onboarding: on approve → GSTIN lookup → auto-promote to `SOCIETY_ATTESTED` if `Active` | 🟢 *(`POST /vendors/:id/approve`; non-fatal, returns vendor + explanatory note)* |
+| BE | `kyc/` light — document upload stub | 🟢 *(`KycDocument` metadata-only, `local://` storage ref; clearly marked stub)* |
+| BE | Endpoints: list, detail, onboard, approve, rate (stub) | 🟢 *(`GET /vendors` w/ `?category=&q=`, `GET /vendors/:id`, `POST /vendors`, `/approve`, `/rate`, `/access-request`)* |
+| BE | E2E: onboard w/ valid test GSTIN → tier flips → list → detail → rate | 🟢 *(`test/vendors.e2e-spec.ts`, 4 cases: GSTIN-active→SOCIETY_ATTESTED, `00…`/no-GSTIN stays UNVERIFIED, cross-society isolation + category filter, two ratings → avg 4.50, non-committee 403. Full suite: 13 e2e green)* |
 | FE | `/marketplace` list with filters | ⚪ |
 | FE | `/marketplace/[vendorId]` record page | ⚪ |
 | FE | `(committee)/admin/vendors` onboarding form (GSTIN field + verified badge) | ⚪ |
@@ -120,6 +120,10 @@ Update this box on the last commit of every phase — it should read like a two-
 | FE | Playwright happy path | ⚪ |
 
 **DoD:** committee onboards a vendor; residents see it and rate the vendor.
+
+**Backend status:** verified directly — `npm run build` ok, oxlint clean, 15 unit + 13 e2e green against real Postgres. GSTIN verification runs offline by default (stub), so the suite needs no external key. Frontend not started.
+
+**Decision (2026-09-16):** `Vendor` carries `societyId` (society-scoped directory) though ARCHITECTURE.md's data-model line omits it — matches the committee-onboards-per-society flow and the `currentUser.societyId` scoping used everywhere else in v1. Geo fields (`latitude`/`longitude`/`radiusKm`) are stored for the Phase 8 recommender but not yet used for cross-society matching.
 
 ---
 

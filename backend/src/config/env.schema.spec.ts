@@ -17,6 +17,16 @@ describe('validateEnv', () => {
     expect(env.SMTP_HOST).toBe('localhost');
     expect(env.SMTP_PORT).toBe(1025);
     expect(env.API_BASE_URL).toBe('http://localhost:4000');
+    expect(env.GSTIN_API_ENABLED).toBe(false);
+    expect(env.GSTIN_API_URL).toBe('https://gstinapi.in/api/v1/gstin');
+    expect(env.GSTIN_API_KEY).toBe('');
+  });
+
+  it('coerces GSTIN_API_ENABLED from "true"/"1" and leaves anything else falsy', () => {
+    expect(validateEnv({ ...validConfig, GSTIN_API_ENABLED: 'true' }).GSTIN_API_ENABLED).toBe(true);
+    expect(validateEnv({ ...validConfig, GSTIN_API_ENABLED: '1' }).GSTIN_API_ENABLED).toBe(true);
+    expect(validateEnv({ ...validConfig, GSTIN_API_ENABLED: 'false' }).GSTIN_API_ENABLED).toBe(false);
+    expect(validateEnv({ ...validConfig, GSTIN_API_ENABLED: 'nonsense' }).GSTIN_API_ENABLED).toBe(false);
   });
 
   it('coerces API_PORT from a string', () => {

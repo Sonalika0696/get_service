@@ -22,6 +22,17 @@ export const envSchema = z.object({
 
   /** Used to build absolute links inside emails (company-email verification). */
   API_BASE_URL: z.url().default('http://localhost:4000'),
+
+  // --- Phase 2 (vendor marketplace) ---
+  /**
+   * Off by default — dev and all automated tests run GstinApiService
+   * against a deterministic offline stub instead of a real network call
+   * (see src/infra/gstinapi/gstinapi.service.ts). Accepts "true"/"1" as
+   * truthy, anything else (including unset) is false.
+   */
+  GSTIN_API_ENABLED: z.preprocess((value) => value === 'true' || value === '1', z.boolean()).default(false),
+  GSTIN_API_URL: z.url().default('https://gstinapi.in/api/v1/gstin'),
+  GSTIN_API_KEY: z.string().default(''),
 });
 
 export type Env = z.infer<typeof envSchema>;

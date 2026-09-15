@@ -38,6 +38,9 @@ model User {
   sessions             Session[]
   otps                 Otp[]
   jobBlogPosts         JobBlogPost[]
+  vendorRatings        VendorRating[]
+  vendorAccessRequests VendorAccessRequest[]
+  kycDocuments         KycDocument[]
 
   @@map("users")
 }
@@ -97,6 +100,7 @@ model Society {
   roles        Role[]
   auditLogs    AuditLog[]
   jobBlogPosts JobBlogPost[]
+  vendors      Vendor[]
 
   @@map("societies")
 }
@@ -254,4 +258,125 @@ model JobBlogPost {
   @@index([societyId, status, expiresAt])
   @@index([posterId, createdAt])
   @@map("job_blog_posts")
+}
+
+// ---------------------------------------------------------------------------
+// Vendor marketplace — Phase 2. Society-scoped vendor directory with a
+// committee-driven onboarding/approval flow, resident ratings, and a light
+// access-request trail. See src/modules/vendors for the service layer and
+// src/infra/gstinapi for the (feature-flagged, stubbable) GSTIN lookup used
+// during approval.
+// ---------------------------------------------------------------------------
+
+/// UNVERIFIED: just onboarded by a committee member, no external check yet.
+/// SOCIETY_ATTESTED: the vendor's GSTIN came back Active from the GSTIN
+///   lookup at approval time — the society is vouching for it.
+/// PLATFORM_AUDITED: a stronger, platform-level audit (out of Phase 2 scope
+///   to produce — the tier exists so the state machine has a next step).
+/// Transitions are forward-only: UNVERIFIED -> SOCIETY_ATTESTED -> PLATFORM_AUDITED.
+enum VerificationTier {
+  UNVERIFIED
+  SOCIETY_ATTESTED
+  PLATFORM_AUDITED
+}
+
+enum RatingSource {
+  RESIDENT
+  COMMITTEE
+}
+
+model Vendor {
+  id        String  @id @default(cuid())
+  societyId String
+  name      String
+  contactEmail String?
+  contactPhone String?
+  latitude  Float?
+  longitude Float?
+  /// Service radius in km, used later for proximity search — optional until then.
+  radiusKm  Decimal? @db.Decimal(6, 2)
+
+  verificationTier VerificationTier @default(UNVERIFIED)
+  gstin            String?
+  gstinVerifiedAt  DateTime?
+
+  /// Denormalized rating aggregate, lazily recomputed by VendorsService
+  /// whenever a new VendorRating is created (see rate()) rather than
+  /// computed on every read.
+  ratingAvg   Decimal @default(0) @db.Decimal(3, 2)
+  ratingCount Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  society        Society                @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  categories     VendorCategory[]
+  ratings        VendorRating[]
+  accessRequests VendorAccessRequest[]
+
+  @@index([societyId])
+  @@map("vendors")
+}
+
+model VendorCategory {
+  id       String @id @default(cuid())
+  vendorId String
+  category String
+
+  vendor Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@unique([vendorId, category])
+  @@map("vendor_categories")
+}
+
+model VendorRating {
+  id         String @id @default(cuid())
+  vendorId   String
+  residentId String
+  /// Real job cards land in a later phase (job-card lifecycle) — until then
+  /// this stays null and ratings aren't gated on a completed, signed-off job.
+  jobCardId  String?
+  rating     Int
+  comment    String?
+  source     RatingSource @default(RESIDENT)
+  createdAt  DateTime     @default(now())
+
+  vendor   Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  resident User   @relation(fields: [residentId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId])
+  @@map("vendor_ratings")
+}
+
+model VendorAccessRequest {
+  id         String    @id @default(cuid())
+  vendorId   String
+  residentId String
+  purpose    String
+  grantedAt  DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  vendor   Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  resident User   @relation(fields: [residentId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId])
+  @@map("vendor_access_requests")
+}
+
+/// Phase-2 stub: records upload METADATA only (kind + fileName); there is no
+/// real file storage or OCR/verification pipeline yet. storageRef is a fake
+/// local placeholder path until an object store is wired up in a later phase.
+model KycDocument {
+  id         String   @id @default(cuid())
+  userId     String
+  kind       String
+  fileName   String
+  storageRef String
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("kyc_documents")
 }
