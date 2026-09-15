@@ -1,0 +1,133 @@
+// Prisma schema — Society FinTech Platform
+// Phase 0 scope: User, Society, Flat, Occupancy, Role, AuditLog.
+// Later phases extend this file; see BACKEND_PLAN.md for the full entity list.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Identity & tenancy
+// ---------------------------------------------------------------------------
+
+enum KycTier {
+  NONE
+  LIGHT
+  STANDARD
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  phone     String?  @unique
+  kycTier   KycTier  @default(NONE)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  occupancies Occupancy[]
+  roles       Role[]
+
+  @@map("users")
+}
+
+model Society {
+  id        String   @id @default(cuid())
+  name      String
+  address   String
+  latitude  Float?
+  longitude Float?
+  /// Society-level feature/config toggles (e.g. job-post rate limit).
+  config    Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  flats Flat[]
+  roles Role[]
+
+  @@map("societies")
+}
+
+model Flat {
+  id                String   @id @default(cuid())
+  societyId         String
+  unitNo            String
+  maintenanceAmount Decimal  @db.Decimal(10, 2)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  society     Society     @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  occupancies Occupancy[]
+
+  @@unique([societyId, unitNo])
+  @@map("flats")
+}
+
+enum OccupancyRole {
+  OWNER
+  TENANT
+}
+
+model Occupancy {
+  id              String        @id @default(cuid())
+  flatId          String
+  userId          String
+  role            OccupancyRole
+  tenureStartedAt DateTime      @default(now())
+  tenureEndedAt   DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  flat Flat @relation(fields: [flatId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([flatId])
+  @@index([userId])
+  @@map("occupancies")
+}
+
+/// Society-level roles layered on top of an occupancy (committee, treasurer).
+/// Distinct from OccupancyRole, which is owner-vs-tenant on a specific flat.
+enum RoleKind {
+  COMMITTEE
+  TREASURER
+  DEPUTY_TREASURER
+}
+
+model Role {
+  id        String   @id @default(cuid())
+  societyId String
+  userId    String
+  kind      RoleKind
+  createdAt DateTime @default(now())
+
+  society Society @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([societyId, userId, kind])
+  @@map("roles")
+}
+
+// ---------------------------------------------------------------------------
+// Audit — append-only. No module should ever update or delete a row here.
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  ts          DateTime @default(now())
+  actorId     String?
+  action      String
+  subjectType String
+  subjectId   String
+  payload     Json
+
+  @@index([subjectType, subjectId])
+  @@index([actorId])
+  @@index([ts])
+  @@map("audit_logs")
+}
