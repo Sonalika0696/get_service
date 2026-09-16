@@ -9,6 +9,9 @@
     "apps/*",
     "packages/*"
   ],
+  "dependencies": {
+    "expo": "~57.0.0"
+  },
   "scripts": {
     "dev:backend": "npm run start:dev --workspace backend",
     "build:backend": "npm run build --workspace backend",
