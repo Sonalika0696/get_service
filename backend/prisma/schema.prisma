@@ -539,6 +539,8 @@ model Vendor {
   taggedPolls    Poll[]
   /// Phase 6.2 — the VENDOR-principal User that logs in as this vendor (see User.vendorId). Opposite side of a 1:1; the FK lives on User.
   linkedUser     User?
+  /// Phase 7.2 — this vendor's published price sheets (see PricingCard).
+  pricingCards   PricingCard[]
 
   @@map("vendors")
 }
@@ -607,6 +609,83 @@ model VendorAccessRequest {
 
   @@index([vendorId])
   @@map("vendor_access_requests")
+}
+
+enum PricingCardStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum PricingBasis {
+  PER_VISIT
+  PER_HOUR
+  PER_UNIT
+  PERCENTAGE
+}
+
+/// Phase 7.2 (BACKEND_PLAN.md Phase 7 items 2-5): a vendor's versioned price
+/// sheet for one category.
+///
+/// Scoped to VENDOR IDENTITY + CATEGORY, deliberately NOT to any one
+/// society: post-7.1 a vendor is a single global identity that can serve
+/// many societies (VendorSocietyLink), and its pricing for "plumbing" is one
+/// thing, not a different price list per society it happens to be linked
+/// to. A per-society override, if ever needed, is a distinct future
+/// concept layered on top of this — not built here.
+///
+/// Lifecycle: created DRAFT (mutable — lines may be added/edited freely via
+/// PricingCardsService), then PUBLISHED exactly once via publish(), which
+/// makes the card AND its lines immutable forever after (enforced in
+/// PricingCardsService.assertMutable, not at the DB layer). Revising a
+/// published card creates a NEW PricingCard row (version = prev + 1,
+/// status DRAFT) rather than touching the old one; publishing that new
+/// draft is what stamps `supersededAt` on the row it replaces (see
+/// PricingCardsService.publish) — never at draft-creation time, so an
+/// abandoned revision draft never orphans the live published card.
+/// Superseded rows are never deleted or mutated: any engagement that froze
+/// a given version keeps reading it byte-for-byte forever (DoD: all
+/// versions independently retrievable).
+model PricingCard {
+  id            String            @id @default(cuid())
+  vendorId      String
+  category      String
+  version       Int
+  /// GST rate applicable to this card's lines, as a percentage (e.g. 18.00).
+  gstRatePct    Decimal           @db.Decimal(5, 2)
+  effectiveFrom DateTime
+  /// Set only when a LATER version of this (vendor, category) is published — see doc comment above.
+  supersededAt  DateTime?
+  status        PricingCardStatus @default(DRAFT)
+  publishedAt   DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  vendor Vendor        @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  lines  PricingLine[]
+
+  @@unique([vendorId, category, version])
+  @@index([vendorId, category])
+  @@map("pricing_cards")
+}
+
+/// A single priced item on a PricingCard. The visit/callout charge is
+/// modelled as an ordinary PER_VISIT line here — deliberately not a
+/// separate column or an implicit fee added at engagement time, so it's
+/// visible, editable and versioned exactly like every other line
+/// (BACKEND_PLAN.md Phase 7 item 3).
+model PricingLine {
+  id         String       @id @default(cuid())
+  cardId     String
+  label      String
+  basis      PricingBasis
+  rate       Decimal      @db.Decimal(10, 2)
+  minimum    Decimal?     @db.Decimal(10, 2)
+  conditions String?
+
+  card PricingCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([cardId])
+  @@map("pricing_lines")
 }
 
 /// Phase-2 stub: records upload METADATA only (kind + fileName); there is no

@@ -232,6 +232,66 @@
         ],
         "type": "object"
       },
+      "CreatePricingCardDto": {
+        "properties": {
+          "category": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "effectiveFrom": {
+            "type": "string"
+          },
+          "gstRatePct": {
+            "description": "Percentage, e.g. 18 for 18% GST.",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "category",
+          "gstRatePct",
+          "effectiveFrom"
+        ],
+        "type": "object"
+      },
+      "CreatePricingLineDto": {
+        "properties": {
+          "basis": {
+            "enum": [
+              "PER_VISIT",
+              "PER_HOUR",
+              "PER_UNIT",
+              "PERCENTAGE"
+            ],
+            "type": "string"
+          },
+          "conditions": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "minimum": {
+            "minimum": 1,
+            "type": "number"
+          },
+          "rate": {
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "label",
+          "basis",
+          "rate"
+        ],
+        "type": "object"
+      },
       "CreateResidentPollDto": {
         "properties": {
           "category": {
@@ -613,6 +673,23 @@
         },
         "type": "object"
       },
+      "RevisePricingCardDto": {
+        "properties": {
+          "effectiveFrom": {
+            "type": "string"
+          },
+          "gstRatePct": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "gstRatePct",
+          "effectiveFrom"
+        ],
+        "type": "object"
+      },
       "SetApprovalConfigDto": {
         "properties": {
           "lowerThreshold": {
@@ -677,6 +754,39 @@
           "flatId",
           "role"
         ],
+        "type": "object"
+      },
+      "UpdatePricingLineDto": {
+        "properties": {
+          "basis": {
+            "enum": [
+              "PER_VISIT",
+              "PER_HOUR",
+              "PER_UNIT",
+              "PERCENTAGE"
+            ],
+            "type": "string"
+          },
+          "conditions": {
+            "maxLength": 500,
+            "nullable": true,
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "minimum": {
+            "minimum": 1,
+            "nullable": true,
+            "type": "number"
+          },
+          "rate": {
+            "minimum": 0,
+            "type": "number"
+          }
+        },
         "type": "object"
       },
       "UpdateProfileDto": {
@@ -2725,6 +2835,378 @@
         },
         "tags": [
           "Polls"
+        ]
+      }
+    },
+    "/api/v1/pricing-cards": {
+      "post": {
+        "operationId": "PricingCardsController_create",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePricingCardDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "PricingCards"
+        ]
+      }
+    },
+    "/api/v1/pricing-cards/mine": {
+      "get": {
+        "operationId": "PricingCardsController_listMine",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "PricingCards"
+        ]
+      }
+    },
+    "/api/v1/pricing-cards/vendors/{vendorId}/categories/{category}/current": {
+      "get": {
+        "operationId": "PricingCardsController_getCurrent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "vendorId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "category",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "PricingCards"
+        ]
+      }
+    },
+    "/api/v1/pricing-cards/vendors/{vendorId}/categories/{category}/versions/{version}": {
+      "get": {
+        "operationId": "PricingCardsController_getVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "vendorId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "category",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "PricingCards"
+        ]
+      }
+    },
+    "/api/v1/pricing-cards/{id}": {
+      "get": {
+        "operationId": "PricingCardsController_getOwn",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "PricingCards"
+        ]
+      }
+    },
+    "/api/v1/pricing-cards/{id}/lines": {
+      "post": {
+        "operationId": "PricingCardsController_addLine",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePricingLineDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "PricingCards"
+        ]
+      }
+    },
+    "/api/v1/pricing-cards/{id}/lines/{lineId}": {
+      "delete": {
+        "operationId": "PricingCardsController_deleteLine",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lineId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "PricingCards"
+        ]
+      },
+      "patch": {
+        "operationId": "PricingCardsController_updateLine",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lineId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePricingLineDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "PricingCards"
+        ]
+      }
+    },
+    "/api/v1/pricing-cards/{id}/publish": {
+      "post": {
+        "operationId": "PricingCardsController_publish",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "PricingCards"
+        ]
+      }
+    },
+    "/api/v1/pricing-cards/{id}/revise": {
+      "post": {
+        "operationId": "PricingCardsController_revise",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisePricingCardDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "PricingCards"
         ]
       }
     },

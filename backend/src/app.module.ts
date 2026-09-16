@@ -17,6 +17,7 @@ import { AuthModule } from './modules/auth/auth.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 import { JobBlogModule } from './modules/job-blog/job-blog.module.js';
 import { VendorsModule } from './modules/vendors/vendors.module.js';
+import { PricingModule } from './modules/pricing/pricing.module.js';
 import { KycModule } from './modules/kyc/kyc.module.js';
 import { PollsModule } from './modules/polls/polls.module.js';
 import { LedgerModule } from './modules/ledger/ledger.module.js';
@@ -58,6 +59,7 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     UsersModule,
     JobBlogModule,
     VendorsModule,
+    PricingModule,
     KycModule,
     PollsModule,
     LedgerModule,
