@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { MMKV } from 'react-native-mmkv';
 import * as SecureStore from 'expo-secure-store';
 
@@ -69,25 +70,61 @@ export const kv: StringKV = new Proxy({} as StringKV, {
 const TOKEN_KEY = 'gatex.auth.bearer';
 
 /**
- * Bearer tokens live in the platform secure keychain, never in the query
- * cache store. SecureStore itself is native — on web it silently no-ops
- * (returns null), on Expo Go it works for both iOS and Android.
+ * SecureStore is native-only — its methods (setValueWithKeyAsync et al.)
+ * don't exist on web, where they throw "is not a function". On web we fall
+ * back to localStorage (or an in-memory map when even that is unavailable,
+ * e.g. SSR or a locked-down browser). Native keeps using the platform
+ * keychain. The bearer token is the only secret stored here.
  */
+const isWeb = Platform.OS === 'web';
+
+const webTokenStore = (() => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return {
+        get: () => window.localStorage.getItem(TOKEN_KEY),
+        set: (v: string) => window.localStorage.setItem(TOKEN_KEY, v),
+        del: () => window.localStorage.removeItem(TOKEN_KEY),
+      };
+    }
+  } catch {
+    // fall through to in-memory
+  }
+  let mem: string | null = null;
+  return {
+    get: () => mem,
+    set: (v: string) => { mem = v; },
+    del: () => { mem = null; },
+  };
+})();
+
 export const secureStorage = {
   async getToken(): Promise<string | null> {
     try {
-      return await SecureStore.getItemAsync(TOKEN_KEY);
+      return isWeb ? webTokenStore.get() : await SecureStore.getItemAsync(TOKEN_KEY);
     } catch {
       return null;
     }
   },
   async setToken(token: string): Promise<void> {
-    await SecureStore.setItemAsync(TOKEN_KEY, token, {
-      keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-    });
+    try {
+      if (isWeb) {
+        webTokenStore.set(token);
+        return;
+      }
+      await SecureStore.setItemAsync(TOKEN_KEY, token, {
+        keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+      });
+    } catch {
+      // Best-effort; a failed persist just means the session won't survive reload.
+    }
   },
   async clearToken(): Promise<void> {
     try {
+      if (isWeb) {
+        webTokenStore.del();
+        return;
+      }
       await SecureStore.deleteItemAsync(TOKEN_KEY);
     } catch {
       // Best-effort on platforms where clear is a no-op.

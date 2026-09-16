@@ -125,6 +125,27 @@ export default function SignIn() {
             rightIcon={!busy ? <ArrowRight size={16} color="#fff" weight="bold" /> : undefined}
             fullWidth
           />
+
+          {__DEV__ ? (
+            <View style={{ gap: theme.spacing.sm, marginTop: theme.spacing.md }}>
+              <View
+                style={{
+                  height: 1,
+                  backgroundColor: theme.colors.border.subtle,
+                  marginVertical: theme.spacing.xs,
+                }}
+              />
+              <Text variant="caption" tone="muted" align="center">
+                OTP delivery is stubbed in this build. Skip it for development.
+              </Text>
+              <Button
+                label="Developer sign-in"
+                variant="secondary"
+                onPress={() => auth.devSignIn()}
+                fullWidth
+              />
+            </View>
+          ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

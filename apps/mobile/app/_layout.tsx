@@ -1,6 +1,6 @@
 import 'react-native-gesture-handler';
 import React, { useEffect } from 'react';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -18,18 +18,24 @@ import { lightTheme } from '../src/theme/theme';
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     Inter: Inter_400Regular,
     'Inter-SemiBold': Inter_600SemiBold,
     JetBrainsMono: JetBrainsMono_400Regular,
     'JetBrainsMono-SemiBold': JetBrainsMono_600SemiBold,
   });
 
-  useEffect(() => {
-    if (fontsLoaded) SplashScreen.hideAsync().catch(() => undefined);
-  }, [fontsLoaded]);
+  const fontsSettled = fontsLoaded || Boolean(fontError);
 
-  if (!fontsLoaded) return null;
+  useEffect(() => {
+    if (fontsSettled) SplashScreen.hideAsync().catch(() => undefined);
+  }, [fontsSettled]);
+
+  // Native: hold the splash until fonts are ready (fast + reliable there).
+  // Web: font loading via @expo-google-fonts can hang without ever
+  // resolving or erroring, which would leave a permanent blank screen, so
+  // render immediately and let the webfonts swap in when they arrive.
+  if (!fontsSettled && Platform.OS !== 'web') return null;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

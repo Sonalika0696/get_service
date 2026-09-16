@@ -31,6 +31,27 @@ type AuthContextValue = {
   signUp: (body: SignupBody) => Promise<{ userId: string }>;
   signOut: () => Promise<void>;
   refreshMe: () => Promise<void>;
+  /** __DEV__ only — inject a mock session with no backend round-trip. */
+  devSignIn: () => Promise<void>;
+};
+
+/**
+ * Sentinel token for the dev bypass. When SecureStore holds this value we
+ * skip the network /me call and serve a mock committee-resident identity,
+ * so every screen (including the committee-only approvals inbox) is
+ * reachable while iterating without a working OTP path.
+ */
+const DEV_TOKEN = 'gatex-dev-bypass';
+
+const DEV_ME: MeResponse = {
+  id: 'dev-resident',
+  name: 'Dev Resident',
+  email: 'dev@gatex.local',
+  phone: '+919000000000',
+  kycTier: 'BASIC',
+  societyId: 'dev-society',
+  occupancyRole: 'OWNER_OCCUPIER',
+  roleKinds: ['COMMITTEE', 'TREASURER'],
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -49,6 +70,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
 
   const refreshMe = useCallback(async () => {
+    // Dev bypass: a stored sentinel token serves the mock identity without
+    // ever touching the backend, so this path can't be knocked out by a
+    // down server or a 401.
+    const token = await secureStorage.getToken();
+    if (token === DEV_TOKEN) {
+      setStatus({ kind: 'signed-in', me: DEV_ME });
+      return;
+    }
     try {
       const me = await api<MeResponse>('/me');
       setStatus({ kind: 'signed-in', me });
@@ -104,6 +133,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return api<{ userId: string }>('/auth/signup', { method: 'POST', body });
   }, []);
 
+  const devSignIn = useCallback(async () => {
+    await secureStorage.setToken(DEV_TOKEN);
+    setStatus({ kind: 'signed-in', me: DEV_ME });
+  }, []);
+
   const signOut = useCallback(async () => {
     try {
       await api<void>('/auth/logout', { method: 'POST' });
@@ -124,7 +158,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signUp,
     signOut,
     refreshMe,
-  }), [status, requestOtp, verifyOtp, signUp, signOut, refreshMe]);
+    devSignIn,
+  }), [status, requestOtp, verifyOtp, signUp, signOut, refreshMe, devSignIn]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
