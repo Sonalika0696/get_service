@@ -82,6 +82,7 @@ export default function HomeScreen() {
             value={preview.stats.upcomingEvents}
             label="Upcoming events"
             tone="info"
+            onPress={() => router.push('/events')}
           />
         </View>
         <View style={{ flexDirection: 'row', gap: theme.spacing.sm, marginTop: theme.spacing.sm }}>

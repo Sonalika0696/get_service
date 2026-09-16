@@ -385,6 +385,102 @@ export type VendorPricingCardHistory = {
   }>;
 };
 
+// ------------ Events (M8, FRONTEND_PLAN §5.F8) ------------
+
+export type EventStatus = 'UPCOMING' | 'FULL' | 'CLOSED' | 'CANCELLED';
+
+export type RefundPolicy = {
+  /** Fixed at creation, immutable thereafter (FRONTEND_PLAN §5.F8). */
+  label: string;
+  /** e.g. "Full refund until 48h before; 50% after; none once it starts". */
+  detail: string;
+};
+
+/**
+ * The caller's own relationship to an event: not opted in, opted in and
+ * paid, opted in awaiting payment, or on the waitlist (with position).
+ */
+export type EventOptIn =
+  | { state: 'NONE' }
+  | { state: 'OPTED_IN'; paid: boolean }
+  | { state: 'WAITLISTED'; position: number };
+
+export type EventSummary = {
+  id: string;
+  title: string;
+  startsAt: string;
+  perFlatMinor: number;
+  currency: string;
+  status: EventStatus;
+  optedInCount: number;
+  capacity: number | null;
+};
+
+export type EventDetail = EventSummary & {
+  description: string | null;
+  registrationOpensAt: string | null;
+  registrationClosesAt: string;
+  refundPolicy: RefundPolicy | null;
+  /** Concession lines, e.g. "Senior citizen: 50% off". Empty if none. */
+  concessions: Array<{ label: string; amountOffMinor: number }>;
+  waitlistCount: number;
+  myOptIn: EventOptIn;
+};
+
+// ------------ Charge sheets (M8 settlement, FRONTEND_PLAN §5.F8) ------------
+
+export type ChargeSheetStatus =
+  | 'SUBMITTED'
+  | 'ACKNOWLEDGED'
+  | 'DISPUTED'
+  | 'SETTLED';
+
+/**
+ * One line on a vendor's post-work charge sheet. `withinCard` is false when
+ * the line has no matching line on the frozen card — the mobile UI flags
+ * every out-of-card line so the resident sees exactly what's new
+ * (FRONTEND_PLAN §5.F8: "every out-of-card line flagged").
+ */
+export type ChargeSheetLine = {
+  id: string;
+  label: string;
+  amountMinor: number;
+  withinCard: boolean;
+  /** The frozen-card line this maps to, when withinCard is true. */
+  cardLineLabel: string | null;
+  note: string | null;
+};
+
+export type FrozenCardLine = {
+  label: string;
+  amountMinor: number;
+};
+
+export type ChargeSheet = {
+  id: string;
+  bookingId: string;
+  vendorName: string;
+  status: ChargeSheetStatus;
+  submittedAt: string;
+  currency: string;
+  lines: ChargeSheetLine[];
+  totalMinor: number;
+  /** The card the vendor was engaged under, frozen at confirmation. */
+  frozenCard: {
+    cardId: string;
+    category: string;
+    version: number;
+    lines: FrozenCardLine[];
+    totalMinor: number;
+  };
+  /** Present once the resident has acted. */
+  disputeReason: string | null;
+};
+
+export type DisputeChargeSheetBody = {
+  reason: string;
+};
+
 // ------------ Utility billing trace (M5 / M6, FRONTEND_PLAN §5.F7) ------------
 
 export type Utility = 'ELECTRICITY' | 'WATER';

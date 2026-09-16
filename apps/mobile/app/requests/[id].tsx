@@ -10,6 +10,8 @@ import {
   CheckCircle,
   Handshake,
   SealCheck,
+  Receipt,
+  CaretRight,
 } from 'phosphor-react-native';
 import type { ResidentPollDetail } from '@sft/api-client';
 import { Text } from '../../src/components/Text';
@@ -207,6 +209,8 @@ function PollBody({
         />
       ) : null}
 
+      {poll.bookingId ? <ChargeSheetLink bookingId={poll.bookingId} /> : null}
+
       {canJoin ? (
         <Button
           label={joining ? 'Joining' : 'I need this too'}
@@ -242,6 +246,38 @@ function PollBody({
         </Text>
       </View>
     </>
+  );
+}
+
+function ChargeSheetLink({ bookingId }: { bookingId: string }) {
+  const theme = useTheme();
+  const router = useRouter();
+  return (
+    <View>
+      <SectionLabel>After the work</SectionLabel>
+      <View
+        onTouchEnd={() => router.push(`/bookings/${bookingId}/charge-sheet` as never)}
+        style={{
+          backgroundColor: theme.colors.bg.elevated,
+          borderRadius: theme.radius.xl,
+          borderWidth: 1,
+          borderColor: theme.colors.border.subtle,
+          padding: theme.spacing.md,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: theme.spacing.sm,
+        }}
+      >
+        <Receipt size={22} color={theme.colors.accent[700]} weight="duotone" />
+        <View style={{ flex: 1 }}>
+          <Text variant="body" weight="semibold">Charge sheet</Text>
+          <Text variant="caption" tone="muted">
+            Review the vendor's charges against the frozen card
+          </Text>
+        </View>
+        <CaretRight size={16} color={theme.colors.ink[40]} weight="bold" />
+      </View>
+    </View>
   );
 }
 
