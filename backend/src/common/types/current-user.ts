@@ -21,14 +21,17 @@ export interface ResidentPrincipal extends BasePrincipal {
 /**
  * A vendor: identity anchored to password + mandatory TOTP 2FA
  * (DECISIONS_V2_SCOPE.md §7.2), linked to exactly one Vendor row via
- * User.vendorId — and, transitively, that Vendor's home society. See
- * Phase 7's note about splitting Vendor from VendorSocietyLink once a
- * vendor can serve multiple societies.
+ * User.vendorId. Phase 7.1 split Vendor from VendorSocietyLink
+ * (BACKEND_PLAN.md Phase 7 item 1) so one vendor can now serve MANY
+ * societies — `societyIds` is the list of societies this vendor is
+ * currently linked to (via VendorSocietyLink), replacing the old single
+ * `societyId`. Every consumer that validates "is this vendor allowed to
+ * touch society X" must check `societyIds.includes(x)` instead of `===`.
  */
 export interface VendorPrincipal extends BasePrincipal {
   principalKind: 'VENDOR';
   vendorId: string;
-  societyId: string;
+  societyIds: string[];
 }
 
 /**

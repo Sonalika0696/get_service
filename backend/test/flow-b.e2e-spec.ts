@@ -250,10 +250,12 @@ describe('Bulk-buy Flow B — resident polls (e2e)', () => {
       flatIds.push(flat.id);
     }
 
-    const vendor = await prisma.vendor.create({ data: { societyId, name: 'Flow B Test Vendor', contactEmail: 'vendor@example.com' } });
+    const vendor = await prisma.vendor.create({ data: { name: 'Flow B Test Vendor', contactEmail: 'vendor@example.com' } });
     vendorId = vendor.id;
-    const otherVendor = await prisma.vendor.create({ data: { societyId: otherSocietyId, name: 'Flow B Other-Society Vendor' } });
+    await prisma.vendorSocietyLink.create({ data: { vendorId, societyId } });
+    const otherVendor = await prisma.vendor.create({ data: { name: 'Flow B Other-Society Vendor' } });
     otherSocietyVendorId = otherVendor.id;
+    await prisma.vendorSocietyLink.create({ data: { vendorId: otherSocietyVendorId, societyId: otherSocietyId } });
   });
 
   afterAll(async () => {
@@ -270,7 +272,8 @@ describe('Bulk-buy Flow B — resident polls (e2e)', () => {
     await prisma.ledgerEntry.deleteMany({ where: { societyId } });
     await prisma.account.deleteMany({ where: { societyId } });
     await prisma.idempotencyKey.deleteMany({ where: { societyId } });
-    await prisma.vendor.deleteMany({ where: { societyId: { in: [societyId, otherSocietyId] } } });
+    await prisma.vendorSocietyLink.deleteMany({ where: { societyId: { in: [societyId, otherSocietyId] } } });
+    await prisma.vendor.deleteMany({ where: { id: { in: [vendorId, otherSocietyVendorId] } } });
     await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.otp.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.role.deleteMany({ where: { userId: { in: userIds } } });

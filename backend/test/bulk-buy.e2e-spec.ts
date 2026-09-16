@@ -257,8 +257,9 @@ describe('Bulk-buy Flow A (e2e)', () => {
       flatIds.push(flat.id);
     }
 
-    const vendor = await prisma.vendor.create({ data: { societyId, name: 'Bulk-Buy Test Vendor', contactEmail: 'vendor@example.com' } });
+    const vendor = await prisma.vendor.create({ data: { name: 'Bulk-Buy Test Vendor', contactEmail: 'vendor@example.com' } });
     vendorId = vendor.id;
+    await prisma.vendorSocietyLink.create({ data: { vendorId, societyId } });
   });
 
   afterAll(async () => {
@@ -275,7 +276,8 @@ describe('Bulk-buy Flow A (e2e)', () => {
     await prisma.ledgerEntry.deleteMany({ where: { societyId } });
     await prisma.account.deleteMany({ where: { societyId } });
     await prisma.idempotencyKey.deleteMany({ where: { societyId } });
-    await prisma.vendor.deleteMany({ where: { societyId } });
+    await prisma.vendorSocietyLink.deleteMany({ where: { societyId } });
+    await prisma.vendor.deleteMany({ where: { id: vendorId } });
     await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.otp.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.role.deleteMany({ where: { userId: { in: userIds } } });

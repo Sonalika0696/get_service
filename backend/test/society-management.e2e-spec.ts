@@ -144,8 +144,9 @@ describe('Society management — Phase 6.3 (e2e)', () => {
   }
 
   async function vendorAgentFixture(sId: string) {
-    const vendor = await prisma.vendor.create({ data: { societyId: sId, name: `Society Mgmt Vendor ${randomUUID()}` } });
+    const vendor = await prisma.vendor.create({ data: { name: `Society Mgmt Vendor ${randomUUID()}` } });
     vendorIds.push(vendor.id);
+    await prisma.vendorSocietyLink.create({ data: { vendorId: vendor.id, societyId: sId } });
 
     const email = `vendor-officer-${randomUUID()}@example.com`;
     const password = 'a vendor officer passphrase';
@@ -293,22 +294,25 @@ describe('Society management — Phase 6.3 (e2e)', () => {
       const { agent: vendorAgent, userId: vendorUserId } = await vendorAgentFixture(societyId);
 
       // No consent yet — denied at the query, not merely with fields stripped.
-      const beforeRes = await vendorAgent.get(`/api/v1/vendors/residents/${resident.userId}/contact`).expect(404);
+      // Phase 7.1: the vendor must now name which society this lookup is
+      // scoped to (`?societyId=`), since a vendor can be linked to more
+      // than one.
+      const beforeRes = await vendorAgent.get(`/api/v1/vendors/residents/${resident.userId}/contact`).query({ societyId }).expect(404);
       expect(beforeRes.body).not.toHaveProperty('phone');
 
       const consentRes = await resident.agent.post('/api/v1/me/consents').send({ granteeUserId: vendorUserId, purpose: 'CONTACT_INFO' }).expect(201);
       const consentId = (consentRes.body as { id: string }).id;
 
-      const afterGrantRes = await vendorAgent.get(`/api/v1/vendors/residents/${resident.userId}/contact`).expect(200);
+      const afterGrantRes = await vendorAgent.get(`/api/v1/vendors/residents/${resident.userId}/contact`).query({ societyId }).expect(200);
       expect((afterGrantRes.body as { id: string }).id).toBe(resident.userId);
 
       // A DIFFERENT vendor (no consent from this resident) is still denied.
       const { agent: otherVendorAgent } = await vendorAgentFixture(societyId);
-      await otherVendorAgent.get(`/api/v1/vendors/residents/${resident.userId}/contact`).expect(404);
+      await otherVendorAgent.get(`/api/v1/vendors/residents/${resident.userId}/contact`).query({ societyId }).expect(404);
 
       // Revocation is immediate: the very next query denies.
       await resident.agent.delete(`/api/v1/me/consents/${consentId}`).expect(200);
-      await vendorAgent.get(`/api/v1/vendors/residents/${resident.userId}/contact`).expect(404);
+      await vendorAgent.get(`/api/v1/vendors/residents/${resident.userId}/contact`).query({ societyId }).expect(404);
 
       const auditRows = await prisma.auditLog.findMany({ where: { societyId, action: { in: ['CONSENT_GRANT', 'CONSENT_REVOKE'] }, subjectId: consentId } });
       expect(auditRows.map((r) => r.action).sort()).toEqual(['CONSENT_GRANT', 'CONSENT_REVOKE']);
@@ -320,7 +324,12 @@ describe('Society management — Phase 6.3 (e2e)', () => {
 
       await resident.agent.post('/api/v1/me/consents').send({ granteeUserId: crossVendorUserId, purpose: 'CONTACT_INFO' }).expect(201);
 
-      await crossSocietyVendorAgent.get(`/api/v1/vendors/residents/${resident.userId}/contact`).expect(404);
+      // The cross-society vendor names its OWN (linked) society — the
+      // resident simply isn't there, so it 404s the same way it always
+      // did. Naming the resident's actual society instead would 403 at
+      // the VendorSocietyLink check before ever reaching the resident
+      // lookup — either way the vendor is scoped out.
+      await crossSocietyVendorAgent.get(`/api/v1/vendors/residents/${resident.userId}/contact`).query({ societyId: otherSocietyId }).expect(404);
     });
   });
 });

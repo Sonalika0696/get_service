@@ -13,6 +13,11 @@ import type { RequestWithUser } from './auth.guard.js';
  * operator is platform-level and carries no societyId at all, so "does :sid
  * match the caller's society" isn't a meaningful question for them; the
  * platform-operator role is itself the authorisation.
+ *
+ * Phase 7.1: a VENDOR principal carries `societyIds` (plural — see
+ * VendorPrincipal's doc comment) instead of a single `societyId`, since a
+ * vendor may now be linked to several societies. `:sid` is allowed through
+ * when it's ANY one of them, not just a single exact match.
  */
 @Injectable()
 export class SocietyScopeGuard implements CanActivate {
@@ -30,9 +35,20 @@ export class SocietyScopeGuard implements CanActivate {
       return true;
     }
 
-    const sid = request.params.sid;
+    const sid = request.params.sid as string | undefined;
+    if (!sid) {
+      return true;
+    }
+
+    if (user?.principalKind === 'VENDOR') {
+      if (!user.societyIds.includes(sid)) {
+        throw new ForbiddenException('Not a member of this society');
+      }
+      return true;
+    }
+
     const userSocietyId = user && 'societyId' in user ? user.societyId : undefined;
-    if (sid && sid !== userSocietyId) {
+    if (sid !== userSocietyId) {
       throw new ForbiddenException('Not a member of this society');
     }
 

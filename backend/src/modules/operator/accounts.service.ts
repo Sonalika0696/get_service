@@ -63,14 +63,33 @@ export class AccountsService {
       data: { name: dto.name, email: dto.email, principalKind: PrincipalKind.VENDOR, vendorId: dto.vendorId },
     });
 
-    await this.auditService.appendBestEffort({
-      societyId: vendor.societyId,
-      actorId: operatorId,
-      action: 'VENDOR_ACCOUNT_PROVISION',
-      subjectType: 'User',
-      subjectId: user.id,
-      payload: { email: dto.email, vendorId: dto.vendorId },
+    // Phase 7.1: a Vendor no longer carries a single societyId — society
+    // membership is now the VendorSocietyLink, which vendor onboarding
+    // (VendorsService.create) already creates, or which a prior 7.2/7.3
+    // multi-society linking step created. This account-provisioning step
+    // doesn't create or choose a society itself (that's not its job — it
+    // only turns an existing Vendor identity into a login); the AuditLog
+    // chain is per-society (AuditLog.societyId is NOT NULL — see
+    // AuditService's class doc comment), so this write is attributed to
+    // the vendor's oldest link as a best-effort choice. A vendor
+    // provisioned with zero links (possible once 7.2/7.3 allow creating a
+    // Vendor identity before any society link exists) skips the audit
+    // write entirely rather than crash provisioning over it — a flagged
+    // gap, not an oversight.
+    const oldestLink = await this.prisma.vendorSocietyLink.findFirst({
+      where: { vendorId: dto.vendorId },
+      orderBy: { createdAt: 'asc' },
     });
+    if (oldestLink) {
+      await this.auditService.appendBestEffort({
+        societyId: oldestLink.societyId,
+        actorId: operatorId,
+        action: 'VENDOR_ACCOUNT_PROVISION',
+        subjectType: 'User',
+        subjectId: user.id,
+        payload: { email: dto.email, vendorId: dto.vendorId },
+      });
+    }
 
     return user;
   }

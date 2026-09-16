@@ -35,7 +35,7 @@ export interface OperatorDashboardKpis {
  * filter exactly (see the comment on each query) so the counts here can
  * never drift from what those routes themselves would return:
  *   - flats:                Flat rows for the society (operator FlatsService's scope)
- *   - vendors:               Vendor rows for the society (VendorsService.listForSociety's base filter)
+ *   - vendors:               VendorSocietyLink rows for the society (VendorsService.listForSociety's base filter, Phase 7.1)
  *   - pendingRatifications:  mirrors RatificationService.listPending's exact where-clause
  *   - residents:             DISTINCT users with a live, ratified occupancy (see residents' doc comment below)
  *
@@ -56,7 +56,11 @@ export class DashboardService {
     const [flats, residents, vendors, pendingRatifications, balances] = await Promise.all([
       this.prisma.flat.count({ where: { societyId } }),
       this.countResidents({ flat: { societyId } }),
-      this.prisma.vendor.count({ where: { societyId } }),
+      // Phase 7.1: Vendor no longer carries societyId — "vendors for this
+      // society" is now a VendorSocietyLink count, mirroring
+      // VendorsService.listForSociety's base filter exactly (see this
+      // class's doc comment on why these counts must never drift from it).
+      this.prisma.vendorSocietyLink.count({ where: { societyId } }),
       this.prisma.occupancy.count({ where: { flat: { societyId }, ratificationStatus: RatificationStatus.PENDING } }),
       this.ledgerService.balances(societyId),
     ]);

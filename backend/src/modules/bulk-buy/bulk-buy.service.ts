@@ -133,8 +133,16 @@ export class BulkBuyService {
   // -------------------------------------------------------------------
 
   async createOffer(societyId: string, dto: CreateOfferDto): Promise<OfferDetail> {
-    const vendor = await this.prisma.vendor.findUnique({ where: { id: dto.vendorId } });
-    if (!vendor || vendor.societyId !== societyId) {
+    // Phase 7.1: a vendor can now be linked to many societies, so "is this
+    // vendor valid for this offer" is "does a VendorSocietyLink exist for
+    // (vendorId, societyId)" rather than a single Vendor.societyId
+    // comparison — preserves the pre-split rule (an offer may only involve
+    // a vendor that actually serves this society) while allowing a
+    // multi-society vendor to have offers in each of its societies.
+    const link = await this.prisma.vendorSocietyLink.findUnique({
+      where: { vendorId_societyId: { vendorId: dto.vendorId, societyId } },
+    });
+    if (!link) {
       throw new NotFoundException('Vendor not found');
     }
 
@@ -955,8 +963,12 @@ export class BulkBuyService {
    * with no vendor response yet.
    */
   async createResidentPoll(societyId: string, creatorId: string, dto: CreateResidentPollDto): Promise<ResidentPollDetail> {
-    const vendor = await this.prisma.vendor.findUnique({ where: { id: dto.taggedVendorId } });
-    if (!vendor || vendor.societyId !== societyId) {
+    // Phase 7.1: same VendorSocietyLink check as createOffer above — a
+    // resident may only tag a vendor actually linked to their own society.
+    const link = await this.prisma.vendorSocietyLink.findUnique({
+      where: { vendorId_societyId: { vendorId: dto.taggedVendorId, societyId } },
+    });
+    if (!link) {
       throw new NotFoundException('Vendor not found');
     }
 

@@ -133,9 +133,10 @@ describe('GET /auth/session — principal-agnostic "who am I" (e2e)', () => {
     });
   });
 
-  it('a VENDOR session reports principalKind VENDOR plus vendorId/societyId', async () => {
-    const vendor = await prisma.vendor.create({ data: { societyId, name: `Session Vendor Co ${randomUUID()}` } });
+  it('a VENDOR session reports principalKind VENDOR plus vendorId/societyIds', async () => {
+    const vendor = await prisma.vendor.create({ data: { name: `Session Vendor Co ${randomUUID()}` } });
     vendorIds.push(vendor.id);
+    await prisma.vendorSocietyLink.create({ data: { vendorId: vendor.id, societyId } });
 
     const email = `vendor-session-${randomUUID()}@example.com`;
     const password = 'a reasonably long fixture password';
@@ -163,7 +164,7 @@ describe('GET /auth/session — principal-agnostic "who am I" (e2e)', () => {
       name: 'Session Vendor',
       email,
       vendorId: vendor.id,
-      societyId,
+      societyIds: [societyId],
     });
   });
 

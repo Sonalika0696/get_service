@@ -183,8 +183,9 @@ describe('Operator console — Phase 6.3 (e2e)', () => {
   describe('VENDOR/OPERATOR account provisioning', () => {
     it('provisions a VENDOR account that can enroll and log in for real, and rejects a second login for the same vendor', async () => {
       const { agent: operatorAgent } = await bootstrapOperatorAgent();
-      const vendor = await prisma.vendor.create({ data: { societyId: homeSocietyId, name: `Provisioned Vendor Co ${randomUUID()}` } });
+      const vendor = await prisma.vendor.create({ data: { name: `Provisioned Vendor Co ${randomUUID()}` } });
       extraVendorIds.push(vendor.id);
+      await prisma.vendorSocietyLink.create({ data: { vendorId: vendor.id, societyId: homeSocietyId } });
 
       const email = `provisioned-vendor-${randomUUID()}@example.com`;
       const provisionRes = await operatorAgent.post('/api/v1/operator/accounts').send({ name: 'Provisioned Vendor', email, principalKind: 'VENDOR', vendorId: vendor.id }).expect(201);
@@ -213,14 +214,14 @@ describe('Operator console — Phase 6.3 (e2e)', () => {
       const vendorAgent = request.agent(app.getHttpServer());
       await vendorAgent.post('/api/v1/auth/officer/login').send({ email, password, totpCode: loginCode }).expect(201);
       const meRes = await vendorAgent.get('/api/v1/vendors/me').expect(200);
-      expect(meRes.body).toEqual({ vendorId: vendor.id, societyId: homeSocietyId });
+      expect(meRes.body).toEqual({ vendorId: vendor.id, societyIds: [homeSocietyId] });
     });
 
     it('rejects VENDOR provisioning with no vendorId, and OPERATOR provisioning WITH one', async () => {
       const { agent: operatorAgent } = await bootstrapOperatorAgent();
       await operatorAgent.post('/api/v1/operator/accounts').send({ name: 'No Vendor', email: `no-vendor-${randomUUID()}@example.com`, principalKind: 'VENDOR' }).expect(400);
 
-      const vendor = await prisma.vendor.create({ data: { societyId: homeSocietyId, name: `Stray Vendor ${randomUUID()}` } });
+      const vendor = await prisma.vendor.create({ data: { name: `Stray Vendor ${randomUUID()}` } });
       extraVendorIds.push(vendor.id);
       await operatorAgent
         .post('/api/v1/operator/accounts')

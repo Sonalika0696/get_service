@@ -192,9 +192,10 @@ describe('Dashboard KPI aggregate (e2e)', () => {
     await prisma.occupancy.updateMany({ where: { userId: rejected.userId }, data: { ratificationStatus: RatificationStatus.REJECTED, ratificationDecidedAt: new Date() } });
 
     // 2 vendors in this society.
-    const vendorA = await prisma.vendor.create({ data: { societyId, name: `Dashboard Vendor A ${randomUUID()}` } });
-    const vendorB = await prisma.vendor.create({ data: { societyId, name: `Dashboard Vendor B ${randomUUID()}` } });
+    const vendorA = await prisma.vendor.create({ data: { name: `Dashboard Vendor A ${randomUUID()}` } });
+    const vendorB = await prisma.vendor.create({ data: { name: `Dashboard Vendor B ${randomUUID()}` } });
     vendorIds.push(vendorA.id, vendorB.id);
+    await prisma.vendorSocietyLink.createMany({ data: [vendorA.id, vendorB.id].map((vendorId) => ({ vendorId, societyId })) });
 
     // One ledger adjustment so accountBalances is non-trivial (mirrors
     // ledger.e2e-spec.ts's sign convention: debit goes negative, credit

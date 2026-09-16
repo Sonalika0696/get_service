@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../infra/prisma/prisma.service.js';
 import { Clock } from '../../infra/clock/clock.service.js';
 import { GstinApiService } from '../../infra/gstinapi/gstinapi.service.js';
@@ -35,11 +35,17 @@ export class VendorsService {
     private readonly gstinApi: GstinApiService,
   ) {}
 
+  /**
+   * Onboarding a vendor also creates its first VendorSocietyLink (Phase
+   * 7.1) — a vendor onboarded by society A's committee starts out linked
+   * to exactly society A, same as the pre-split behaviour where Vendor
+   * carried societyId directly. Multi-society linking (a vendor being
+   * added to a SECOND society) is 7.2/7.3 territory — not built here.
+   */
   async create(societyId: string, dto: CreateVendorDto): Promise<VendorDetail> {
     const vendor = await this.prisma.$transaction(async (tx) => {
       const created = await tx.vendor.create({
         data: {
-          societyId,
           name: dto.name,
           contactEmail: dto.contactEmail,
           contactPhone: dto.contactPhone,
@@ -49,6 +55,7 @@ export class VendorsService {
           gstin: dto.gstin,
         },
       });
+      await tx.vendorSocietyLink.create({ data: { vendorId: created.id, societyId } });
       await tx.vendorCategory.createMany({
         data: [...new Set(dto.categories)].map((category) => ({ vendorId: created.id, category })),
       });
@@ -57,11 +64,11 @@ export class VendorsService {
     return toDetail(vendor);
   }
 
-  /** Directory for the caller's own society only — never another society's vendors. */
+  /** Directory for the caller's own society only — never another society's vendors. Phase 7.1: scoped via VendorSocietyLink, not Vendor.societyId. */
   async listForSociety(societyId: string, filter: ListVendorsFilter): Promise<VendorDetail[]> {
     const vendors = await this.prisma.vendor.findMany({
       where: {
-        societyId,
+        societyLinks: { some: { societyId } },
         ...(filter.category ? { categories: { some: { category: { equals: filter.category, mode: 'insensitive' } } } } : {}),
         ...(filter.q ? { name: { contains: filter.q, mode: 'insensitive' } } : {}),
       },
@@ -157,11 +164,26 @@ export class VendorsService {
    * include phone/email in the response" — that shape is a display-time
    * filter, which is what this phase's brief rules out.
    */
-  async getResidentContact(vendorUserId: string, vendorSocietyId: string, residentId: string): Promise<{ id: string; name: string; phone: string | null; email: string }> {
+  /**
+   * Phase 7.1: a vendor can now be linked to several societies, so the
+   * caller must name WHICH one this lookup is scoped to (`societyId`) —
+   * validated as an actual VendorSocietyLink for this vendor before the
+   * consent + membership check below ever runs (a vendor can't probe a
+   * society it has no relationship with by just changing the query param).
+   */
+  async getResidentContact(vendorUserId: string, vendorId: string, societyId: string | undefined, residentId: string): Promise<{ id: string; name: string; phone: string | null; email: string }> {
+    if (!societyId) {
+      throw new BadRequestException('societyId query param is required');
+    }
+    const link = await this.prisma.vendorSocietyLink.findUnique({ where: { vendorId_societyId: { vendorId, societyId } } });
+    if (!link) {
+      throw new ForbiddenException('Vendor is not linked to this society');
+    }
+
     const resident = await this.prisma.user.findFirst({
       where: {
         id: residentId,
-        occupancies: { some: { tenureEndedAt: null, ratificationStatus: 'RATIFIED', flat: { societyId: vendorSocietyId } } },
+        occupancies: { some: { tenureEndedAt: null, ratificationStatus: 'RATIFIED', flat: { societyId } } },
         consentsGranted: { some: { granteeUserId: vendorUserId, purpose: 'CONTACT_INFO', revokedAt: null } },
       },
       select: { id: true, name: true, phone: true, email: true },
@@ -172,9 +194,14 @@ export class VendorsService {
     return resident;
   }
 
+  /** Phase 7.1: "does this vendor belong to this society" is now a VendorSocietyLink lookup, not a Vendor.societyId comparison. */
   private async getInternal(societyId: string, id: string): Promise<VendorModel & { categories: { category: string }[] }> {
     const vendor = await this.prisma.vendor.findUnique({ where: { id }, include: { categories: true } });
-    if (!vendor || vendor.societyId !== societyId) {
+    if (!vendor) {
+      throw new NotFoundException('Vendor not found');
+    }
+    const link = await this.prisma.vendorSocietyLink.findUnique({ where: { vendorId_societyId: { vendorId: id, societyId } } });
+    if (!link) {
       throw new NotFoundException('Vendor not found');
     }
     return vendor;

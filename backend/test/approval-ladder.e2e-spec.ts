@@ -102,6 +102,7 @@ describe('Approval ladder (e2e) — Phase 6.4 (M14)', () => {
   const societyIds: string[] = [];
   const userIds: string[] = [];
   const webhookEventIds: string[] = [];
+  const vendorIds: string[] = [];
 
   async function latestMailTo(email: string, subject: string): Promise<SendMailInput> {
     const matches = mailer.sent.filter((m) => m.to === email && m.subject === subject);
@@ -242,7 +243,9 @@ describe('Approval ladder (e2e) — Phase 6.4 (M14)', () => {
       const flat = await prisma.flat.create({ data: { societyId: society.id, unitNo: `L-${i}-${randomUUID().slice(0, 8)}`, maintenanceAmount: 1000 } });
       flatIds.push(flat.id);
     }
-    const vendor = await prisma.vendor.create({ data: { societyId: society.id, name: `${name} Vendor`, contactEmail: `vendor-${randomUUID()}@example.com` } });
+    const vendor = await prisma.vendor.create({ data: { name: `${name} Vendor`, contactEmail: `vendor-${randomUUID()}@example.com` } });
+    vendorIds.push(vendor.id);
+    await prisma.vendorSocietyLink.create({ data: { vendorId: vendor.id, societyId: society.id } });
     return { societyId: society.id, vendorId: vendor.id, flatIds };
   }
 
@@ -279,7 +282,7 @@ describe('Approval ladder (e2e) — Phase 6.4 (M14)', () => {
     await prisma.ledgerEntry.deleteMany({ where: { societyId: { in: societyIds } } });
     await prisma.account.deleteMany({ where: { societyId: { in: societyIds } } });
     await prisma.idempotencyKey.deleteMany({ where: { societyId: { in: societyIds } } });
-    await prisma.vendor.deleteMany({ where: { societyId: { in: societyIds } } });
+    await prisma.vendor.deleteMany({ where: { id: { in: vendorIds } } });
     await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.otp.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.role.deleteMany({ where: { userId: { in: userIds } } });

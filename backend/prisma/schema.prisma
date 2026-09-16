@@ -57,10 +57,11 @@ model User {
   principalKind PrincipalKind @default(RESIDENT)
 
   /// VENDOR principals only: the one Vendor identity this login is for (and,
-  /// transitively, its home society — see UserContextService.load()). Null
-  /// for RESIDENT/OPERATOR. A future vendor serving multiple societies still
-  /// has one User <-> one Vendor <-> many VendorSocietyLink once Phase 7
-  /// splits Vendor from VendorSocietyLink (see BACKEND_PLAN.md Phase 7).
+  /// transitively, its linked societies — see UserContextService.load()).
+  /// Null for RESIDENT/OPERATOR. Phase 7.1 split Vendor from
+  /// VendorSocietyLink: one User <-> one Vendor <-> many VendorSocietyLink,
+  /// so a vendor may now serve multiple societies (see VendorPrincipal's
+  /// `societyIds`).
   vendorId String? @unique
 
   /// Password + mandatory TOTP 2FA path for VENDOR/OPERATOR principals
@@ -180,7 +181,8 @@ model Society {
   roles         Role[]
   auditLogs     AuditLog[]
   jobBlogPosts  JobBlogPost[]
-  vendors       Vendor[]
+  /// Phase 7.1: goes through VendorSocietyLink now, not a direct Vendor.societyId FK — see VendorSocietyLink's doc comment.
+  vendorLinks   VendorSocietyLink[]
   polls         Poll[]
   accounts      Account[]
   ledgerEntries LedgerEntry[]
@@ -495,9 +497,16 @@ enum RatingSource {
   COMMITTEE
 }
 
+/// Phase 7.1 (BACKEND_PLAN.md Phase 7 item 1; DECISIONS_V2_SCOPE.md §7.6):
+/// Vendor is the vendor's GLOBAL identity — name, contact, geo, GSTIN, and
+/// the single global rating aggregate. It no longer carries a societyId: a
+/// vendor's presence in a given society is a VendorSocietyLink row, and one
+/// Vendor can now have many links (many societies). verificationTier stays
+/// here as the vendor's global tier for now — untouched by this split;
+/// refining it into per-society SOCIETY_ATTESTED semantics is Phase 7.3's
+/// job, not this one's.
 model Vendor {
   id           String   @id @default(cuid())
-  societyId    String
   name         String
   contactEmail String?
   contactPhone String?
@@ -510,16 +519,17 @@ model Vendor {
   gstin            String?
   gstinVerifiedAt  DateTime?
 
-  /// Denormalized rating aggregate, lazily recomputed by VendorsService
-  /// whenever a new VendorRating is created (see rate()) rather than
-  /// computed on every read.
+  /// Denormalized GLOBAL rating aggregate, lazily recomputed by
+  /// VendorsService whenever a new VendorRating is created (see rate())
+  /// rather than computed on every read. Unaffected by the Phase 7.1 split
+  /// — ratings are still keyed on vendorId, not on any one society.
   ratingAvg   Decimal @default(0) @db.Decimal(3, 2)
   ratingCount Int     @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  society        Society               @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  societyLinks   VendorSocietyLink[]
   categories     VendorCategory[]
   ratings        VendorRating[]
   accessRequests VendorAccessRequest[]
@@ -530,8 +540,27 @@ model Vendor {
   /// Phase 6.2 — the VENDOR-principal User that logs in as this vendor (see User.vendorId). Opposite side of a 1:1; the FK lives on User.
   linkedUser     User?
 
-  @@index([societyId])
   @@map("vendors")
+}
+
+/// Phase 7.1: a Vendor's presence/membership in one Society — the entity the
+/// Phase 6.2 doc comments on User.vendorId/VendorPrincipal already flagged
+/// as coming. Every vendor↔society validation that used to compare
+/// `vendor.societyId === societyId` becomes "does a VendorSocietyLink exist
+/// for (vendorId, societyId)" — see BulkBuyService.createOffer/
+/// createResidentPoll and VendorsService.getInternal.
+model VendorSocietyLink {
+  id        String   @id @default(cuid())
+  vendorId  String
+  societyId String
+  createdAt DateTime @default(now())
+
+  vendor  Vendor  @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  society Society @relation(fields: [societyId], references: [id], onDelete: Cascade)
+
+  @@unique([vendorId, societyId])
+  @@index([societyId])
+  @@map("vendor_society_links")
 }
 
 model VendorCategory {

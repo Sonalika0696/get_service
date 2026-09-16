@@ -21,6 +21,8 @@ interface SessionResponse {
   occupancyRole?: OccupancyRole;
   roleKinds?: RoleKind[];
   vendorId?: string;
+  /** VENDOR sessions only (Phase 7.1) — every society this vendor is currently linked to. */
+  societyIds?: string[];
 }
 
 /**
@@ -43,7 +45,7 @@ export class SessionController {
       case 'RESIDENT':
         return { ...base, societyId: currentUser.societyId, occupancyRole: currentUser.occupancyRole, roleKinds: currentUser.roleKinds };
       case 'VENDOR':
-        return { ...base, vendorId: currentUser.vendorId, societyId: currentUser.societyId };
+        return { ...base, vendorId: currentUser.vendorId, societyIds: currentUser.societyIds };
       case 'OPERATOR':
         return base;
     }

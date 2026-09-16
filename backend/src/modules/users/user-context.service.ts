@@ -10,8 +10,11 @@ import type { CurrentUserContext } from '../../common/types/current-user.js';
  *   RESIDENT — via their active occupancy (one user, one society in v1).
  *     No active occupancy means no context at all (null), same as before
  *     6.2 — a resident who has moved out still can't authenticate.
- *   VENDOR   — via User.vendorId -> Vendor (and Vendor.societyId as the
- *     vendor's home society). No linked/resolvable Vendor means no context.
+ *   VENDOR   — via User.vendorId -> Vendor, and (Phase 7.1) that Vendor's
+ *     linked societies via VendorSocietyLink -> `societyIds`. No
+ *     linked/resolvable Vendor means no context; a vendor may resolve to
+ *     zero societyIds (unlinked from every society) without that being an
+ *     auth failure — see VendorPrincipal's doc comment.
  *   OPERATOR — platform-level, no society scope, always resolvable once the
  *     User row exists.
  *
@@ -42,13 +45,14 @@ export class UserContextService {
       if (!user.vendorId) return null;
       const vendor = await this.prisma.vendor.findUnique({ where: { id: user.vendorId } });
       if (!vendor) return null;
+      const links = await this.prisma.vendorSocietyLink.findMany({ where: { vendorId: vendor.id }, select: { societyId: true } });
       return {
         principalKind: 'VENDOR',
         id: user.id,
         name: user.name,
         email: user.email,
         vendorId: vendor.id,
-        societyId: vendor.societyId,
+        societyIds: links.map((l) => l.societyId),
       };
     }
 

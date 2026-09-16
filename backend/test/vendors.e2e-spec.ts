@@ -137,11 +137,16 @@ describe('Vendors (e2e)', () => {
   });
 
   afterAll(async () => {
-    // FK-respecting cleanup, children before parents.
-    await prisma.vendorAccessRequest.deleteMany({ where: { vendor: { societyId: { in: [societyId, otherSocietyId] } } } });
-    await prisma.vendorRating.deleteMany({ where: { vendor: { societyId: { in: [societyId, otherSocietyId] } } } });
-    await prisma.vendorCategory.deleteMany({ where: { vendor: { societyId: { in: [societyId, otherSocietyId] } } } });
-    await prisma.vendor.deleteMany({ where: { societyId: { in: [societyId, otherSocietyId] } } });
+    // FK-respecting cleanup, children before parents. Phase 7.1: Vendor no
+    // longer carries societyId, so scope by the vendorIds this suite itself
+    // created (tracked in the array above) instead — cascade would clean up
+    // VendorCategory/VendorRating/VendorAccessRequest/VendorSocietyLink too,
+    // but these stay explicit for clarity/ordering with the rest of the block.
+    await prisma.vendorAccessRequest.deleteMany({ where: { vendorId: { in: vendorIds } } });
+    await prisma.vendorRating.deleteMany({ where: { vendorId: { in: vendorIds } } });
+    await prisma.vendorCategory.deleteMany({ where: { vendorId: { in: vendorIds } } });
+    await prisma.vendorSocietyLink.deleteMany({ where: { vendorId: { in: vendorIds } } });
+    await prisma.vendor.deleteMany({ where: { id: { in: vendorIds } } });
     await prisma.kycDocument.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.otp.deleteMany({ where: { userId: { in: userIds } } });
@@ -255,5 +260,83 @@ describe('Vendors (e2e)', () => {
 
     // KYC stub: any authenticated resident can record document metadata.
     await resident.agent.post('/api/v1/kyc/documents').send({ kind: 'ID_PROOF', fileName: 'aadhaar.pdf' }).expect(201);
+  });
+
+  /**
+   * Phase 7.1 (BACKEND_PLAN.md Phase 7 item 1): the whole point of splitting
+   * Vendor from VendorSocietyLink is that one vendor identity can now serve
+   * several societies. An offer may only be created for a vendor actually
+   * LINKED to the offer's society — this is the same rule bulk-buy always
+   * had (vendor.societyId === societyId), now expressed as a
+   * VendorSocietyLink existence check instead of a single-column compare.
+   */
+  it('an offer can be created for a vendor linked to the society, and is rejected for a society the vendor is NOT linked to', async () => {
+    const committeeA = await signupAndLogin(`vendor-multi-committee-a-${randomUUID()}@example.com`, societyId, flatIds[3], OccupancyRole.OWNER_OCCUPIER);
+    await makeCommittee(societyId, committeeA.userId);
+    const committeeB = await signupAndLogin(`vendor-multi-committee-b-${randomUUID()}@example.com`, otherSocietyId, otherFlatId, OccupancyRole.OWNER_OCCUPIER);
+    await makeCommittee(otherSocietyId, committeeB.userId);
+
+    // Onboarded in society A only; then manually linked to society B too
+    // (multi-society LINKING itself — adding a SECOND link to an existing
+    // vendor — is 7.2/7.3 self-service territory, not built in this phase;
+    // here we simulate the end state directly via Prisma, same as other
+    // suites poke fixture state that has no route yet).
+    const multiVendor = await committeeA.agent.post('/api/v1/vendors').send({ name: 'Multi-Society Movers', categories: ['moving'] }).expect(201);
+    const multiVendorId = (multiVendor.body as { id: string }).id;
+    vendorIds.push(multiVendorId);
+    await prisma.vendorSocietyLink.create({ data: { vendorId: multiVendorId, societyId: otherSocietyId } });
+
+    const futureIso = new Date(Date.now() + 86_400_000).toISOString();
+    const baseOffer = { category: 'Groceries', title: 'Bulk order', unitPrice: 500, discountLadder: [{ minN: 2, pct: 5 }], deadline: futureIso };
+
+    // Society B's committee CAN offer through the multi-society vendor —
+    // it's actually linked there now.
+    const okOffer = await committeeB.agent.post('/api/v1/offers').send({ ...baseOffer, vendorId: multiVendorId }).expect(201);
+    expect((okOffer.body as { vendorId: string }).vendorId).toBe(multiVendorId);
+
+    // A vendor onboarded ONLY in society A is rejected when society B's
+    // committee tries to offer through it — not linked there.
+    const soloVendor = await committeeA.agent.post('/api/v1/vendors').send({ name: 'Society A Only Plumbers', categories: ['plumbing'] }).expect(201);
+    const soloVendorId = (soloVendor.body as { id: string }).id;
+    vendorIds.push(soloVendorId);
+    await committeeB.agent.post('/api/v1/offers').send({ ...baseOffer, vendorId: soloVendorId }).expect(404);
+
+    // ...but society A's own committee CAN, through the very same vendor.
+    const ownSocietyOffer = await committeeA.agent.post('/api/v1/offers').send({ ...baseOffer, vendorId: soloVendorId }).expect(201);
+    expect((ownSocietyOffer.body as { vendorId: string }).vendorId).toBe(soloVendorId);
+  });
+
+  /**
+   * Phase 7.1: Vendor.ratingAvg/ratingCount stay the GLOBAL aggregate they
+   * always were — unaffected by a vendor now serving several societies.
+   * Residents of two DIFFERENT (both linked) societies rate the same
+   * vendor; the aggregate is one number, identical no matter which
+   * society's directory it's read from.
+   */
+  it('the global rating aggregate is unchanged by the vendor/society split — ratings from two different linked societies aggregate into one number', async () => {
+    const committeeA = await signupAndLogin(`vendor-rate-committee-a-${randomUUID()}@example.com`, societyId, flatIds[3], OccupancyRole.OWNER_OCCUPIER);
+    await makeCommittee(societyId, committeeA.userId);
+
+    const vendorRes = await committeeA.agent.post('/api/v1/vendors').send({ name: 'Cross-Society Rated Vendor', categories: ['cleaning'] }).expect(201);
+    const crossVendorId = (vendorRes.body as { id: string }).id;
+    vendorIds.push(crossVendorId);
+    await prisma.vendorSocietyLink.create({ data: { vendorId: crossVendorId, societyId: otherSocietyId } });
+
+    const residentA = await signupAndLogin(`vendor-rate-resident-a-${randomUUID()}@example.com`, societyId, flatIds[3], OccupancyRole.TENANT);
+    const residentB = await signupAndLogin(`vendor-rate-resident-b-${randomUUID()}@example.com`, otherSocietyId, otherFlatId, OccupancyRole.TENANT);
+
+    await residentA.agent.post(`/api/v1/vendors/${crossVendorId}/rate`).send({ rating: 4 }).expect(201);
+    const secondRate = await residentB.agent.post(`/api/v1/vendors/${crossVendorId}/rate`).send({ rating: 2 }).expect(201);
+    const rated = secondRate.body as { ratingAvg: string | number; ratingCount: number };
+    expect(rated.ratingCount).toBe(2);
+    expect(Number(rated.ratingAvg)).toBeCloseTo(3, 2);
+
+    // Read back from BOTH societies' directories — same global row, same numbers.
+    const fromA = (await residentA.agent.get(`/api/v1/vendors/${crossVendorId}`).expect(200)).body as { ratingAvg: string | number; ratingCount: number };
+    const fromB = (await residentB.agent.get(`/api/v1/vendors/${crossVendorId}`).expect(200)).body as { ratingAvg: string | number; ratingCount: number };
+    expect(fromA.ratingCount).toBe(2);
+    expect(fromB.ratingCount).toBe(2);
+    expect(Number(fromA.ratingAvg)).toBeCloseTo(3, 2);
+    expect(Number(fromB.ratingAvg)).toBeCloseTo(3, 2);
   });
 });

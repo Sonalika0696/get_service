@@ -120,8 +120,9 @@ describe('Identity — Phase 6.2 (e2e)', () => {
     const otherSociety = await prisma.society.create({ data: { name: 'Identity Test Society (other)', address: 'n/a' } });
     otherSocietyId = otherSociety.id;
 
-    const vendorRow = await prisma.vendor.create({ data: { societyId, name: 'Identity Test Vendor Co' } });
+    const vendorRow = await prisma.vendor.create({ data: { name: 'Identity Test Vendor Co' } });
     vendorRowId = vendorRow.id;
+    await prisma.vendorSocietyLink.create({ data: { vendorId: vendorRowId, societyId } });
   });
 
   afterAll(async () => {
@@ -248,11 +249,61 @@ describe('Identity — Phase 6.2 (e2e)', () => {
       expect(loginRes.headers['set-cookie']?.some((c: string) => c.startsWith(`${cookieName}=`))).toBe(true);
 
       // The session is a real VendorPrincipal — reaches the vendor-only identity route.
+      // Phase 7.1: `GET /vendors/me` returns `societyIds` (plural) now that
+      // a vendor can be linked to more than one society.
       const meRes = await agent.get('/api/v1/vendors/me').expect(200);
-      expect(meRes.body).toEqual({ vendorId: vendorRowId, societyId });
+      expect(meRes.body).toEqual({ vendorId: vendorRowId, societyIds: [societyId] });
 
       // ...but not a resident-only one.
       await agent.get('/api/v1/me').expect(403);
+    });
+
+    /**
+     * Phase 7.1 (BACKEND_PLAN.md Phase 7 item 1): a Vendor identity can now
+     * be linked to MORE than one society via VendorSocietyLink.
+     * VendorPrincipal.societyIds (and every route that echoes it) must
+     * reflect every link, not just one — this is the case the old
+     * single-`societyId` shape couldn't represent at all.
+     */
+    it('a vendor linked to TWO societies resolves both in societyIds, via GET /vendors/me and GET /auth/session', async () => {
+      const vendor = await prisma.vendor.create({ data: { name: `Multi-Society Vendor ${randomUUID()}` } });
+      extraVendorIds.push(vendor.id);
+      await prisma.vendorSocietyLink.createMany({
+        data: [
+          { vendorId: vendor.id, societyId },
+          { vendorId: vendor.id, societyId: otherSocietyId },
+        ],
+      });
+
+      const email = `multi-society-vendor-${randomUUID()}@example.com`;
+      const password = 'a multi society vendor passphrase';
+      const user = await prisma.user.create({
+        data: { name: 'Multi Society Vendor', email, principalKind: PrincipalKind.VENDOR, vendorId: vendor.id },
+      });
+      userIds.push(user.id);
+
+      await request(app.getHttpServer()).post('/api/v1/auth/officer/enroll/start').send({ email }).expect(204);
+      const startCode = extractOtpFromEmail(mailer.sent.filter((m) => m.to === email).at(-1)!);
+      const completeRes = await request(app.getHttpServer())
+        .post('/api/v1/auth/officer/enroll/complete')
+        .send({ email, code: startCode, password })
+        .expect(201);
+      const { totpSecret } = completeRes.body as { totpSecret: string };
+      const enrollCode = await generateTotpCode({ secret: totpSecret, strategy: 'totp' });
+      await request(app.getHttpServer()).post('/api/v1/auth/officer/enroll/verify-totp').send({ email, code: enrollCode }).expect(204);
+
+      const loginCode = await generateTotpCode({ secret: totpSecret, strategy: 'totp' });
+      const agent = request.agent(app.getHttpServer());
+      await agent.post('/api/v1/auth/officer/login').send({ email, password, totpCode: loginCode }).expect(201);
+
+      const meRes = await agent.get('/api/v1/vendors/me').expect(200);
+      const meBody = meRes.body as { vendorId: string; societyIds: string[] };
+      expect(meBody.vendorId).toBe(vendor.id);
+      expect([...meBody.societyIds].sort()).toEqual([societyId, otherSocietyId].sort());
+
+      const sessionRes = await agent.get('/api/v1/auth/session').expect(200);
+      const sessionBody = sessionRes.body as { societyIds: string[] };
+      expect([...sessionBody.societyIds].sort()).toEqual([societyId, otherSocietyId].sort());
     });
 
     it('an operator authenticates, reaches an operator-only route (a resident is 403d), and bypasses SocietyScopeGuard', async () => {
@@ -356,9 +407,10 @@ describe('Identity — Phase 6.2 (e2e)', () => {
 
     let linkedVendorId: string | null = null;
     if (principalKind === 'VENDOR') {
-      const vendor = await prisma.vendor.create({ data: { societyId, name: `Fixture Vendor ${randomUUID()}` } });
+      const vendor = await prisma.vendor.create({ data: { name: `Fixture Vendor ${randomUUID()}` } });
       extraVendorIds.push(vendor.id);
       linkedVendorId = vendor.id;
+      await prisma.vendorSocietyLink.create({ data: { vendorId: vendor.id, societyId } });
     }
 
     const user = await prisma.user.create({

@@ -3084,7 +3084,7 @@
             "description": ""
           }
         },
-        "summary": "Phase 6.2: a VENDOR principal's own identity echo — the same purpose\n`GET /me` serves for residents. Registered before `GET /:id` so \"me\"\nisn't swallowed as an :id param. Real vendor self-service (pricing\ncards, profile) is Phase 7.",
+        "summary": "Phase 6.2: a VENDOR principal's own identity echo — the same purpose\n`GET /me` serves for residents. Registered before `GET /:id` so \"me\"\nisn't swallowed as an :id param. Phase 7.1: `societyId` (singular)\nbecame `societyIds` — a vendor may now be linked to many societies.\nReal vendor self-service (pricing cards, profile) is Phase 7.2/7.3.",
         "tags": [
           "Vendors"
         ]
@@ -3101,6 +3101,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "societyId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -3108,7 +3116,7 @@
             "description": ""
           }
         },
-        "summary": "Phase 6.3: ConsentGrant enforced at query time — see\nVendorsService.getResidentContact's doc comment. Registered before\n`GET /:id` (same reason as `GET /me` above) so \"residents\" isn't\nswallowed as an :id param.",
+        "summary": "Phase 6.3: ConsentGrant enforced at query time — see\nVendorsService.getResidentContact's doc comment. Registered before\n`GET /:id` (same reason as `GET /me` above) so \"residents\" isn't\nswallowed as an :id param. Phase 7.1: a vendor may now be linked to\nseveral societies, so the caller must name WHICH one this lookup is\nscoped to via `?societyId=` — VendorsService.getResidentContact\nvalidates the caller is actually linked to it before doing anything\nelse, so a vendor can't probe a society it has no relationship with.",
         "tags": [
           "Vendors"
         ]

@@ -22,29 +22,38 @@ export class VendorsController {
   /**
    * Phase 6.2: a VENDOR principal's own identity echo — the same purpose
    * `GET /me` serves for residents. Registered before `GET /:id` so "me"
-   * isn't swallowed as an :id param. Real vendor self-service (pricing
-   * cards, profile) is Phase 7.
+   * isn't swallowed as an :id param. Phase 7.1: `societyId` (singular)
+   * became `societyIds` — a vendor may now be linked to many societies.
+   * Real vendor self-service (pricing cards, profile) is Phase 7.2/7.3.
    */
   @Get('me')
   @UseGuards(AuthGuard, PrincipalGuard)
   @VendorOnly()
-  async me(@CurrentUser() currentUser: CurrentUserContext): Promise<{ vendorId: string; societyId: string }> {
+  async me(@CurrentUser() currentUser: CurrentUserContext): Promise<{ vendorId: string; societyIds: string[] }> {
     const vendor = currentUser as VendorPrincipal;
-    return { vendorId: vendor.vendorId, societyId: vendor.societyId };
+    return { vendorId: vendor.vendorId, societyIds: vendor.societyIds };
   }
 
   /**
    * Phase 6.3: ConsentGrant enforced at query time — see
    * VendorsService.getResidentContact's doc comment. Registered before
    * `GET /:id` (same reason as `GET /me` above) so "residents" isn't
-   * swallowed as an :id param.
+   * swallowed as an :id param. Phase 7.1: a vendor may now be linked to
+   * several societies, so the caller must name WHICH one this lookup is
+   * scoped to via `?societyId=` — VendorsService.getResidentContact
+   * validates the caller is actually linked to it before doing anything
+   * else, so a vendor can't probe a society it has no relationship with.
    */
   @Get('residents/:residentId/contact')
   @UseGuards(AuthGuard, PrincipalGuard)
   @VendorOnly()
-  async residentContact(@CurrentUser() currentUser: CurrentUserContext, @Param('residentId') residentId: string) {
+  async residentContact(
+    @CurrentUser() currentUser: CurrentUserContext,
+    @Param('residentId') residentId: string,
+    @Query('societyId') societyId: string,
+  ) {
     const vendor = currentUser as VendorPrincipal;
-    return this.vendorsService.getResidentContact(vendor.id, vendor.societyId, residentId);
+    return this.vendorsService.getResidentContact(vendor.id, vendor.vendorId, societyId, residentId);
   }
 
   @Get()
