@@ -8,16 +8,35 @@ import { canTransitionTier } from './verification-tier.util.js';
 import type { CreateVendorDto } from './dto/create-vendor.dto.js';
 import type { RateVendorDto } from './dto/rate-vendor.dto.js';
 import type { VendorAccessRequestDto } from './dto/vendor-access-request.dto.js';
+import type { UpdateVendorProfileDto } from './dto/update-vendor-profile.dto.js';
 
-/** API-facing shape: the vendor plus its onboarded category list. */
-export type VendorDetail = VendorModel & { categories: string[] };
+/**
+ * API-facing shape: the vendor plus its onboarded category list — but with
+ * the settlement-account trio (Vendor.settlementAccountName/Number/Ifsc)
+ * deliberately stripped out. This is what residents, committees and the
+ * public pricing-card reader ever see of a vendor (BACKEND_PLAN.md Phase 7
+ * item 6): the vendor's payout destination is banking metadata for a future
+ * settlement, not directory content, and must never leak to anyone but the
+ * vendor itself. See VendorProfileDetail for the vendor's own, fuller view.
+ */
+export type VendorDetail = Omit<VendorModel, 'settlementAccountName' | 'settlementAccountNumber' | 'settlementIfsc'> & { categories: string[] };
+
+/** The vendor's OWN view of its profile (GET/PATCH /vendors/me/profile) — includes the settlement account fields VendorDetail strips out. */
+export type VendorProfileDetail = VendorModel & { categories: string[] };
 
 export interface ListVendorsFilter {
   category?: string;
   q?: string;
 }
 
+/** Public/committee/resident-facing projection — never includes the settlement account trio. */
 function toDetail(vendor: VendorModel & { categories: { category: string }[] }): VendorDetail {
+  const { categories, settlementAccountName: _settlementAccountName, settlementAccountNumber: _settlementAccountNumber, settlementIfsc: _settlementIfsc, ...rest } = vendor;
+  return { ...rest, categories: categories.map((c) => c.category) };
+}
+
+/** The vendor's own full profile projection — the only place settlementAccountNumber is ever returned. */
+function toProfileDetail(vendor: VendorModel & { categories: { category: string }[] }): VendorProfileDetail {
   const { categories, ...rest } = vendor;
   return { ...rest, categories: categories.map((c) => c.category) };
 }
@@ -192,6 +211,80 @@ export class VendorsService {
       throw new NotFoundException('Resident not found, not in your society, or has not granted contact-info consent');
     }
     return resident;
+  }
+
+  /**
+   * Phase 7.3 (BACKEND_PLAN.md Phase 7 item 6): the vendor's own profile —
+   * the ONLY read path that returns the settlement account trio. `vendorId`
+   * always comes from the caller's own VendorPrincipal (never a route
+   * param), so there is no way to address another vendor's row through this
+   * method at all.
+   */
+  async getOwnProfile(vendorId: string): Promise<VendorProfileDetail> {
+    return toProfileDetail(await this.getOwnVendorInternal(vendorId));
+  }
+
+  /**
+   * Vendor self-service profile update (BACKEND_PLAN.md Phase 7 items 6-7):
+   * contact/geo/radius, the settlement account destination, and the trade
+   * licence number. PATCH semantics — only fields present in `dto` are
+   * touched. Never logs `dto` (which may carry settlementAccountNumber):
+   * pino's request logging doesn't capture the body either (see
+   * app.module.ts's pinoHttp config), so the only way that value could ever
+   * reach a log is a future change adding one — don't.
+   */
+  async updateOwnProfile(vendorId: string, dto: UpdateVendorProfileDto): Promise<VendorProfileDetail> {
+    await this.getOwnVendorInternal(vendorId);
+    const updated = await this.prisma.vendor.update({
+      where: { id: vendorId },
+      data: {
+        ...(dto.contactEmail !== undefined ? { contactEmail: dto.contactEmail } : {}),
+        ...(dto.contactPhone !== undefined ? { contactPhone: dto.contactPhone } : {}),
+        ...(dto.latitude !== undefined ? { latitude: dto.latitude } : {}),
+        ...(dto.longitude !== undefined ? { longitude: dto.longitude } : {}),
+        ...(dto.radiusKm !== undefined ? { radiusKm: dto.radiusKm } : {}),
+        ...(dto.tradeLicenceNumber !== undefined ? { tradeLicenceNumber: dto.tradeLicenceNumber } : {}),
+        ...(dto.settlementAccountName !== undefined ? { settlementAccountName: dto.settlementAccountName } : {}),
+        ...(dto.settlementAccountNumber !== undefined ? { settlementAccountNumber: dto.settlementAccountNumber } : {}),
+        ...(dto.settlementIfsc !== undefined ? { settlementIfsc: dto.settlementIfsc } : {}),
+      },
+      include: { categories: true },
+    });
+    return toProfileDetail(updated);
+  }
+
+  /**
+   * Adds a category to the caller's OWN vendor (BACKEND_PLAN.md Phase 7
+   * item 6). Idempotent via upsert — VendorCategory's
+   * `@@unique([vendorId, category])` means re-adding an existing category
+   * is a no-op, not a 400/409, matching how self-service toggles elsewhere
+   * in this phase (e.g. Milestone/PayoutAuthorisation's upsert-based no-op)
+   * behave.
+   */
+  async addOwnCategory(vendorId: string, category: string): Promise<VendorDetail> {
+    await this.getOwnVendorInternal(vendorId);
+    await this.prisma.vendorCategory.upsert({
+      where: { vendorId_category: { vendorId, category } },
+      create: { vendorId, category },
+      update: {},
+    });
+    return toDetail(await this.getOwnVendorInternal(vendorId));
+  }
+
+  /** Removes a category from the caller's OWN vendor. Idempotent — removing a category that isn't there deletes zero rows rather than 404ing. */
+  async removeOwnCategory(vendorId: string, category: string): Promise<VendorDetail> {
+    await this.getOwnVendorInternal(vendorId);
+    await this.prisma.vendorCategory.deleteMany({ where: { vendorId, category } });
+    return toDetail(await this.getOwnVendorInternal(vendorId));
+  }
+
+  /** Loads the caller's own vendor by id (no society scoping — a VENDOR principal's self-service surface isn't society-scoped at all). 404s if the vendorId on the session somehow doesn't resolve (should never happen for a real session). */
+  private async getOwnVendorInternal(vendorId: string): Promise<VendorModel & { categories: { category: string }[] }> {
+    const vendor = await this.prisma.vendor.findUnique({ where: { id: vendorId }, include: { categories: true } });
+    if (!vendor) {
+      throw new NotFoundException('Vendor not found');
+    }
+    return vendor;
   }
 
   /** Phase 7.1: "does this vendor belong to this society" is now a VendorSocietyLink lookup, not a Vendor.societyId comparison. */

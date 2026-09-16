@@ -483,8 +483,12 @@ model JobBlogPost {
 /// UNVERIFIED: just onboarded by a committee member, no external check yet.
 /// SOCIETY_ATTESTED: the vendor's GSTIN came back Active from the GSTIN
 ///   lookup at approval time — the society is vouching for it.
-/// PLATFORM_AUDITED: a stronger, platform-level audit (out of Phase 2 scope
-///   to produce — the tier exists so the state machine has a next step).
+/// PLATFORM_AUDITED: a stronger, platform-level audit. Phase 7.3
+///   (BACKEND_PLAN.md Phase 7 item 8) implements the promotion itself as an
+///   OPERATOR-only manual action (POST /operator/vendors/:vendorId/promote)
+///   — there is still no automated audit pipeline behind it, only the tier
+///   and the guard that a vendor must already be SOCIETY_ATTESTED with a
+///   GSTIN or trade licence on file before an operator can promote it.
 /// Transitions are forward-only: UNVERIFIED -> SOCIETY_ATTESTED -> PLATFORM_AUDITED.
 enum VerificationTier {
   UNVERIFIED
@@ -518,6 +522,30 @@ model Vendor {
   verificationTier VerificationTier @default(UNVERIFIED)
   gstin            String?
   gstinVerifiedAt  DateTime?
+
+  /// Phase 7.3 (BACKEND_PLAN.md Phase 7 item 7): trade licence capture
+  /// alongside the existing GSTIN. Mirrors gstin/gstinVerifiedAt's shape —
+  /// captured now via the vendor's own profile self-service; there is no
+  /// registry-lookup integration in this phase (unlike gstinApi for GSTIN),
+  /// so tradeLicenceVerifiedAt is a manual/stubbed field nothing in this
+  /// phase sets automatically.
+  tradeLicenceNumber     String?
+  tradeLicenceVerifiedAt DateTime?
+
+  /// Phase 7.3 (BACKEND_PLAN.md Phase 7 item 6): the vendor's own
+  /// self-declared payout destination for a future (still-stubbed)
+  /// RazorpayX settlement — see Payout.razorpayPayoutRef's doc comment for
+  /// how stubbed the actual money movement remains. This is metadata the
+  /// vendor supplies about ITS OWN account via an authenticated route, not a
+  /// credential and not something this phase verifies or moves money
+  /// against — VendorsService never logs settlementAccountNumber (pino's
+  /// default request logging doesn't include the body either — see
+  /// app.module.ts's pinoHttp config). Never exposed through the
+  /// resident/committee-facing VendorDetail shape — see
+  /// VendorsService.toDetail's doc comment.
+  settlementAccountName   String?
+  settlementAccountNumber String?
+  settlementIfsc          String?
 
   /// Denormalized GLOBAL rating aggregate, lazily recomputed by
   /// VendorsService whenever a new VendorRating is created (see rate())

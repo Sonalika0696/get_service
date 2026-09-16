@@ -1,6 +1,19 @@
 {
   "components": {
     "schemas": {
+      "AddVendorCategoryDto": {
+        "properties": {
+          "category": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "category"
+        ],
+        "type": "object"
+      },
       "AssignRoleDto": {
         "properties": {
           "kind": {
@@ -824,6 +837,51 @@
           },
           "name": {
             "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateVendorProfileDto": {
+        "properties": {
+          "contactEmail": {
+            "format": "email",
+            "type": "string"
+          },
+          "contactPhone": {
+            "maxLength": 30,
+            "type": "string"
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "radiusKm": {
+            "description": "Service radius in km — matches Vendor.radiusKm's `@db.Decimal(6, 2)`.",
+            "minimum": 1,
+            "type": "number"
+          },
+          "settlementAccountName": {
+            "description": "Settlement account — the vendor's OWN payout destination, self-declared\nvia this authenticated route (BACKEND_PLAN.md Phase 7 item 6). This is\nmetadata for a still-stubbed future RazorpayX payout, not a credential:\nnothing here is verified or used to move money in this phase. See\nVendor.settlementAccountNumber's schema doc comment for why it's never\nlogged and never exposed through the resident/committee-facing\nVendorDetail shape.",
+            "maxLength": 200,
+            "minLength": 2,
+            "type": "string"
+          },
+          "settlementAccountNumber": {
+            "pattern": "^[0-9]{6,20}$",
+            "type": "string"
+          },
+          "settlementIfsc": {
+            "description": "Standard Indian IFSC shape: 4 letters, a literal 0, then 6 alphanumerics.",
+            "pattern": "^[A-Z]{4}0[A-Z0-9]{6}$",
+            "type": "string"
+          },
+          "tradeLicenceNumber": {
+            "description": "Self-declared trade licence number, captured alongside the existing\nGSTIN (BACKEND_PLAN.md Phase 7 item 7). Mirrors gstin: captured here,\nverified (tradeLicenceVerifiedAt) only through a manual/stubbed path —\nno registry integration in this phase.",
+            "maxLength": 50,
             "minLength": 1,
             "type": "string"
           }
@@ -2562,6 +2620,36 @@
         ]
       }
     },
+    "/api/v1/operator/vendors/{vendorId}/promote": {
+      "post": {
+        "operationId": "OperatorVendorsController_promote",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "vendorId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "OperatorVendors"
+        ]
+      }
+    },
     "/api/v1/payments/orders": {
       "post": {
         "operationId": "PaymentsController_createOrder",
@@ -3567,6 +3655,121 @@
           }
         },
         "summary": "Phase 6.2: a VENDOR principal's own identity echo — the same purpose\n`GET /me` serves for residents. Registered before `GET /:id` so \"me\"\nisn't swallowed as an :id param. Phase 7.1: `societyId` (singular)\nbecame `societyIds` — a vendor may now be linked to many societies.\nReal vendor self-service (pricing cards, profile) is Phase 7.2/7.3.",
+        "tags": [
+          "Vendors"
+        ]
+      }
+    },
+    "/api/v1/vendors/me/categories": {
+      "post": {
+        "operationId": "VendorsController_addMyCategory",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddVendorCategoryDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Adds one category to the caller's own vendor listing.",
+        "tags": [
+          "Vendors"
+        ]
+      }
+    },
+    "/api/v1/vendors/me/categories/{category}": {
+      "delete": {
+        "operationId": "VendorsController_removeMyCategory",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "category",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Removes one category from the caller's own vendor listing.",
+        "tags": [
+          "Vendors"
+        ]
+      }
+    },
+    "/api/v1/vendors/me/profile": {
+      "get": {
+        "operationId": "VendorsController_myProfile",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Phase 7.3 (BACKEND_PLAN.md Phase 7 item 6): the vendor's own profile,\nincluding the settlement account trio — never exposed via the\nresident/committee-facing routes below (see VendorsService.toDetail's\ndoc comment). Registered before `GET /:id` (same reason as `GET /me`\nabove) so `me` isn't swallowed as an :id param.",
+        "tags": [
+          "Vendors"
+        ]
+      },
+      "patch": {
+        "operationId": "VendorsController_updateMyProfile",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateVendorProfileDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Vendor self-service profile update — contact/geo/radius, trade licence, and the settlement account destination (PATCH semantics: only sent fields change).",
         "tags": [
           "Vendors"
         ]

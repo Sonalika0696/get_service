@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { PrincipalGuard } from '../../common/guards/principal.guard.js';
@@ -13,7 +13,9 @@ import type { VendorAccessRequestModel } from '../../generated/prisma/models.js'
 import { CreateVendorDto } from './dto/create-vendor.dto.js';
 import { RateVendorDto } from './dto/rate-vendor.dto.js';
 import { VendorAccessRequestDto } from './dto/vendor-access-request.dto.js';
-import { VendorsService, type VendorDetail } from './vendors.service.js';
+import { UpdateVendorProfileDto } from './dto/update-vendor-profile.dto.js';
+import { AddVendorCategoryDto } from './dto/add-vendor-category.dto.js';
+import { VendorsService, type VendorDetail, type VendorProfileDetail } from './vendors.service.js';
 
 @Controller('vendors')
 export class VendorsController {
@@ -54,6 +56,48 @@ export class VendorsController {
   ) {
     const vendor = currentUser as VendorPrincipal;
     return this.vendorsService.getResidentContact(vendor.id, vendor.vendorId, societyId, residentId);
+  }
+
+  /**
+   * Phase 7.3 (BACKEND_PLAN.md Phase 7 item 6): the vendor's own profile,
+   * including the settlement account trio — never exposed via the
+   * resident/committee-facing routes below (see VendorsService.toDetail's
+   * doc comment). Registered before `GET /:id` (same reason as `GET /me`
+   * above) so `me` isn't swallowed as an :id param.
+   */
+  @Get('me/profile')
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @VendorOnly()
+  async myProfile(@CurrentUser() currentUser: CurrentUserContext): Promise<VendorProfileDetail> {
+    const vendor = currentUser as VendorPrincipal;
+    return this.vendorsService.getOwnProfile(vendor.vendorId);
+  }
+
+  /** Vendor self-service profile update — contact/geo/radius, trade licence, and the settlement account destination (PATCH semantics: only sent fields change). */
+  @Patch('me/profile')
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @VendorOnly()
+  async updateMyProfile(@CurrentUser() currentUser: CurrentUserContext, @Body() dto: UpdateVendorProfileDto): Promise<VendorProfileDetail> {
+    const vendor = currentUser as VendorPrincipal;
+    return this.vendorsService.updateOwnProfile(vendor.vendorId, dto);
+  }
+
+  /** Adds one category to the caller's own vendor listing. */
+  @Post('me/categories')
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @VendorOnly()
+  async addMyCategory(@CurrentUser() currentUser: CurrentUserContext, @Body() dto: AddVendorCategoryDto): Promise<VendorDetail> {
+    const vendor = currentUser as VendorPrincipal;
+    return this.vendorsService.addOwnCategory(vendor.vendorId, dto.category);
+  }
+
+  /** Removes one category from the caller's own vendor listing. */
+  @Delete('me/categories/:category')
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @VendorOnly()
+  async removeMyCategory(@CurrentUser() currentUser: CurrentUserContext, @Param('category') category: string): Promise<VendorDetail> {
+    const vendor = currentUser as VendorPrincipal;
+    return this.vendorsService.removeOwnCategory(vendor.vendorId, category);
   }
 
   @Get()
