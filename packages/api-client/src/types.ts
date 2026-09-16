@@ -244,3 +244,81 @@ export type MeResponse = {
   occupancyRole: string;
   roleKinds: string[];
 };
+
+/** Matches backend/prisma/schema.prisma:enum RoleKind. */
+export type RoleKind = 'COMMITTEE' | 'TREASURER' | 'DEPUTY_TREASURER';
+
+// ------------ Approvals inbox (M14 governance ladder, FRONTEND_PLAN §3.2) ------------
+
+/**
+ * Kinds of pending items in a committee's approvals inbox. Each maps to a
+ * concrete backend action endpoint (see useAuthorise*):
+ *
+ *   PAYOUT        - POST /bookings/:id/payout/authorise         (TREASURER)
+ *   MILESTONE     - POST /bookings/:id/milestones/:mid/authorise (TREASURER)
+ *   RETENTION     - POST /bookings/:id/retention/release        (TREASURER)
+ *   RATIFICATION  - flat-claim ratification (committee), backend not shipped
+ *   CORPUS        - cross-pocket / FD placement, backend not shipped
+ */
+export type ApprovalKind =
+  | 'PAYOUT'
+  | 'MILESTONE'
+  | 'RETENTION'
+  | 'RATIFICATION'
+  | 'CORPUS';
+
+export type ApprovalItem = {
+  id: string;
+  kind: ApprovalKind;
+  title: string;
+  /** One-line rationale — like BillLine.basis. */
+  basis: string;
+  counterparty: string;
+  amountMinor: number | null;
+  currency: string;
+  createdAt: string;
+  dueOn: string | null;
+  /** How many distinct role-holder approvals the ladder requires. */
+  requiredApprovers: number;
+  /** How many have signed off already. */
+  collectedApprovers: number;
+  /** True if the calling user has already approved this item. */
+  currentUserApproved: boolean;
+  /** Which RoleKind can act on this — used to render "for treasurers" etc. */
+  requiresRole: RoleKind;
+  /**
+   * Where the item lives. The mobile client turns this into a call to the
+   * right backend POST route (see useAuthoriseX in mobile/src/hooks).
+   */
+  actionRef:
+    | { kind: 'PAYOUT'; bookingId: string }
+    | { kind: 'MILESTONE'; bookingId: string; milestoneId: string }
+    | { kind: 'RETENTION'; bookingId: string }
+    | { kind: 'RATIFICATION'; claimId: string }
+    | { kind: 'CORPUS'; movementId: string };
+};
+
+export type ApprovalsResponse = {
+  asOf: string;
+  items: ApprovalItem[];
+};
+
+// ---- Shipped booking actions ----
+
+/**
+ * All three shipped authorise routes take no body — the caller identity comes
+ * from the session, the target ids come from the URL. Placeholders exist here
+ * so a future add (e.g. an optional `note` field) has a home to grow into.
+ */
+export type AuthorisePayoutBody = Record<string, never>;
+export type AuthoriseMilestoneBody = Record<string, never>;
+export type ReleaseRetentionBody = Record<string, never>;
+
+/** BookingStatus subset the client actually reads. */
+export type BookingStatus = 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+
+/** PayoutStatus subset the client actually reads. */
+export type PayoutStatus = 'PENDING' | 'AUTHORISED' | 'PAID';
+
+/** MilestoneStatus subset the client actually reads. */
+export type MilestoneStatus = 'PENDING' | 'AUTHORISED' | 'PAID';
