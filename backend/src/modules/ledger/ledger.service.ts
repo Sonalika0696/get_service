@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../infra/prisma/prisma.service.js';
+import { Clock } from '../../infra/clock/clock.service.js';
 import { Prisma } from '../../generated/prisma/client.js';
 import { AccountKind, SocietyStatus } from '../../generated/prisma/enums.js';
 
@@ -71,6 +72,50 @@ export interface RebuildResult {
   report: BalanceVerificationReport;
 }
 
+/** One day's bucket in a GET /ledger/cashflow series — see LedgerService.cashflow's doc comment for the exact income/expense/net definition. */
+export interface CashflowBucket {
+  /** UTC calendar day, `YYYY-MM-DD`. */
+  date: string;
+  income: string;
+  expense: string;
+  net: string;
+}
+
+/** The `range` values GET /ledger/cashflow accepts, each mapped to a fixed number of trailing UTC days — see CASHFLOW_RANGE_DAYS. */
+export type CashflowRange = '7d' | '30d' | '90d' | '12m';
+
+export interface CashflowSeries {
+  range: CashflowRange;
+  /** Inclusive UTC start date of the window, `YYYY-MM-DD`. */
+  from: string;
+  /** Inclusive UTC end date of the window (today, in UTC), `YYYY-MM-DD`. */
+  to: string;
+  series: CashflowBucket[];
+}
+
+/**
+ * Fixed day-count per accepted `range` value — the whole bound on
+ * GET /ledger/cashflow's scan: the window can never exceed 366 days
+ * (the `12m` case), so there is no unbounded-range query to guard against
+ * separately.
+ */
+const CASHFLOW_RANGE_DAYS: Record<CashflowRange, number> = {
+  '7d': 7,
+  '30d': 30,
+  '90d': 90,
+  '12m': 366,
+};
+const DEFAULT_CASHFLOW_RANGE: CashflowRange = '30d';
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function isCashflowRange(value: string): value is CashflowRange {
+  return value === '7d' || value === '30d' || value === '90d' || value === '12m';
+}
+
+function toUtcDayKey(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
 /**
  * The escrow ledger's append-only double-entry posting primitive (Phase
  * 4A — see schema.prisma's Ledger section doc comment for the balance
@@ -87,6 +132,7 @@ export class LedgerService {
     private readonly prisma: PrismaService,
     private readonly idempotency: IdempotencyService,
     private readonly auditService: AuditService,
+    private readonly clock: Clock,
   ) {}
 
   /** Idempotent per [societyId, kind] — the canonical account for a kind is created lazily on first use. */
@@ -318,5 +364,97 @@ export class LedgerService {
       return { status: 201, body: entry };
     });
     return { entry: body, replayed };
+  }
+
+  /**
+   * Backs `GET /ledger/cashflow`: a day-bucketed income/expense/net
+   * timeseries for the caller's society, for the web console's CashflowCard.
+   *
+   * Definition (derived from schema.prisma's Ledger file-level doc comment,
+   * not invented): money only enters or leaves the society's closed set of
+   * accounts by crossing the EXTERNAL account (the PSP/bank boundary).
+   * Debiting EXTERNAL means money is entering (some internal account is
+   * credited); crediting EXTERNAL means money is leaving (some internal
+   * account was debited). So, per LedgerEntry:
+   *   - income  = amount, when debitAccountId's account.kind  === EXTERNAL
+   *   - expense = amount, when creditAccountId's account.kind === EXTERNAL
+   *   - net     = income - expense
+   * debitAccountId and creditAccountId are always different accounts, so an
+   * entry can only ever hit one of these branches (or neither, if both legs
+   * are non-EXTERNAL, e.g. a BULK_BUY -> RETENTION internal move) — no entry
+   * is ever double-counted as both income and expense.
+   *
+   * Reconciliation: every posting keeps the sum of ALL account balances
+   * (including EXTERNAL) at exactly 0, since a transfer decrements one
+   * account and increments another by the same amount and every account
+   * starts at 0. So the sum of non-EXTERNAL balances is always
+   * -EXTERNAL.balance, and the *change* in the sum of non-EXTERNAL balances
+   * over a window equals -(change in EXTERNAL.balance) over that window.
+   * EXTERNAL.balance moves by (creditsToExternal - debitsFromExternal) =
+   * (expense - income) over the window, so the change in the non-EXTERNAL
+   * total = income - expense = the sum of `net` over every bucket. Internal
+   * transfers (both legs non-EXTERNAL) touch neither income/expense nor the
+   * non-EXTERNAL total, so they can't break this identity.
+   *
+   * `range` selects a fixed trailing window of whole UTC days ending today
+   * (today included) — see CASHFLOW_RANGE_DAYS for the accepted values and
+   * day counts; an unrecognised value is a 400. The window is bounded by
+   * construction (max 366 days for `12m`), so there's no separate cap to
+   * enforce. Buckets are always returned for every day in the window, in
+   * order, even ones with zero postings.
+   */
+  async cashflow(societyId: string, rangeParam?: string): Promise<CashflowSeries> {
+    if (rangeParam !== undefined && !isCashflowRange(rangeParam)) {
+      throw new BadRequestException(`range must be one of ${Object.keys(CASHFLOW_RANGE_DAYS).join(', ')}`);
+    }
+    const range: CashflowRange = rangeParam === undefined ? DEFAULT_CASHFLOW_RANGE : rangeParam;
+    const days = CASHFLOW_RANGE_DAYS[range];
+
+    const now = this.clock.now();
+    const endExclusive = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+    const startInclusive = new Date(endExclusive.getTime() - days * MS_PER_DAY);
+
+    const buckets = new Map<string, { income: Decimal; expense: Decimal }>();
+    for (let t = startInclusive.getTime(); t < endExclusive.getTime(); t += MS_PER_DAY) {
+      buckets.set(toUtcDayKey(new Date(t)), { income: new Decimal(0), expense: new Decimal(0) });
+    }
+
+    const externalAccount = await this.prisma.account.findUnique({ where: { societyId_kind: { societyId, kind: AccountKind.EXTERNAL } } });
+
+    if (externalAccount) {
+      const entries = await this.prisma.ledgerEntry.findMany({
+        where: { societyId, ts: { gte: startInclusive, lt: endExclusive } },
+        select: { ts: true, amount: true, debitAccountId: true, creditAccountId: true },
+      });
+
+      for (const entry of entries) {
+        const isIncome = entry.debitAccountId === externalAccount.id;
+        const isExpense = entry.creditAccountId === externalAccount.id;
+        if (!isIncome && !isExpense) continue; // internal transfer — neither income nor expense
+
+        const key = toUtcDayKey(entry.ts);
+        const bucket = buckets.get(key);
+        if (!bucket) continue; // defensive — ts should always fall inside [startInclusive, endExclusive)
+
+        if (isIncome) bucket.income = bucket.income.plus(entry.amount);
+        else bucket.expense = bucket.expense.plus(entry.amount);
+      }
+    }
+
+    const series: CashflowBucket[] = [...buckets.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([date, { income, expense }]) => ({
+        date,
+        income: income.toString(),
+        expense: expense.toString(),
+        net: income.minus(expense).toString(),
+      }));
+
+    return {
+      range,
+      from: series[0]?.date ?? toUtcDayKey(startInclusive),
+      to: series.at(-1)?.date ?? toUtcDayKey(new Date(endExclusive.getTime() - MS_PER_DAY)),
+      series,
+    };
   }
 }

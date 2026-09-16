@@ -10,7 +10,14 @@ import type { ResidentPrincipal } from '../../common/types/current-user.js';
 import { RoleKind } from '../../generated/prisma/enums.js';
 import type { LedgerEntryModel } from '../../generated/prisma/models.js';
 import { PostAdjustmentDto } from './dto/post-adjustment.dto.js';
-import { LedgerService, type AccountBalance, type BalanceAssertionSummary, type BalanceVerificationReport, type RebuildResult } from './ledger.service.js';
+import {
+  LedgerService,
+  type AccountBalance,
+  type BalanceAssertionSummary,
+  type BalanceVerificationReport,
+  type CashflowSeries,
+  type RebuildResult,
+} from './ledger.service.js';
 import { ReconciliationService, type ReconciliationReport } from './reconciliation.service.js';
 
 @Controller('ledger')
@@ -48,6 +55,20 @@ export class LedgerController {
   @UseGuards(AuthGuard)
   async verify(@CurrentResident() currentUser: ResidentPrincipal): Promise<BalanceVerificationReport> {
     return this.ledgerService.verifyBalances(currentUser.societyId);
+  }
+
+  /**
+   * Dated income/expense/net timeseries for the web console's CashflowCard
+   * — see LedgerService.cashflow's doc comment for the exact definition and
+   * the `range` contract. Same gate as `GET /ledger` (COMMITTEE-visible
+   * aggregates, never per-resident rows).
+   */
+  @Get('cashflow')
+  @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
+  @ResidentOnly()
+  @Roles(RoleKind.COMMITTEE)
+  async cashflow(@CurrentResident() currentUser: ResidentPrincipal, @Query('range') range?: string): Promise<CashflowSeries> {
+    return this.ledgerService.cashflow(currentUser.societyId, range);
   }
 
   @Get('reconciliation')

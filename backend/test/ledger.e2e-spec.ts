@@ -290,4 +290,134 @@ describe('Ledger (e2e)', () => {
     const verifyRes = await committee.agent.get('/api/v1/ledger').expect(200);
     expect((verifyRes.body as LedgerAggregateBody).balancesIntact).toBe(true);
   });
+
+  describe('GET /ledger/cashflow', () => {
+    /**
+     * Posts a LedgerEntry directly (bypassing LedgerService.post, which
+     * always stamps `ts = now()`) so the fixture can backdate postings to
+     * known days, same rationale as signupAndLogin backdating ratification
+     * above. Mirrors LedgerService.postWithin exactly (upsert both
+     * accounts by kind, create the entry with the given `ts`, then move
+     * both accounts' cached balances) so balancesIntact stays true for the
+     * rest of the suite.
+     */
+    async function postDated(debitKind: AccountKind, creditKind: AccountKind, amount: number, reasonCode: string, ts: Date) {
+      return prisma.$transaction(async (tx) => {
+        const debitAccount = await tx.account.upsert({
+          where: { societyId_kind: { societyId, kind: debitKind } },
+          update: {},
+          create: { societyId, kind: debitKind },
+        });
+        const creditAccount = await tx.account.upsert({
+          where: { societyId_kind: { societyId, kind: creditKind } },
+          update: {},
+          create: { societyId, kind: creditKind },
+        });
+        const entry = await tx.ledgerEntry.create({
+          data: { societyId, debitAccountId: debitAccount.id, creditAccountId: creditAccount.id, amount, reasonCode, ts },
+        });
+        await tx.account.update({ where: { id: debitAccount.id }, data: { balance: { decrement: amount } } });
+        await tx.account.update({ where: { id: creditAccount.id }, data: { balance: { increment: amount } } });
+        return entry;
+      });
+    }
+
+    function daysAgoUtcNoon(daysAgo: number): Date {
+      const now = new Date();
+      return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysAgo, 12, 0, 0));
+    }
+
+    interface CashflowBucketBody {
+      date: string;
+      income: string;
+      expense: string;
+      net: string;
+    }
+    interface CashflowSeriesBody {
+      range: string;
+      from: string;
+      to: string;
+      series: CashflowBucketBody[];
+    }
+
+    it('buckets an escrow fund-in and a vendor payout on different known days, with net reconciling to the SOCIETY_MASTER balance change over the window', async () => {
+      const committee = await signupAndLogin(`ledger-cashflow-committee-${randomUUID()}@example.com`, flatIds[0], OccupancyRole.OWNER_OCCUPIER);
+      await makeRole(committee.userId, RoleKind.COMMITTEE);
+
+      const fundInDate = daysAgoUtcNoon(2);
+      const payoutDate = daysAgoUtcNoon(0);
+      const fundInKey = fundInDate.toISOString().slice(0, 10);
+      const payoutKey = payoutDate.toISOString().slice(0, 10);
+
+      const masterBefore = (await prisma.account.findUnique({ where: { societyId_kind: { societyId, kind: AccountKind.SOCIETY_MASTER } } }))?.balance ?? 0;
+
+      // Escrow fund-in: money enters the society (debits EXTERNAL, credits SOCIETY_MASTER) — income.
+      await postDated(AccountKind.EXTERNAL, AccountKind.SOCIETY_MASTER, 1200, 'TEST_CASHFLOW_FUNDIN', fundInDate);
+      // Vendor payout: money leaves the society (debits SOCIETY_MASTER, credits EXTERNAL) — expense.
+      await postDated(AccountKind.SOCIETY_MASTER, AccountKind.EXTERNAL, 450, 'TEST_CASHFLOW_PAYOUT', payoutDate);
+
+      const masterAfter = (await prisma.account.findUnique({ where: { societyId_kind: { societyId, kind: AccountKind.SOCIETY_MASTER } } }))?.balance ?? 0;
+
+      const res = await committee.agent.get('/api/v1/ledger/cashflow').query({ range: '7d' }).expect(200);
+      const body = res.body as CashflowSeriesBody;
+
+      expect(body.range).toBe('7d');
+      expect(body.series).toHaveLength(7);
+      // Contiguous, ascending UTC calendar days, ending today.
+      for (let i = 1; i < body.series.length; i++) {
+        expect(body.series[i].date > body.series[i - 1].date).toBe(true);
+      }
+      expect(body.to).toBe(body.series.at(-1)?.date);
+
+      const fundInBucket = body.series.find((b) => b.date === fundInKey);
+      const payoutBucket = body.series.find((b) => b.date === payoutKey);
+      expect(fundInBucket).toBeDefined();
+      expect(payoutBucket).toBeDefined();
+
+      expect(Number(fundInBucket?.income)).toBe(1200);
+      expect(Number(fundInBucket?.expense)).toBe(0);
+      expect(Number(fundInBucket?.net)).toBe(1200);
+
+      expect(Number(payoutBucket?.income)).toBe(0);
+      expect(Number(payoutBucket?.expense)).toBe(450);
+      expect(Number(payoutBucket?.net)).toBe(-450);
+
+      // No other bucket in the window picked up either posting (no double counting).
+      for (const bucket of body.series) {
+        if (bucket.date === fundInKey || bucket.date === payoutKey) continue;
+        expect(Number(bucket.income)).toBe(0);
+        expect(Number(bucket.expense)).toBe(0);
+      }
+
+      const sumNet = body.series.reduce((total, b) => total + Number(b.net), 0);
+      expect(sumNet).toBe(750); // 1200 income - 450 expense
+
+      // Reconciliation: net summed over the whole window equals the change
+      // in the non-EXTERNAL (here, SOCIETY_MASTER) balance over that window
+      // — see LedgerService.cashflow's doc comment for the full identity.
+      const masterDelta = Number(masterAfter) - Number(masterBefore);
+      expect(masterDelta).toBe(sumNet);
+    });
+
+    it('rejects an unrecognised range value with 400 and applies a bounded default when omitted', async () => {
+      const committee = await signupAndLogin(`ledger-cashflow-badrange-${randomUUID()}@example.com`, flatIds[0], OccupancyRole.OWNER_OCCUPIER);
+      await makeRole(committee.userId, RoleKind.COMMITTEE);
+
+      await committee.agent.get('/api/v1/ledger/cashflow').query({ range: 'forever' }).expect(400);
+
+      const defaultRes = await committee.agent.get('/api/v1/ledger/cashflow').expect(200);
+      const defaultBody = defaultRes.body as CashflowSeriesBody;
+      expect(defaultBody.range).toBe('30d');
+      expect(defaultBody.series).toHaveLength(30);
+
+      const yearRes = await committee.agent.get('/api/v1/ledger/cashflow').query({ range: '12m' }).expect(200);
+      const yearBody = yearRes.body as CashflowSeriesBody;
+      expect(yearBody.series.length).toBeLessThanOrEqual(366); // bounded window, never unbounded
+    });
+
+    it('forbids a non-committee resident from reading /ledger/cashflow', async () => {
+      const resident = await signupAndLogin(`ledger-cashflow-resident-${randomUUID()}@example.com`, flatIds[0], OccupancyRole.TENANT);
+      await resident.agent.get('/api/v1/ledger/cashflow').query({ range: '30d' }).expect(403);
+    });
+  });
 });
