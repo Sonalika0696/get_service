@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import { View, ScrollView, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Phone, ArrowRight, ShieldCheck } from 'phosphor-react-native';
+import { Phone, ArrowRight } from 'phosphor-react-native';
 import { Text } from '../../src/components/Text';
 import { Button } from '../../src/components/Button';
+import { Logo } from '../../src/components/brand/Logo';
+import { Wordmark } from '../../src/components/brand/Wordmark';
 import { useTheme } from '../../src/theme/ThemeProvider';
 import { useAuth } from '../../src/auth/AuthProvider';
 
@@ -59,21 +61,13 @@ export default function SignIn() {
           }}
           keyboardShouldPersistTaps="handled"
         >
-          <View
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: theme.radius.lg,
-              backgroundColor: theme.colors.accent.tint,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <ShieldCheck size={28} color={theme.colors.accent[700]} weight="duotone" />
-          </View>
+          <Logo size={56} rounded />
 
           <View style={{ gap: theme.spacing.xs }}>
-            <Text variant="display" weight="semibold">Welcome</Text>
+            <Wordmark height={30} />
+            <Text variant="display" weight="semibold" style={{ marginTop: theme.spacing.sm }}>
+              Welcome
+            </Text>
             <Text variant="body" tone="secondary">
               Sign in with your phone. We send a one-time code — no passwords.
             </Text>

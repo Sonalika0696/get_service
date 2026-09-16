@@ -10,6 +10,7 @@ import { Segmented } from '../../src/components/Segmented';
 import { PollRow } from '../../src/components/PollRow';
 import { ListLoading, ListError, ListEmpty } from '../../src/components/ListState';
 import { OfflineBanner } from '../../src/components/OfflineBanner';
+import { SwipeableTabs } from '../../src/components/SwipeableTabs';
 import { useResidentPolls } from '../../src/hooks/useResidentPolls';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
@@ -40,6 +41,7 @@ export default function RequestsScreen() {
       : 'Nothing open right now. Raise the first request — your neighbours will see it here.';
 
   return (
+    <SwipeableTabs index={2}>
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.colors.bg.primary }}>
       <OfflineBanner />
       <ScrollView
@@ -102,6 +104,7 @@ export default function RequestsScreen() {
           {query.isSuccess && visible.length === 0 ? (
             <ListEmpty
               Icon={Handshake}
+              illustration="requests"
               title={segment === 'mine' ? 'Nothing joined yet' : 'No open requests'}
               body={emptyBody}
               action={
@@ -130,5 +133,6 @@ export default function RequestsScreen() {
         </View>
       </ScrollView>
     </SafeAreaView>
+    </SwipeableTabs>
   );
 }

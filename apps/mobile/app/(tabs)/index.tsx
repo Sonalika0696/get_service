@@ -8,6 +8,7 @@ import { SectionLabel } from '../../src/components/SectionLabel';
 import { DuesCard } from '../../src/components/DuesCard';
 import { StatTile } from '../../src/components/StatTile';
 import { RequestRow } from '../../src/components/RequestRow';
+import { SwipeableTabs } from '../../src/components/SwipeableTabs';
 import { useTheme } from '../../src/theme/ThemeProvider';
 import { useAuth } from '../../src/auth/AuthProvider';
 
@@ -49,6 +50,7 @@ export default function HomeScreen() {
   const firstName = me?.name?.trim().split(/\s+/)[0];
 
   return (
+    <SwipeableTabs index={0}>
     <Screen>
       <View style={{ marginTop: theme.spacing.xs }}>
         <Text variant="caption" tone="muted" weight="semibold">
@@ -155,5 +157,6 @@ export default function HomeScreen() {
         </View>
       </View>
     </Screen>
+    </SwipeableTabs>
   );
 }

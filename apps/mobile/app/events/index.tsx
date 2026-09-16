@@ -71,6 +71,7 @@ export default function EventsIndex() {
           {query.isSuccess && events.length === 0 ? (
             <ListEmpty
               Icon={CalendarBlank}
+              illustration="events"
               title="No events yet"
               body="When your committee schedules an event, it shows up here with the charge and refund policy."
             />

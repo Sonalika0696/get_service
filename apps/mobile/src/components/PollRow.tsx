@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Pressable } from 'react-native';
-import { Users, CaretRight, CheckCircle, Clock } from 'phosphor-react-native';
+import { CaretRight, CheckCircle, Clock } from 'phosphor-react-native';
 import type { ResidentPollDetail } from '@sft/api-client';
 import { Text } from './Text';
 import { StatusPill } from './StatusPill';
@@ -23,6 +23,11 @@ export function PollRow({
   const threshold = poll.vendorConfirmedMinimum ?? poll.minCommitments ?? 0;
   const progress = threshold > 0 ? Math.min(1, poll.commitmentCount / threshold) : 0;
   const reached = threshold > 0 && poll.commitmentCount >= threshold;
+  const countLabel = reached
+    ? 'Threshold met'
+    : threshold > 0
+      ? `of ${threshold} joined`
+      : 'neighbours joined';
 
   return (
     <Pressable
@@ -50,7 +55,26 @@ export function PollRow({
           </View>
           <Text variant="body" weight="semibold" numberOfLines={2}>{poll.title}</Text>
         </View>
-        <CaretRight size={18} color={theme.colors.ink[40]} weight="bold" />
+
+        <View style={{ alignItems: 'center', paddingHorizontal: theme.spacing.xs, minWidth: 56 }}>
+          <Text
+            variant="display"
+            weight="semibold"
+            mono
+            tone="primary"
+            style={reached ? { color: theme.colors.feedback.success } : undefined}
+          >
+            {poll.commitmentCount}
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+            {reached ? <CheckCircle size={11} color={theme.colors.feedback.success} weight="fill" /> : null}
+            <Text variant="caption" tone="muted" numberOfLines={1}>
+              {countLabel}
+            </Text>
+          </View>
+        </View>
+
+        <CaretRight size={18} color={theme.colors.ink[40]} weight="bold" style={{ marginTop: 6 }} />
       </View>
 
       <View style={{ gap: 6 }}>
@@ -71,26 +95,11 @@ export function PollRow({
           />
         </View>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1 }}>
-            <Users size={14} color={theme.colors.ink[60]} weight="duotone" />
-            <Text variant="caption" tone="secondary" mono>
-              {poll.commitmentCount}
-              {threshold > 0 ? ` / ${threshold}` : ''}
-            </Text>
-            {reached ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, marginLeft: 4 }}>
-                <CheckCircle size={12} color={theme.colors.feedback.success} weight="fill" />
-                <Text variant="caption" weight="semibold" tone="secondary">Threshold met</Text>
-              </View>
-            ) : null}
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <Clock size={12} color={theme.colors.ink[60]} weight="duotone" />
-            <Text variant="caption" tone="muted">
-              {formatCloses(poll.closesAt)}
-            </Text>
-          </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <Clock size={12} color={theme.colors.ink[60]} weight="duotone" />
+          <Text variant="caption" tone="muted">
+            {formatCloses(poll.closesAt)}
+          </Text>
         </View>
 
         {poll.hasJoined ? (

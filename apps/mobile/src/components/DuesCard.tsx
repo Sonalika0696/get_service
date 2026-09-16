@@ -33,13 +33,30 @@ export function DuesCard({
   return (
     <View
       style={{
-        backgroundColor: theme.colors.accent[800],
+        backgroundColor: theme.colors.hero.dueBg,
         borderRadius: theme.radius.xxl,
         padding: theme.spacing.lg,
         gap: theme.spacing.md,
+        overflow: 'hidden',
         ...theme.shadows.md.native,
       }}
     >
+      {/* Subtle inner tone shift standing in for a gradient (no new deps):
+          a soft glow near the top-right fading into the base crimson. */}
+      <View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          top: -60,
+          right: -60,
+          width: 180,
+          height: 180,
+          borderRadius: 90,
+          backgroundColor: theme.colors.hero.dueBgTo,
+          opacity: 0.45,
+        }}
+      />
+
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         {captions.map((c) => (
           <View

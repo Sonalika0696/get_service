@@ -12,6 +12,7 @@ import { Segmented } from '../../src/components/Segmented';
 import { BillLineRow } from '../../src/components/BillLineRow';
 import { ListLoading, ListError, ListEmpty } from '../../src/components/ListState';
 import { OfflineBanner } from '../../src/components/OfflineBanner';
+import { SwipeableTabs } from '../../src/components/SwipeableTabs';
 import { useBillsHub } from '../../src/hooks/useBills';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
@@ -41,6 +42,7 @@ export default function BillsScreen() {
   const totalDue = hub.data?.totalDueMinor ?? 0;
 
   return (
+    <SwipeableTabs index={1}>
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.colors.bg.primary }}>
       <OfflineBanner />
       <ScrollView
@@ -94,6 +96,7 @@ export default function BillsScreen() {
           {hub.isSuccess && visible.length === 0 ? (
             <ListEmpty
               Icon={Receipt}
+              illustration="bills"
               title={segment === 'due' ? 'Nothing due' : 'No bills yet'}
               body={
                 segment === 'due'
@@ -111,6 +114,7 @@ export default function BillsScreen() {
         </View>
       </ScrollView>
     </SafeAreaView>
+    </SwipeableTabs>
   );
 }
 
@@ -127,10 +131,11 @@ function HeroDueCard({
   return (
     <View
       style={{
-        backgroundColor: theme.colors.accent[800],
+        backgroundColor: theme.colors.hero.dueBg,
         borderRadius: theme.radius.xxl,
         padding: theme.spacing.lg,
         gap: theme.spacing.md,
+        overflow: 'hidden',
         ...theme.shadows.md.native,
       }}
     >

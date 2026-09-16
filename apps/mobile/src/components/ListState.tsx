@@ -4,6 +4,7 @@ import type { IconProps } from 'phosphor-react-native';
 import { Warning, TrayArrowDown } from 'phosphor-react-native';
 import { Text } from './Text';
 import { Button } from './Button';
+import { SpotIllustration, type SpotIllustrationName } from './illustrations/SpotIllustration';
 import { useTheme } from '../theme/ThemeProvider';
 
 export function ListLoading({ label = 'Loading' }: { label?: string }) {
@@ -56,11 +57,13 @@ export function ListEmpty({
   title,
   body,
   action,
+  illustration,
 }: {
   Icon?: React.ComponentType<IconProps>;
   title: string;
   body: string;
   action?: React.ReactNode;
+  illustration?: SpotIllustrationName;
 }) {
   const theme = useTheme();
   return (
@@ -75,18 +78,22 @@ export function ListEmpty({
         borderColor: theme.colors.border.subtle,
       }}
     >
-      <View
-        style={{
-          width: 56,
-          height: 56,
-          borderRadius: 999,
-          backgroundColor: theme.colors.accent.tint,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Icon size={28} color={theme.colors.accent[700]} weight="duotone" />
-      </View>
+      {illustration ? (
+        <SpotIllustration name={illustration} size={104} />
+      ) : (
+        <View
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: 999,
+            backgroundColor: theme.colors.accent.tint,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Icon size={28} color={theme.colors.accent[700]} weight="duotone" />
+        </View>
+      )}
       <Text variant="heading" weight="semibold" align="center">{title}</Text>
       <Text variant="body" tone="secondary" align="center">{body}</Text>
       {action}

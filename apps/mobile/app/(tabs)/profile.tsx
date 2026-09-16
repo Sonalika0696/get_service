@@ -1,13 +1,28 @@
 import React from 'react';
-import { View, Alert } from 'react-native';
+import { View, Alert, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
-import { PaintBrushBroad, Gear, SignOut, User, ShieldCheck, CaretRight } from 'phosphor-react-native';
-import { Pressable } from 'react-native';
+import {
+  PaintBrush,
+  SignOut,
+  User,
+  ShieldCheck,
+  CaretRight,
+  Sun,
+  Moon,
+  Monitor,
+  IdentificationCard,
+  Bell,
+  Translate,
+  Lock,
+  Question,
+  ChatCircle,
+  PencilSimple,
+} from 'phosphor-react-native';
 import { Screen } from '../../src/components/Screen';
+import { SwipeableTabs } from '../../src/components/SwipeableTabs';
 import { Text } from '../../src/components/Text';
 import { SectionLabel } from '../../src/components/SectionLabel';
-import { Button } from '../../src/components/Button';
-import { useTheme } from '../../src/theme/ThemeProvider';
+import { useTheme, useThemeControls } from '../../src/theme/ThemeProvider';
 import { useAuth } from '../../src/auth/AuthProvider';
 import { useApprovals, useIsCommittee } from '../../src/hooks/useApprovals';
 
@@ -16,6 +31,14 @@ const ROLE_LABELS: Record<string, string> = {
   OWNER_ABSENTEE: 'Owner, non-resident',
   TENANT: 'Tenant',
 };
+
+function initialsFor(name?: string | null): string {
+  if (!name) return '';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
 export default function ProfileScreen() {
   const theme = useTheme();
@@ -36,46 +59,64 @@ export default function ProfileScreen() {
     );
   };
 
-  return (
-    <Screen>
-      <Text variant="display" weight="semibold">Profile</Text>
+  const initials = initialsFor(me?.name);
+  const occupancyLabel = me?.occupancyRole ? ROLE_LABELS[me.occupancyRole] ?? me.occupancyRole : undefined;
+  const accent = theme.colors.accent[700];
 
-      <View
-        style={{
-          backgroundColor: theme.colors.bg.elevated,
-          borderRadius: theme.radius.xl,
-          padding: theme.spacing.lg,
-          gap: theme.spacing.sm,
-          borderWidth: 1,
-          borderColor: theme.colors.border.subtle,
-        }}
-      >
-        <View
-          style={{
-            width: 52,
-            height: 52,
-            borderRadius: 999,
-            backgroundColor: theme.colors.accent.tint,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <User size={26} color={theme.colors.accent[700]} weight="duotone" />
+  return (
+    <SwipeableTabs index={4}>
+    <Screen>
+      {/* Identity header */}
+      <View style={{ alignItems: 'center', gap: theme.spacing.sm, paddingTop: theme.spacing.sm }}>
+        <View>
+          <View
+            style={{
+              width: 92,
+              height: 92,
+              borderRadius: 999,
+              backgroundColor: theme.colors.accent.tint,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderWidth: 2,
+              borderColor: theme.colors.bg.elevated,
+              ...theme.shadows.sm.native,
+            }}
+          >
+            {initials ? (
+              <Text variant="display" weight="semibold" tone="accent">{initials}</Text>
+            ) : (
+              <User size={42} color={accent} weight="duotone" />
+            )}
+          </View>
+          <View
+            style={{
+              position: 'absolute',
+              right: -2,
+              bottom: -2,
+              width: 30,
+              height: 30,
+              borderRadius: 999,
+              backgroundColor: accent,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderWidth: 2,
+              borderColor: theme.colors.bg.primary,
+            }}
+          >
+            <PencilSimple size={15} color={theme.colors.ink.onAccent} weight="bold" />
+          </View>
         </View>
-        <Text variant="heading" weight="semibold">{me?.name ?? 'You'}</Text>
-        <View style={{ gap: 2 }}>
-          {me?.phone ? (
-            <Text variant="caption" tone="muted" mono>{me.phone}</Text>
-          ) : null}
-          {me?.email ? (
-            <Text variant="caption" tone="muted">{me.email}</Text>
-          ) : null}
+
+        <View style={{ alignItems: 'center', gap: 2 }}>
+          <Text variant="display" weight="semibold" align="center">{me?.name ?? 'You'}</Text>
+          <Text variant="body" tone="muted" align="center">
+            {[me?.email, me?.phone].filter(Boolean).join('  ·  ')}
+          </Text>
         </View>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
-          {me?.occupancyRole ? (
-            <Chip label={ROLE_LABELS[me.occupancyRole] ?? me.occupancyRole} />
-          ) : null}
+
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6, marginTop: 4 }}>
           {me?.roleKinds?.map((r) => <Chip key={r} label={r} tone="accent" />)}
+          {occupancyLabel ? <Chip label={occupancyLabel} /> : null}
           {me?.kycTier ? <Chip label={`KYC · ${me.kycTier}`} /> : null}
         </View>
       </View>
@@ -92,31 +133,202 @@ export default function ProfileScreen() {
 
       <View>
         <SectionLabel>Account</SectionLabel>
-        <View style={{ gap: theme.spacing.sm }}>
-          <Button
-            label="Open design playground"
-            variant="secondary"
-            leftIcon={<PaintBrushBroad size={18} color={theme.colors.accent[700]} weight="duotone" />}
-            onPress={() => router.push('/dev/ui')}
-            fullWidth
-          />
-          <Button
-            label="Settings"
-            variant="ghost"
-            leftIcon={<Gear size={18} color={theme.colors.accent[700]} weight="duotone" />}
+        <Card>
+          <Row
+            icon={<IdentificationCard size={18} color={accent} weight="duotone" />}
+            title="Edit profile information"
             onPress={() => undefined}
-            fullWidth
           />
-          <Button
-            label="Sign out"
-            variant="ghost"
-            leftIcon={<SignOut size={18} color={theme.colors.feedback.danger} weight="regular" />}
+          <Divider />
+          <Row
+            icon={<Bell size={18} color={accent} weight="duotone" />}
+            title="Notifications"
+            rightValue="On"
+            onPress={() => undefined}
+          />
+          <Divider />
+          <Row
+            icon={<Translate size={18} color={accent} weight="duotone" />}
+            title="Language"
+            rightValue="English"
+            onPress={() => undefined}
+          />
+        </Card>
+      </View>
+
+      <View>
+        <SectionLabel>Preferences</SectionLabel>
+        <Card>
+          <Row
+            icon={<ShieldCheck size={18} color={accent} weight="duotone" />}
+            title="Security"
+            onPress={() => undefined}
+          />
+          <Divider />
+          <ThemeRow />
+        </Card>
+      </View>
+
+      <View>
+        <SectionLabel>Support</SectionLabel>
+        <Card>
+          <Row
+            icon={<Question size={18} color={accent} weight="duotone" />}
+            title="Help & support"
+            onPress={() => undefined}
+          />
+          <Divider />
+          <Row
+            icon={<ChatCircle size={18} color={accent} weight="duotone" />}
+            title="Contact us"
+            onPress={() => undefined}
+          />
+          <Divider />
+          <Row
+            icon={<Lock size={18} color={accent} weight="duotone" />}
+            title="Privacy policy"
+            onPress={() => undefined}
+          />
+        </Card>
+      </View>
+
+      <View>
+        <SectionLabel>More</SectionLabel>
+        <Card>
+          <Row
+            icon={<PaintBrush size={18} color={accent} weight="duotone" />}
+            title="Design playground"
+            subtitle="Preview shared components"
+            onPress={() => router.push('/dev/ui')}
+          />
+          <Divider />
+          <Row
+            icon={<SignOut size={18} color={theme.colors.feedback.danger} weight="bold" />}
+            title="Sign out"
+            danger
+            showCaret={false}
             onPress={confirmSignOut}
-            fullWidth
           />
-        </View>
+        </Card>
       </View>
     </Screen>
+    </SwipeableTabs>
+  );
+}
+
+/**
+ * Theme row in the reference's value-row style: label left, current mode on
+ * the right in accent, a leading sun/moon icon reflecting the resolved
+ * scheme. Tapping cycles Light → Dark → System.
+ */
+function ThemeRow() {
+  const theme = useTheme();
+  const { scheme, resolved, setScheme } = useThemeControls();
+  const next: Record<'light' | 'dark' | 'system', 'light' | 'dark' | 'system'> = {
+    light: 'dark',
+    dark: 'system',
+    system: 'light',
+  };
+  const valueLabel = scheme === 'system' ? 'System' : scheme === 'dark' ? 'Dark' : 'Light';
+  const Icon = scheme === 'system' ? Monitor : resolved === 'dark' ? Moon : Sun;
+  return (
+    <Row
+      icon={<Icon size={18} color={theme.colors.accent[700]} weight="duotone" />}
+      title="Theme"
+      rightValue={valueLabel}
+      accentValue
+      onPress={() => setScheme(next[scheme])}
+    />
+  );
+}
+
+function Card({ children }: { children: React.ReactNode }) {
+  const theme = useTheme();
+  return (
+    <View
+      style={{
+        backgroundColor: theme.colors.bg.elevated,
+        borderRadius: theme.radius.xl,
+        borderWidth: 1,
+        borderColor: theme.colors.border.subtle,
+        overflow: 'hidden',
+      }}
+    >
+      {children}
+    </View>
+  );
+}
+
+function Divider() {
+  const theme = useTheme();
+  return (
+    <View
+      style={{
+        height: 1,
+        backgroundColor: theme.colors.border.divider,
+        marginLeft: theme.spacing.md + 36 + theme.spacing.sm,
+      }}
+    />
+  );
+}
+
+function Row({
+  icon,
+  title,
+  subtitle,
+  rightValue,
+  accentValue = false,
+  onPress,
+  danger = false,
+  showCaret = true,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  subtitle?: string;
+  rightValue?: string;
+  accentValue?: boolean;
+  onPress?: () => void;
+  danger?: boolean;
+  showCaret?: boolean;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.md,
+        paddingVertical: theme.spacing.sm,
+        minHeight: 44,
+        backgroundColor: pressed ? theme.colors.bg.secondary : 'transparent',
+      })}
+    >
+      <View
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: theme.radius.md,
+          backgroundColor: danger ? theme.colors.feedback.dangerTint : theme.colors.accent.tint,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        {icon}
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text variant="body" weight="semibold" tone={danger ? 'danger' : 'primary'}>{title}</Text>
+        {subtitle ? <Text variant="caption" tone="muted">{subtitle}</Text> : null}
+      </View>
+      {rightValue ? (
+        <Text variant="body" weight={accentValue ? 'semibold' : 'regular'} tone={accentValue ? 'accent' : 'muted'}>
+          {rightValue}
+        </Text>
+      ) : null}
+      {showCaret ? <CaretRight size={16} color={theme.colors.ink[40]} weight="bold" /> : null}
+    </Pressable>
   );
 }
 

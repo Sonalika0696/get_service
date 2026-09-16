@@ -9,6 +9,7 @@ import { SectionLabel } from '../../src/components/SectionLabel';
 import { JobPostRow } from '../../src/components/JobPostRow';
 import { ListLoading, ListError, ListEmpty } from '../../src/components/ListState';
 import { OfflineBanner } from '../../src/components/OfflineBanner';
+import { SwipeableTabs } from '../../src/components/SwipeableTabs';
 import { useJobPosts } from '../../src/hooks/useJobPosts';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
@@ -26,6 +27,7 @@ export default function NoticesScreen() {
   const posts = query.data ?? [];
 
   return (
+    <SwipeableTabs index={3}>
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.colors.bg.primary }}>
       <OfflineBanner />
       <ScrollView
@@ -77,6 +79,7 @@ export default function NoticesScreen() {
           {query.isSuccess && posts.length === 0 ? (
             <ListEmpty
               Icon={Megaphone}
+              illustration="notices"
               title="Quiet in the community"
               body="Be the first: post a job you're hiring for, or one you're looking to take on."
               action={
@@ -97,5 +100,6 @@ export default function NoticesScreen() {
         </View>
       </ScrollView>
     </SafeAreaView>
+    </SwipeableTabs>
   );
 }

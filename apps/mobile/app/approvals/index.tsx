@@ -105,6 +105,7 @@ export default function ApprovalsInbox() {
               {query.isSuccess && visible.length === 0 ? (
                 <ListEmpty
                   Icon={ShieldCheck}
+                  illustration="approvals"
                   title={segment === 'awaiting-me' ? 'Nothing waiting on you' : 'Nothing open'}
                   body={
                     segment === 'awaiting-me'

@@ -9,7 +9,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { useFonts, Inter_400Regular, Inter_600SemiBold } from '@expo-google-fonts/inter';
 import { JetBrainsMono_400Regular, JetBrainsMono_600SemiBold } from '@expo-google-fonts/jetbrains-mono';
-import { ThemeProvider } from '../src/theme/ThemeProvider';
+import { ThemeProvider, useTheme, useThemeControls } from '../src/theme/ThemeProvider';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { queryClient, queryPersister } from '../src/lib/query';
 import { AuthProvider, useAuth } from '../src/auth/AuthProvider';
@@ -47,15 +47,9 @@ export default function RootLayout() {
           <ThemeProvider>
             <ErrorBoundary>
               <AuthProvider>
-                <StatusBar style="dark" />
+                <ThemedStatusBar />
                 <AuthGate>
-                  <Stack
-                    screenOptions={{
-                      headerShown: false,
-                      contentStyle: { backgroundColor: '#FBF8F4' },
-                      animation: 'slide_from_right',
-                    }}
-                  />
+                  <ThemedStack />
                 </AuthGate>
               </AuthProvider>
             </ErrorBoundary>
@@ -63,6 +57,35 @@ export default function RootLayout() {
         </PersistQueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
+  );
+}
+
+/**
+ * Reflects the resolved theme in the OS status bar: light icons/text on the
+ * dark theme's dark surfaces, dark icons/text on the light theme's light
+ * ones. Rendered as its own component because `useThemeControls` needs a
+ * descendant of `ThemeProvider`, not `RootLayout` itself.
+ */
+function ThemedStatusBar() {
+  const { resolved } = useThemeControls();
+  return <StatusBar style={resolved === 'dark' ? 'light' : 'dark'} />;
+}
+
+/**
+ * Wraps `Stack` so its `contentStyle` background tracks the resolved theme
+ * instead of a hardcoded light-mode hex value. Same rationale as
+ * `ThemedStatusBar` above: needs to sit under `ThemeProvider` to read it.
+ */
+function ThemedStack() {
+  const theme = useTheme();
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: theme.colors.bg.primary },
+        animation: 'slide_from_right',
+      }}
+    />
   );
 }
 

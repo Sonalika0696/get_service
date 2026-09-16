@@ -129,6 +129,7 @@ export default function VendorsIndex() {
         {empty ? (
           <ListEmpty
             Icon={Storefront}
+            illustration="vendors"
             title="No vendors here yet"
             body={
               category
