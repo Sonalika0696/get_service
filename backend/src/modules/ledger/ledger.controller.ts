@@ -7,18 +7,30 @@ import { Roles } from '../../common/decorators/roles.decorator.js';
 import { CurrentResident } from '../../common/decorators/current-user.decorator.js';
 import { AuditLog } from '../../common/decorators/audit-log.decorator.js';
 import type { ResidentPrincipal } from '../../common/types/current-user.js';
-import { RoleKind } from '../../generated/prisma/enums.js';
+import { AccountKind, RoleKind } from '../../generated/prisma/enums.js';
 import type { LedgerEntryModel } from '../../generated/prisma/models.js';
 import { PostAdjustmentDto } from './dto/post-adjustment.dto.js';
 import {
   LedgerService,
   type AccountBalance,
   type BalanceAssertionSummary,
-  type BalanceVerificationReport,
   type CashflowSeries,
   type RebuildResult,
 } from './ledger.service.js';
 import { ReconciliationService, type ReconciliationReport } from './reconciliation.service.js';
+
+/**
+ * Integrity-only shape for `GET /ledger/verify` — mirrors `GET /audit/verify`'s
+ * "tell me it's intact, not the numbers" posture. Deliberately drops
+ * `accountId`, `cached`, and `recomputed` from `BalanceVerificationReport`'s
+ * rows: those are actual balance amounts (and their account handles), which
+ * this route must not leak to an arbitrary resident. `GET /ledger` remains
+ * the COMMITTEE-only place to see real balances.
+ */
+export interface LedgerVerifySummary {
+  ok: boolean;
+  accounts: { kind: AccountKind; intact: boolean }[];
+}
 
 @Controller('ledger')
 export class LedgerController {
@@ -50,11 +62,23 @@ export class LedgerController {
    * `RolesGuard` — see AuditController.verify's doc comment for why that
    * route (and this one) is left open to any resident rather than gated to
    * COMMITTEE/TREASURER the way GET /ledger's aggregates are.
+   *
+   * Response is shaped down to integrity only (`LedgerVerifySummary`): no
+   * `cached`/`recomputed` amounts and no `accountId`, since (unlike
+   * `GET /audit/verify`, which never dealt in money) this route's backing
+   * report carries actual balance figures that must stay COMMITTEE-only
+   * (see `GET /ledger`). `LedgerService.verifyBalances()` itself is
+   * untouched — `assertAllBalances()` (the worker) and `POST /ledger/rebuild`
+   * still consume its full-detail `BalanceVerificationReport`.
    */
   @Get('verify')
   @UseGuards(AuthGuard)
-  async verify(@CurrentResident() currentUser: ResidentPrincipal): Promise<BalanceVerificationReport> {
-    return this.ledgerService.verifyBalances(currentUser.societyId);
+  async verify(@CurrentResident() currentUser: ResidentPrincipal): Promise<LedgerVerifySummary> {
+    const report = await this.ledgerService.verifyBalances(currentUser.societyId);
+    return {
+      ok: report.ok,
+      accounts: report.accounts.map((row) => ({ kind: row.kind, intact: row.intact })),
+    };
   }
 
   /**

@@ -24,7 +24,7 @@ describe('validateEnv', () => {
     expect(env.RAZORPAY_KEY_ID).toBe('rzp_test_stub');
     expect(env.RAZORPAY_KEY_SECRET).toBe('stub_secret');
     expect(env.RAZORPAY_WEBHOOK_SECRET).toBe('stub_webhook_secret');
-    expect(env.THROTTLE_ENABLED).toBe(false);
+    expect(env.THROTTLE_ENABLED).toBe(true);
   });
 
   it('coerces RAZORPAY_ENABLED from "true"/"1" and leaves anything else falsy', () => {

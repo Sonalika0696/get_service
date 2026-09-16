@@ -63,17 +63,20 @@ export const envSchema = z.object({
 
   // --- Phase 6.5 (rate limiting on auth/OTP endpoints) ---
   /**
-   * Off by default — mirrors GSTIN_API_ENABLED/RAZORPAY_ENABLED/SMS_ENABLED:
-   * dev and the automated e2e suite hammer /auth/signup, /auth/verify, and
-   * the officer enroll/login routes hundreds of times per run (every test
-   * that needs a logged-in fixture signs one up), so a naive always-on
-   * limiter would 429 the suite itself. Set THROTTLE_ENABLED=true (and keep
-   * it true) in every real deployment — the in-memory @nestjs/throttler
-   * guard is only wired onto the auth/officer-auth controllers (see
-   * AuthModule), so this flag has no effect on any other route. Accepts
-   * "true"/"1" as truthy, anything else (including unset) is false.
+   * On by default (secure-by-default) — unlike GSTIN_API_ENABLED/
+   * RAZORPAY_ENABLED/SMS_ENABLED, which gate a real external integration
+   * dev/test have no stub for, this just gates the in-memory
+   * @nestjs/throttler guard wired onto the auth/officer-auth controllers
+   * (see AuthModule), so there's no reason a real deployment should ever
+   * run without it. dev and the automated e2e suite hammer /auth/signup,
+   * /auth/verify, and the officer enroll/login routes hundreds of times per
+   * run (every test that needs a logged-in fixture signs one up), so a
+   * naive always-on limiter would 429 the suite itself — set
+   * THROTTLE_ENABLED=false explicitly in backend/.env for dev/test (already
+   * done there). This flag has no effect on any route outside auth/
+   * officer-auth. Accepts "true"/"1" as truthy, anything else is false.
    */
-  THROTTLE_ENABLED: z.preprocess((value) => value === 'true' || value === '1', z.boolean()).default(false),
+  THROTTLE_ENABLED: z.preprocess((value) => value === 'true' || value === '1', z.boolean()).default(true),
 });
 
 export type Env = z.infer<typeof envSchema>;

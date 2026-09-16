@@ -28,9 +28,10 @@ import { SessionService } from './session.service.js';
  * AuthController/OfficerAuthController opt into it per-route via
  * `@UseGuards(ThrottlerGuard)` + `@Throttle(...)` (see those controllers).
  * No other module gets a global throttling guard. Gated by
- * THROTTLE_ENABLED (off by default — see env.schema.ts's doc comment for
- * why: the e2e suite's fixture helpers sign up/verify/enroll hundreds of
- * times per run). The store is `ThrottlerStorageService`, an in-memory
+ * THROTTLE_ENABLED (on by default; dev/test set it false in backend/.env —
+ * see env.schema.ts's doc comment for why: the e2e suite's fixture helpers
+ * sign up/verify/enroll hundreds of times per run). The store is
+ * `ThrottlerStorageService`, an in-memory
  * Map — correct for a single instance only. Once this service runs behind
  * more than one instance, the limits below become per-instance instead of
  * global (an attacker could get N× the intended limit by hitting different

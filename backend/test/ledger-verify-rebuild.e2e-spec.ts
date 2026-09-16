@@ -46,7 +46,14 @@ function extractOtpCode(mail: SendMailInput): string {
   return match[1];
 }
 
-interface VerifyReportBody {
+/** GET /ledger/verify — integrity only, no amounts (resident-callable). */
+interface VerifySummaryBody {
+  ok: boolean;
+  accounts: { kind: AccountKind; intact: boolean }[];
+}
+
+/** POST /ledger/rebuild's embedded report — unchanged, still full detail (TREASURER-only). */
+interface FullVerificationReportBody {
   ok: boolean;
   accounts: { kind: AccountKind; accountId: string; cached: string; recomputed: string; intact: boolean }[];
 }
@@ -54,7 +61,7 @@ interface VerifyReportBody {
 interface RebuildBody {
   societyId: string;
   accounts: { kind: AccountKind; accountId: string; balance: string }[];
-  report: VerifyReportBody;
+  report: FullVerificationReportBody;
 }
 
 interface AssertBalancesBody {
@@ -189,13 +196,14 @@ describe('Ledger balance-cache integrity — Phase 6.5 I6 (e2e)', () => {
     // A plain resident (no committee/treasurer role) can still read /ledger/verify.
     const resident = await signupAndLogin(`i6-verify-healthy-resident-${randomUUID()}@example.com`, societyId, flatIds[1], OccupancyRole.TENANT);
     const res = await resident.agent.get('/api/v1/ledger/verify').expect(200);
-    const body = res.body as VerifyReportBody;
+    const body = res.body as VerifySummaryBody;
 
     expect(body.ok).toBe(true);
     expect(body.accounts.length).toBeGreaterThan(0);
     expect(body.accounts.every((a) => a.intact)).toBe(true);
+    // Integrity only — no cached/recomputed amounts or accountId leak to a resident.
     for (const row of body.accounts) {
-      expect(row.cached).toBe(row.recomputed);
+      expect(Object.keys(row).sort()).toEqual(['intact', 'kind']);
     }
   });
 
@@ -222,10 +230,13 @@ describe('Ledger balance-cache integrity — Phase 6.5 I6 (e2e)', () => {
     expect(conservedSum).toBeCloseTo(0, 6);
 
     const preTamperVerify = await treasurer.agent.get('/api/v1/ledger/verify').expect(200);
-    expect((preTamperVerify.body as VerifyReportBody).ok).toBe(true);
+    expect((preTamperVerify.body as VerifySummaryBody).ok).toBe(true);
 
     // Bypass the app layer entirely: directly corrupt one account's cached
     // balance, simulating drift (a crash mid-post, a bad manual UPDATE, ...).
+    // Captured before the tamper, so disputeAccount.balance is the known-good
+    // (ledger-true) value — used below instead of GET /ledger/verify's
+    // `recomputed` field, which the integrity-only response no longer exposes.
     const disputeAccount = await prisma.account.findFirstOrThrow({ where: { societyId, kind: AccountKind.DISPUTE } });
     await prisma.account.update({ where: { id: disputeAccount.id }, data: { balance: { increment: 999 } } });
 
@@ -233,11 +244,12 @@ describe('Ledger balance-cache integrity — Phase 6.5 I6 (e2e)', () => {
     expect(tamperedSum).not.toBeCloseTo(conservedSum, 6);
 
     const tamperedVerify = await treasurer.agent.get('/api/v1/ledger/verify').expect(200);
-    const tamperedBody = tamperedVerify.body as VerifyReportBody;
+    const tamperedBody = tamperedVerify.body as VerifySummaryBody;
     expect(tamperedBody.ok).toBe(false);
-    const divergentRow = tamperedBody.accounts.find((a) => a.accountId === disputeAccount.id);
+    const divergentRow = tamperedBody.accounts.find((a) => a.kind === AccountKind.DISPUTE);
     expect(divergentRow?.intact).toBe(false);
-    expect(Number(divergentRow?.cached)).toBe(Number(divergentRow?.recomputed) + 999);
+    // No accountId/cached/recomputed on this response — every other account kind must still report intact.
+    expect(tamperedBody.accounts.filter((a) => a.kind !== AccountKind.DISPUTE).every((a) => a.intact)).toBe(true);
 
     // The rebuild rewrites the cache from ledger truth and restores conservation.
     const rebuildRes = await treasurer.agent.post('/api/v1/ledger/rebuild').expect(201);
@@ -248,13 +260,13 @@ describe('Ledger balance-cache integrity — Phase 6.5 I6 (e2e)', () => {
     expect(rebuiltDisputeRow).toBeDefined();
 
     const rebuiltAccount = await prisma.account.findUniqueOrThrow({ where: { id: disputeAccount.id } });
-    expect(Number(rebuiltAccount.balance)).toBe(Number(divergentRow?.recomputed));
+    expect(Number(rebuiltAccount.balance)).toBe(Number(disputeAccount.balance));
 
     const postRebuildSum = await sumBalances(societyId);
     expect(postRebuildSum).toBeCloseTo(conservedSum, 6);
 
     const postRebuildVerify = await treasurer.agent.get('/api/v1/ledger/verify').expect(200);
-    expect((postRebuildVerify.body as VerifyReportBody).ok).toBe(true);
+    expect((postRebuildVerify.body as VerifySummaryBody).ok).toBe(true);
 
     // The rebuild wrote its own audit entry (LedgerService.rebuildBalances -> AuditService.appendBestEffort).
     const auditRow = await prisma.auditLog.findFirst({ where: { societyId, action: 'LEDGER_BALANCE_REBUILD' }, orderBy: { sequence: 'desc' } });

@@ -1860,7 +1860,7 @@
             "description": ""
           }
         },
-        "summary": "Phase 6.5 Invariant I6 — surfaces LedgerService.verifyBalances()\n(the balance-cache analogue of AuditService.verifyChain) to every\nresident of the caller's own society, mirroring the just-shipped\n`GET /audit/verify`: `AuthGuard` + `@CurrentResident()` only, no\n`RolesGuard` — see AuditController.verify's doc comment for why that\nroute (and this one) is left open to any resident rather than gated to\nCOMMITTEE/TREASURER the way GET /ledger's aggregates are.",
+        "summary": "Phase 6.5 Invariant I6 — surfaces LedgerService.verifyBalances()\n(the balance-cache analogue of AuditService.verifyChain) to every\nresident of the caller's own society, mirroring the just-shipped\n`GET /audit/verify`: `AuthGuard` + `@CurrentResident()` only, no\n`RolesGuard` — see AuditController.verify's doc comment for why that\nroute (and this one) is left open to any resident rather than gated to\nCOMMITTEE/TREASURER the way GET /ledger's aggregates are.\n\nResponse is shaped down to integrity only (`LedgerVerifySummary`): no\n`cached`/`recomputed` amounts and no `accountId`, since (unlike\n`GET /audit/verify`, which never dealt in money) this route's backing\nreport carries actual balance figures that must stay COMMITTEE-only\n(see `GET /ledger`). `LedgerService.verifyBalances()` itself is\nuntouched — `assertAllBalances()` (the worker) and `POST /ledger/rebuild`\nstill consume its full-detail `BalanceVerificationReport`.",
         "tags": [
           "Ledger"
         ]
