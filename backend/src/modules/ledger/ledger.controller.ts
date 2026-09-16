@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Headers, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
 import { PrincipalGuard } from '../../common/guards/principal.guard.js';
-import { ResidentOnly } from '../../common/decorators/principal.decorator.js';
+import { ResidentOnly, OperatorOnly } from '../../common/decorators/principal.decorator.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { CurrentResident } from '../../common/decorators/current-user.decorator.js';
@@ -10,7 +10,7 @@ import type { ResidentPrincipal } from '../../common/types/current-user.js';
 import { RoleKind } from '../../generated/prisma/enums.js';
 import type { LedgerEntryModel } from '../../generated/prisma/models.js';
 import { PostAdjustmentDto } from './dto/post-adjustment.dto.js';
-import { LedgerService, type AccountBalance } from './ledger.service.js';
+import { LedgerService, type AccountBalance, type BalanceAssertionSummary, type BalanceVerificationReport, type RebuildResult } from './ledger.service.js';
 import { ReconciliationService, type ReconciliationReport } from './reconciliation.service.js';
 
 @Controller('ledger')
@@ -33,6 +33,21 @@ export class LedgerController {
   async getLedger(@CurrentResident() currentUser: ResidentPrincipal): Promise<{ balances: AccountBalance[]; balancesIntact: boolean }> {
     const [balances, verification] = await Promise.all([this.ledgerService.balances(currentUser.societyId), this.ledgerService.verifyBalances(currentUser.societyId)]);
     return { balances, balancesIntact: verification.ok };
+  }
+
+  /**
+   * Phase 6.5 Invariant I6 — surfaces LedgerService.verifyBalances()
+   * (the balance-cache analogue of AuditService.verifyChain) to every
+   * resident of the caller's own society, mirroring the just-shipped
+   * `GET /audit/verify`: `AuthGuard` + `@CurrentResident()` only, no
+   * `RolesGuard` — see AuditController.verify's doc comment for why that
+   * route (and this one) is left open to any resident rather than gated to
+   * COMMITTEE/TREASURER the way GET /ledger's aggregates are.
+   */
+  @Get('verify')
+  @UseGuards(AuthGuard)
+  async verify(@CurrentResident() currentUser: ResidentPrincipal): Promise<BalanceVerificationReport> {
+    return this.ledgerService.verifyBalances(currentUser.societyId);
   }
 
   @Get('reconciliation')
@@ -60,5 +75,45 @@ export class LedgerController {
     }
     const { entry } = await this.ledgerService.postAdjustment(currentUser.societyId, idempotencyKey, dto);
     return entry;
+  }
+
+  /**
+   * Phase 6.5 Invariant I6 "rebuildable cache" guarantee: rewrites every
+   * Account.balance in the caller's society from LedgerEntry truth.
+   * TREASURER-only (not COMMITTEE, unlike POST /ledger/adjustments) — this
+   * overwrites the balance cache outright rather than posting a normal
+   * transfer, so it's scoped to the officer most directly accountable for
+   * cash integrity, matching GET /ledger/reconciliation's precedent
+   * (also TREASURER-only) rather than the wider COMMITTEE-or-TREASURER
+   * gate on ordinary adjustments.
+   *
+   * No `@AuditLog(...)` here on purpose — LedgerService.rebuildBalances
+   * writes its own richer AuditService entry (per-account rebuilt
+   * balances) directly, same reasoning as SocietiesService/FlatsService
+   * (see AuditService.appendBestEffort's doc comment), rather than the
+   * interceptor's generic `{params, body}` payload.
+   */
+  @Post('rebuild')
+  @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
+  @ResidentOnly()
+  @Roles(RoleKind.TREASURER)
+  async rebuild(@CurrentResident() currentUser: ResidentPrincipal): Promise<RebuildResult> {
+    return this.ledgerService.rebuildBalances(currentUser.societyId, currentUser.id);
+  }
+
+  /**
+   * Phase 6.5 Invariant I6 assertion worker trigger — see
+   * LedgerService.assertAllBalances' doc comment for why this is
+   * `@OperatorOnly()` and cross-society rather than the
+   * `@ResidentOnly()` + `@Roles(...)` shape every other route on this
+   * controller uses: PollsService.processExpired's "stand-in for a future
+   * scheduler" pattern, adapted to a check that inherently spans every
+   * society at once.
+   */
+  @Post('assert-balances')
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @OperatorOnly()
+  async assertBalances(): Promise<BalanceAssertionSummary> {
+    return this.ledgerService.assertAllBalances();
   }
 }
