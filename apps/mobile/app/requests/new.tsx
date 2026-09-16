@@ -14,8 +14,6 @@ import {
   ArrowLeft,
   CaretDown,
   Storefront,
-  Minus,
-  Plus,
   CheckCircle,
 } from 'phosphor-react-native';
 import type { VendorDetail } from '@sft/api-client';
@@ -43,7 +41,6 @@ export default function ComposeRequest() {
   const [vendor, setVendor] = useState<VendorDetail | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [proposedMinimum, setProposedMinimum] = useState(3);
   const [closeHours, setCloseHours] = useState(168);
   const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -54,8 +51,7 @@ export default function ComposeRequest() {
   const canSubmit =
     Boolean(vendor) &&
     Boolean(category) &&
-    title.trim().length >= 3 &&
-    proposedMinimum >= 2;
+    title.trim().length >= 3;
 
   const submit = () => {
     if (!canSubmit || !vendor || !category) return;
@@ -66,7 +62,10 @@ export default function ComposeRequest() {
         category,
         title: title.trim(),
         description: description.trim() || undefined,
-        proposedMinimum,
+        // The resident does not choose the fire threshold — the vendor sets
+        // it at confirmation. The backend requires a value here (min 2), so
+        // we send the floor as a placeholder it will overwrite.
+        proposedMinimum: 2,
         closesAt,
       },
       {
@@ -110,8 +109,8 @@ export default function ComposeRequest() {
           <View>
             <Text variant="display" weight="semibold">Raise a request</Text>
             <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
-              Tag a vendor and set how many neighbours it takes to fire. Your committee
-              helps get the vendor to confirm.
+              Tag a vendor and describe what you need. The vendor sets how many
+              neighbours it takes to fire when they confirm.
             </Text>
           </View>
 
@@ -168,19 +167,6 @@ export default function ComposeRequest() {
               multiline
               minHeight={100}
             />
-          </View>
-
-          <View>
-            <SectionLabel>How many neighbours to fire</SectionLabel>
-            <Stepper
-              value={proposedMinimum}
-              onChange={(v) => setProposedMinimum(Math.max(2, Math.min(50, v)))}
-              min={2}
-              max={50}
-            />
-            <Text variant="caption" tone="muted" style={{ marginTop: 6 }}>
-              The vendor can adjust this when confirming, but this is what shows on the poll.
-            </Text>
           </View>
 
           <View>
@@ -329,78 +315,6 @@ function CloseChoice({
       <Text variant="body" weight="semibold" tone={active ? 'accent' : 'secondary'}>
         {label}
       </Text>
-    </Pressable>
-  );
-}
-
-function Stepper({
-  value,
-  onChange,
-  min,
-  max,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-  min: number;
-  max: number;
-}) {
-  const theme = useTheme();
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        backgroundColor: theme.colors.bg.elevated,
-        borderRadius: theme.radius.lg,
-        borderWidth: 1,
-        borderColor: theme.colors.border.subtle,
-        padding: 6,
-      }}
-    >
-      <StepperButton
-        Icon={Minus}
-        onPress={() => onChange(value - 1)}
-        disabled={value <= min}
-      />
-      <View style={{ flex: 1, alignItems: 'center' }}>
-        <Text variant="heading" weight="semibold" mono>{value}</Text>
-        <Text variant="caption" tone="muted">neighbours</Text>
-      </View>
-      <StepperButton
-        Icon={Plus}
-        onPress={() => onChange(value + 1)}
-        disabled={value >= max}
-      />
-    </View>
-  );
-}
-
-function StepperButton({
-  Icon,
-  onPress,
-  disabled,
-}: {
-  Icon: React.ComponentType<{ size?: number; color?: string; weight?: 'bold' }>;
-  onPress: () => void;
-  disabled: boolean;
-}) {
-  const theme = useTheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={({ pressed }) => ({
-        width: 40,
-        height: 40,
-        borderRadius: 999,
-        backgroundColor: theme.colors.accent.tint,
-        alignItems: 'center',
-        justifyContent: 'center',
-        opacity: disabled ? 0.4 : pressed ? 0.7 : 1,
-      })}
-    >
-      <Icon size={18} color={theme.colors.accent[700]} weight="bold" />
     </Pressable>
   );
 }
