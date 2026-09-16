@@ -35,7 +35,7 @@ export default function TabsLayout() {
         options={{
           title: 'Home',
           tabBarIcon: ({ color, focused }) => (
-            <House size={24} color={color} weight={focused ? 'fill' : 'regular'} />
+            <House size={24} color={color as string} weight={focused ? 'fill' : 'regular'} />
           ),
         }}
       />
@@ -44,7 +44,7 @@ export default function TabsLayout() {
         options={{
           title: 'Bills',
           tabBarIcon: ({ color, focused }) => (
-            <Receipt size={24} color={color} weight={focused ? 'fill' : 'regular'} />
+            <Receipt size={24} color={color as string} weight={focused ? 'fill' : 'regular'} />
           ),
         }}
       />
@@ -53,7 +53,7 @@ export default function TabsLayout() {
         options={{
           title: 'Requests',
           tabBarIcon: ({ color, focused }) => (
-            <Handshake size={24} color={color} weight={focused ? 'fill' : 'regular'} />
+            <Handshake size={24} color={color as string} weight={focused ? 'fill' : 'regular'} />
           ),
         }}
       />
@@ -62,7 +62,7 @@ export default function TabsLayout() {
         options={{
           title: 'Notices',
           tabBarIcon: ({ color, focused }) => (
-            <Megaphone size={24} color={color} weight={focused ? 'fill' : 'regular'} />
+            <Megaphone size={24} color={color as string} weight={focused ? 'fill' : 'regular'} />
           ),
         }}
       />
@@ -71,7 +71,7 @@ export default function TabsLayout() {
         options={{
           title: 'Profile',
           tabBarIcon: ({ color, focused }) => (
-            <User size={24} color={color} weight={focused ? 'fill' : 'regular'} />
+            <User size={24} color={color as string} weight={focused ? 'fill' : 'regular'} />
           ),
         }}
       />
