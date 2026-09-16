@@ -45,14 +45,14 @@ describe('applyPosting / sumBalances — conservation invariant', () => {
     let balances: Record<string, Decimal> = { SOCIETY_MASTER: new Decimal(1000) };
     const totalBefore = sumBalances(balances);
 
-    balances = applyPosting(balances, 'SOCIETY_MASTER', 'COMMISSION_SINK', new Decimal(150));
+    balances = applyPosting(balances, 'SOCIETY_MASTER', 'RETENTION', new Decimal(150));
     balances = applyPosting(balances, 'SOCIETY_MASTER', 'BULK_BUY', new Decimal(200));
-    balances = applyPosting(balances, 'BULK_BUY', 'COMMISSION_SINK', new Decimal(50));
-    balances = applyPosting(balances, 'COMMISSION_SINK', 'SOCIETY_MASTER', new Decimal(30));
+    balances = applyPosting(balances, 'BULK_BUY', 'RETENTION', new Decimal(50));
+    balances = applyPosting(balances, 'RETENTION', 'SOCIETY_MASTER', new Decimal(30));
 
     expect(sumBalances(balances).toString()).toBe(totalBefore.toString());
     expect(balances.SOCIETY_MASTER.toString()).toBe('680'); // 1000 - 150 - 200 + 30
-    expect(balances.COMMISSION_SINK.toString()).toBe('170'); // 150 + 50 - 30
+    expect(balances.RETENTION.toString()).toBe('170'); // 150 + 50 - 30
     expect(balances.BULK_BUY.toString()).toBe('150'); // 200 - 50
   });
 
@@ -72,16 +72,16 @@ describe('recomputeBalanceFromEntries', () => {
   it('matches the cumulative result of applying the same postings via applyPosting', () => {
     let balances: Record<string, Decimal> = {};
     const entries = [
-      { debitAccountId: 'SOCIETY_MASTER', creditAccountId: 'COMMISSION_SINK', amount: new Decimal(150) },
+      { debitAccountId: 'SOCIETY_MASTER', creditAccountId: 'RETENTION', amount: new Decimal(150) },
       { debitAccountId: 'SOCIETY_MASTER', creditAccountId: 'BULK_BUY', amount: new Decimal(200) },
-      { debitAccountId: 'BULK_BUY', creditAccountId: 'COMMISSION_SINK', amount: new Decimal(50) },
+      { debitAccountId: 'BULK_BUY', creditAccountId: 'RETENTION', amount: new Decimal(50) },
     ];
     for (const entry of entries) {
       balances = applyPosting(balances, entry.debitAccountId, entry.creditAccountId, entry.amount);
     }
 
     expect(recomputeBalanceFromEntries('SOCIETY_MASTER', entries).toString()).toBe(balances.SOCIETY_MASTER.toString());
-    expect(recomputeBalanceFromEntries('COMMISSION_SINK', entries).toString()).toBe(balances.COMMISSION_SINK.toString());
+    expect(recomputeBalanceFromEntries('RETENTION', entries).toString()).toBe(balances.RETENTION.toString());
     expect(recomputeBalanceFromEntries('BULK_BUY', entries).toString()).toBe(balances.BULK_BUY.toString());
   });
 
@@ -90,8 +90,8 @@ describe('recomputeBalanceFromEntries', () => {
   });
 
   it('verifyBalances-style check: a tampered cached balance is caught by comparing against the recompute', () => {
-    const entries = [{ debitAccountId: 'SOCIETY_MASTER', creditAccountId: 'COMMISSION_SINK', amount: new Decimal(150) }];
-    const recomputed = recomputeBalanceFromEntries('COMMISSION_SINK', entries);
+    const entries = [{ debitAccountId: 'SOCIETY_MASTER', creditAccountId: 'RETENTION', amount: new Decimal(150) }];
+    const recomputed = recomputeBalanceFromEntries('RETENTION', entries);
     const cachedCorrect = new Decimal(150);
     const cachedTampered = new Decimal(999);
 

@@ -8,7 +8,6 @@ import type { CurrentUserContext } from '../../common/types/current-user.js';
 import { PollStatus, RoleKind } from '../../generated/prisma/enums.js';
 import type { PollModel } from '../../generated/prisma/models.js';
 import { CreatePollDto } from './dto/create-poll.dto.js';
-import { VotePollDto } from './dto/vote-poll.dto.js';
 import { PollsService, type PollDetail } from './polls.service.js';
 
 @Controller('polls')
@@ -31,14 +30,7 @@ export class PollsController {
   @UseGuards(AuthGuard)
   @AuditLog('POLL_CREATE', 'Poll')
   async create(@CurrentUser() currentUser: CurrentUserContext, @Body() dto: CreatePollDto): Promise<PollDetail> {
-    return this.pollsService.create(currentUser.societyId, currentUser.id, currentUser.roleKinds, dto);
-  }
-
-  @Post(':id/vote')
-  @UseGuards(AuthGuard)
-  @AuditLog('POLL_VOTE', 'Poll')
-  async vote(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string, @Body() dto: VotePollDto): Promise<PollDetail> {
-    return this.pollsService.vote(currentUser.societyId, id, currentUser.id, dto);
+    return this.pollsService.create(currentUser.societyId, currentUser.id, dto);
   }
 
   @Post(':id/join')

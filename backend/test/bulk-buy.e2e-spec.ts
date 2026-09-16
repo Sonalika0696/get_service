@@ -38,8 +38,9 @@ import { AccountKind, OccupancyRole, RoleKind } from '../src/generated/prisma/en
  *    (400) — the sign-off-before-payout gate; a non-treasurer gets 403;
  *  - a treasurer's authorisation call both records the dual authorisation
  *    (SYSTEM + TREASURER) AND executes the payout in the same call, exactly
- *    once: commission (10% of the escrowed amount) to COMMISSION_SINK,
- *    vendorNet to EXTERNAL, BULK_BUY back to (its pre-booking level).
+ *    once: the full escrowed amount to EXTERNAL (no commission — V2.0
+ *    invariant I2), BULK_BUY back to its pre-booking level, and EXTERNAL
+ *    netting to zero: every rupee that came in went back out.
  *    Re-calling authorise does NOT double-pay;
  *  - committing to an already-FIRED offer is rejected (400);
  *  - conservation holds throughout: GET /ledger's balancesIntact stays true.
@@ -50,7 +51,7 @@ import { AccountKind, OccupancyRole, RoleKind } from '../src/generated/prisma/en
  * creates ordered Milestone rows and a retentionReleaseAt; the SMALL
  * payout/authorise route rejects a LARGE booking and vice versa; milestones
  * release strictly in order; the FIRST milestone authorisation also sets
- * aside commission + retention (BULK_BUY -> COMMISSION_SINK / -> RETENTION),
+ * aside retention (BULK_BUY -> RETENTION),
  * the LAST milestone releases whatever of vendorPayable remains (no rounding
  * dust); retention can only be released once every milestone is PAID and
  * the defect-liability period has elapsed (RETENTION -> EXTERNAL); every
@@ -97,8 +98,6 @@ interface PayoutBody {
   id: string;
   bookingId: string;
   amount: string | number;
-  commission: string | number;
-  vendorNet: string | number;
   status: 'PENDING' | 'AUTHORISED' | 'PAID';
   razorpayPayoutRef: string | null;
 }
@@ -125,7 +124,7 @@ interface BookingBody {
   retentionAmount?: string | number;
   retentionReleaseAt?: string | null;
   retentionReleasedAt?: string | null;
-  commissionTaken?: boolean;
+  retentionSetAside?: boolean;
 }
 
 interface LedgerAggregateBody {
@@ -289,7 +288,6 @@ describe('Bulk-buy Flow A (e2e)', () => {
     // independent of anything another suite left behind in a shared account.
     const startLedger = await ledgerBalances(committee.agent);
     const bulkBuyStart = balanceOf(startLedger, AccountKind.BULK_BUY);
-    const commissionStart = balanceOf(startLedger, AccountKind.COMMISSION_SINK);
     const externalStart = balanceOf(startLedger, AccountKind.EXTERNAL);
 
     // --- 1. Offer creation: bad ladders rejected with 400 ---
@@ -401,8 +399,6 @@ describe('Bulk-buy Flow A (e2e)', () => {
     expect(paidBooking.payout).not.toBeNull();
     expect(paidBooking.payout!.status).toBe('PAID');
     expect(Number(paidBooking.payout!.amount)).toBe(1900);
-    expect(Number(paidBooking.payout!.commission)).toBe(190);
-    expect(Number(paidBooking.payout!.vendorNet)).toBe(1710);
     expect(paidBooking.payout!.razorpayPayoutRef).toMatch(/^payout_stub_/);
 
     const authorisations = await prisma.payoutAuthorisation.findMany({ where: { payoutId: paidBooking.payout!.id } });
@@ -413,15 +409,15 @@ describe('Bulk-buy Flow A (e2e)', () => {
     const afterPayoutLedger = await ledgerBalances(committee.agent);
     expect(afterPayoutLedger.balancesIntact).toBe(true);
     expect(balanceOf(afterPayoutLedger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(0, 6);
-    expect(balanceOf(afterPayoutLedger, AccountKind.COMMISSION_SINK) - commissionStart).toBeCloseTo(190, 6);
     // EXTERNAL was debited 1900 at capture (money coming in) and credited
-    // 1710 at payout (money going back out to the vendor) — net -190.
-    expect(balanceOf(afterPayoutLedger, AccountKind.EXTERNAL) - externalStart).toBeCloseTo(-190, 6);
+    // 1900 at payout (money going back out to the vendor) — net zero. The
+    // platform retains nothing (invariant I2).
+    expect(balanceOf(afterPayoutLedger, AccountKind.EXTERNAL) - externalStart).toBeCloseTo(0, 6);
 
-    const commissionEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Payout', linkedEntityId: paidBooking.payout!.id, reasonCode: 'BULK_BUY_PAYOUT_COMMISSION' } });
     const vendorEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Payout', linkedEntityId: paidBooking.payout!.id, reasonCode: 'BULK_BUY_PAYOUT_VENDOR' } });
-    expect(commissionEntryCount).toBe(1);
     expect(vendorEntryCount).toBe(1);
+    const totalPayoutEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Payout', linkedEntityId: paidBooking.payout!.id } });
+    expect(totalPayoutEntryCount).toBe(1); // a single vendor posting — no commission leg
 
     // --- Re-calling authorise does NOT double-pay ---
     const replayRes = await treasurer.agent.post(`/api/v1/bookings/${booking.id}/payout/authorise`).expect(201);
@@ -429,10 +425,8 @@ describe('Bulk-buy Flow A (e2e)', () => {
     expect(replayBooking.payout!.status).toBe('PAID');
     expect(replayBooking.payout!.razorpayPayoutRef).toBe(paidBooking.payout!.razorpayPayoutRef);
 
-    const commissionEntryCountAfterReplay = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Payout', linkedEntityId: paidBooking.payout!.id, reasonCode: 'BULK_BUY_PAYOUT_COMMISSION' } });
     const vendorEntryCountAfterReplay = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Payout', linkedEntityId: paidBooking.payout!.id, reasonCode: 'BULK_BUY_PAYOUT_VENDOR' } });
-    expect(commissionEntryCountAfterReplay).toBe(1); // still exactly one — no double payout
-    expect(vendorEntryCountAfterReplay).toBe(1);
+    expect(vendorEntryCountAfterReplay).toBe(1); // still exactly one — no double payout
 
     const finalLedger = await ledgerBalances(committee.agent);
     expect(finalLedger.balancesIntact).toBe(true);
@@ -448,7 +442,7 @@ describe('Bulk-buy Flow A (e2e)', () => {
    * exact double-pay: two `$transaction` calls opened on separate pool
    * connections both read Payout as PENDING (or absent) before either
    * commits, both pass the authCount>=2 guard, and both credit
-   * COMMISSION_SINK/EXTERNAL — draining BULK_BUY twice for one booking. With
+   * EXTERNAL — draining BULK_BUY twice for one booking. With
    * the lock, the second transaction blocks on pg_advisory_xact_lock until
    * the first commits, then re-reads and finds Payout.status already PAID,
    * making its own guard a true no-op.
@@ -468,7 +462,6 @@ describe('Bulk-buy Flow A (e2e)', () => {
 
     const startLedger = await ledgerBalances(committee2.agent);
     const bulkBuyStart = balanceOf(startLedger, AccountKind.BULK_BUY);
-    const commissionStart = balanceOf(startLedger, AccountKind.COMMISSION_SINK);
     const externalStart = balanceOf(startLedger, AccountKind.EXTERNAL);
 
     const ladder = [{ minN: 2, pct: 5 }];
@@ -520,17 +513,14 @@ describe('Bulk-buy Flow A (e2e)', () => {
     expect(authorisations).toHaveLength(2); // SYSTEM + TREASURER — the race didn't duplicate either row (upsert + unique [payoutId, kind])
 
     const vendorEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Payout', linkedEntityId: payoutId, reasonCode: 'BULK_BUY_PAYOUT_VENDOR' } });
-    const commissionEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Payout', linkedEntityId: payoutId, reasonCode: 'BULK_BUY_PAYOUT_COMMISSION' } });
     expect(vendorEntryCount).toBe(1); // paid exactly once, despite the race
-    expect(commissionEntryCount).toBe(1);
 
     const finalLedger = await ledgerBalances(committee2.agent);
     expect(finalLedger.balancesIntact).toBe(true);
-    // amount = 1900 (2 x 950), commission = 190 (10%), vendorNet = 1710 —
-    // drained from BULK_BUY exactly once, not twice.
+    // amount = 1900 (2 x 950), paid in full — drained from BULK_BUY exactly
+    // once, not twice.
     expect(balanceOf(finalLedger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(0, 6);
-    expect(balanceOf(finalLedger, AccountKind.COMMISSION_SINK) - commissionStart).toBeCloseTo(190, 6);
-    expect(balanceOf(finalLedger, AccountKind.EXTERNAL) - externalStart).toBeCloseTo(-190, 6);
+    expect(balanceOf(finalLedger, AccountKind.EXTERNAL) - externalStart).toBeCloseTo(0, 6);
   });
 
   /**
@@ -538,22 +528,21 @@ describe('Bulk-buy Flow A (e2e)', () => {
    * Milestones + a retentionReleaseAt) -> escrow -> sign-off -> in-order
    * dual-authorised milestone releases -> defect-liability retention
    * release. Money flow for T=1900 (2 residents x 950, same 5%-off ladder
-   * tier as the SMALL test), commissionPct 10% (society default), 40/60
-   * milestone split, retentionPct 10%:
-   *   commission = 190 -> COMMISSION_SINK, retention = 190 -> RETENTION
-   *     (both set aside once, at milestone #1's authorisation)
-   *   vendorPayable = 1900 - 190 - 190 = 1520
-   *   milestone #1 (Advance, 40%)    = 1520 * 0.40 = 608  -> EXTERNAL
-   *   milestone #2 (Completion, 60%) = 1520 - 608  = 912  -> EXTERNAL
+   * tier as the SMALL test), 40/60 milestone split, retentionPct 10%, no
+   * commission (V2.0, invariant I2):
+   *   retention = 190 -> RETENTION (set aside once, at milestone #1's
+   *     authorisation)
+   *   vendorPayable = 1900 - 190 = 1710
+   *   milestone #1 (Advance, 40%)    = 1710 * 0.40 = 684  -> EXTERNAL
+   *   milestone #2 (Completion, 60%) = 1710 - 684  = 1026 -> EXTERNAL
    *     (the LAST milestone always takes whatever of vendorPayable remains,
-   *     rather than 1520 * 0.60 exactly, so rounding dust never gets
+   *     rather than 1710 * 0.60 exactly, so rounding dust never gets
    *     stranded in BULK_BUY — irrelevant to the arithmetic here since
-   *     1520 * 0.60 is exactly 912 too, but exercised by construction)
+   *     1710 * 0.60 is exactly 1026 too, but exercised by construction)
    *   retention (190) is released later, once every milestone is PAID and
    *     Clock.now() has reached retentionReleaseAt: RETENTION -> EXTERNAL.
-   * So EXTERNAL's net delta across the whole chain is exactly -commission
-   * (-190): -1900 in at escrow, +608 +912 +190 back out — the platform's
-   * commission share is the only part of T that never leaves via EXTERNAL.
+   * So EXTERNAL's net delta across the whole chain is exactly zero: -1900 in
+   * at escrow, +684 +1026 +190 back out. The platform retains nothing.
    */
   it('runs the full LARGE-tier chain: ordered milestone releases + defect-liability retention (Phase 4D)', async () => {
     const committee = await signupAndLogin(`bb-committee-large-${randomUUID()}@example.com`, flatIds[9], OccupancyRole.OWNER_OCCUPIER);
@@ -565,7 +554,6 @@ describe('Bulk-buy Flow A (e2e)', () => {
 
     const startLedger = await ledgerBalances(committee.agent);
     const bulkBuyStart = balanceOf(startLedger, AccountKind.BULK_BUY);
-    const commissionStart = balanceOf(startLedger, AccountKind.COMMISSION_SINK);
     const retentionStart = balanceOf(startLedger, AccountKind.RETENTION);
     const externalStart = balanceOf(startLedger, AccountKind.EXTERNAL);
 
@@ -649,18 +637,18 @@ describe('Bulk-buy Flow A (e2e)', () => {
     // --- 5. Out-of-order milestone authorisation is rejected ---
     await treasurer.agent.post(`/api/v1/bookings/${booking.id}/milestones/${milestoneRows[1].id}/authorise`).expect(400);
 
-    // --- 6. Milestone #1: non-treasurer 403; treasurer sets aside commission
-    //        + retention and releases the Advance share; replay is a no-op ---
+    // --- 6. Milestone #1: non-treasurer 403; treasurer sets aside retention
+    //        and releases the Advance share; replay is a no-op ---
     await resident1.agent.post(`/api/v1/bookings/${booking.id}/milestones/${milestoneRows[0].id}/authorise`).expect(403);
 
     const m1Res = await treasurer.agent.post(`/api/v1/bookings/${booking.id}/milestones/${milestoneRows[0].id}/authorise`).expect(201);
     const bookingAfterM1 = m1Res.body as BookingBody;
     const m1 = bookingAfterM1.milestones.find((m) => m.id === milestoneRows[0].id)!;
     expect(m1.status).toBe('PAID');
-    expect(Number(m1.amount)).toBe(608);
+    expect(Number(m1.amount)).toBe(684);
     expect(m1.razorpayPayoutRef).toMatch(/^payout_stub_/);
     expect(Number(bookingAfterM1.retentionAmount)).toBe(190);
-    expect(bookingAfterM1.commissionTaken).toBe(true);
+    expect(bookingAfterM1.retentionSetAside).toBe(true);
 
     const m1Authorisations = await prisma.milestoneAuthorisation.findMany({ where: { milestoneId: milestoneRows[0].id } });
     expect(m1Authorisations).toHaveLength(2);
@@ -669,8 +657,7 @@ describe('Bulk-buy Flow A (e2e)', () => {
 
     const afterM1Ledger = await ledgerBalances(committee.agent);
     expect(afterM1Ledger.balancesIntact).toBe(true);
-    expect(balanceOf(afterM1Ledger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(1900 - 190 - 190 - 608, 6);
-    expect(balanceOf(afterM1Ledger, AccountKind.COMMISSION_SINK) - commissionStart).toBeCloseTo(190, 6);
+    expect(balanceOf(afterM1Ledger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(1900 - 190 - 684, 6);
     expect(balanceOf(afterM1Ledger, AccountKind.RETENTION) - retentionStart).toBeCloseTo(190, 6);
 
     // Re-authorise #1 -> idempotent no-op: exactly one payout ledger entry,
@@ -679,17 +666,17 @@ describe('Bulk-buy Flow A (e2e)', () => {
     expect((m1ReplayRes.body as BookingBody).milestones.find((m) => m.id === milestoneRows[0].id)!.status).toBe('PAID');
     const m1PayoutEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Milestone', linkedEntityId: milestoneRows[0].id, reasonCode: 'BULK_BUY_MILESTONE_PAYOUT' } });
     expect(m1PayoutEntryCount).toBe(1);
-    const m1CommissionEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Booking', linkedEntityId: booking.id, reasonCode: 'BULK_BUY_MILESTONE_COMMISSION' } });
-    expect(m1CommissionEntryCount).toBe(1);
+    const m1RetentionHoldEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Booking', linkedEntityId: booking.id, reasonCode: 'BULK_BUY_MILESTONE_RETENTION_HOLD' } });
+    expect(m1RetentionHoldEntryCount).toBe(1);
     const afterM1ReplayLedger = await ledgerBalances(committee.agent);
-    expect(balanceOf(afterM1ReplayLedger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(1900 - 190 - 190 - 608, 6);
+    expect(balanceOf(afterM1ReplayLedger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(1900 - 190 - 684, 6);
 
     // --- 7. Milestone #2 (last): releases whatever of vendorPayable remains ---
     const m2Res = await treasurer.agent.post(`/api/v1/bookings/${booking.id}/milestones/${milestoneRows[1].id}/authorise`).expect(201);
     const bookingAfterM2 = m2Res.body as BookingBody;
     const m2 = bookingAfterM2.milestones.find((m) => m.id === milestoneRows[1].id)!;
     expect(m2.status).toBe('PAID');
-    expect(Number(m2.amount)).toBe(912);
+    expect(Number(m2.amount)).toBe(1026);
 
     const afterM2Ledger = await ledgerBalances(committee.agent);
     expect(afterM2Ledger.balancesIntact).toBe(true);
@@ -710,7 +697,7 @@ describe('Bulk-buy Flow A (e2e)', () => {
     expect(afterReleaseLedger.balancesIntact).toBe(true);
     expect(balanceOf(afterReleaseLedger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(0, 6);
     expect(balanceOf(afterReleaseLedger, AccountKind.RETENTION) - retentionStart).toBeCloseTo(0, 6);
-    expect(balanceOf(afterReleaseLedger, AccountKind.EXTERNAL) - externalStart).toBeCloseTo(-190, 6); // -commission, exactly as the SMALL flow's own invariant
+    expect(balanceOf(afterReleaseLedger, AccountKind.EXTERNAL) - externalStart).toBeCloseTo(0, 6); // nets to zero, exactly as the SMALL flow's own invariant
 
     const releaseReplayRes = await treasurer.agent.post(`/api/v1/bookings/${booking.id}/retention/release`).expect(201);
     expect((releaseReplayRes.body as BookingBody).retentionReleasedAt).toBe(releasedBooking.retentionReleasedAt);
@@ -742,7 +729,6 @@ describe('Bulk-buy Flow A (e2e)', () => {
 
     const startLedger = await ledgerBalances(committee3.agent);
     const bulkBuyStart = balanceOf(startLedger, AccountKind.BULK_BUY);
-    const commissionStart = balanceOf(startLedger, AccountKind.COMMISSION_SINK);
     const retentionStart = balanceOf(startLedger, AccountKind.RETENTION);
 
     const milestoneTemplate = [{ name: 'Full payment', pct: 100 }];
@@ -804,19 +790,16 @@ describe('Bulk-buy Flow A (e2e)', () => {
     expect(authorisations).toHaveLength(2); // SYSTEM + TREASURER — the race didn't duplicate either row
 
     const payoutEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Milestone', linkedEntityId: milestone.id, reasonCode: 'BULK_BUY_MILESTONE_PAYOUT' } });
-    const commissionEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Booking', linkedEntityId: booking.id, reasonCode: 'BULK_BUY_MILESTONE_COMMISSION' } });
     const retentionHoldEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Booking', linkedEntityId: booking.id, reasonCode: 'BULK_BUY_MILESTONE_RETENTION_HOLD' } });
     expect(payoutEntryCount).toBe(1); // paid exactly once, despite the race
-    expect(commissionEntryCount).toBe(1);
     expect(retentionHoldEntryCount).toBe(1);
 
     const finalLedger = await ledgerBalances(committee3.agent);
     expect(finalLedger.balancesIntact).toBe(true);
-    // T = 1900 (2 x 950), commission = 190, retention = 190, vendor = 1520 —
-    // the single (100%) milestone releases the full 1520, drained from
+    // T = 1900 (2 x 950), retention = 190, vendor = 1710 —
+    // the single (100%) milestone releases the full 1710, drained from
     // BULK_BUY exactly once, not twice.
     expect(balanceOf(finalLedger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(0, 6);
-    expect(balanceOf(finalLedger, AccountKind.COMMISSION_SINK) - commissionStart).toBeCloseTo(190, 6);
     expect(balanceOf(finalLedger, AccountKind.RETENTION) - retentionStart).toBeCloseTo(190, 6);
   });
 });

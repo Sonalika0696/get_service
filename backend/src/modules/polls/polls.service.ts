@@ -2,51 +2,38 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { PrismaService } from '../../infra/prisma/prisma.service.js';
 import { Clock } from '../../infra/clock/clock.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
-import { sha256 } from '../../common/util/hash.js';
 import { Prisma } from '../../generated/prisma/client.js';
-import { OccupancyRole, PollStatus, PollType, PollWeightMode, RoleKind } from '../../generated/prisma/enums.js';
+import { PollStatus, PollType } from '../../generated/prisma/enums.js';
 import type { PollModel } from '../../generated/prisma/models.js';
-import { computeTally, type TallyResult } from './poll-tally.util.js';
 import type { CreatePollDto } from './dto/create-poll.dto.js';
-import type { VotePollDto } from './dto/vote-poll.dto.js';
 
-/** API-facing shape: the poll row plus a live tally readout and the caller's own participation flags. */
+/** API-facing shape: the poll row plus its commitment count and the caller's own participation flag. */
 export type PollDetail = PollModel & {
-  tally: TallyResult;
   commitmentCount: number;
-  hasVoted: boolean;
   hasJoined: boolean;
 };
 
-// BULK_BUY_RESIDENT deliberately excluded: create()/join() both reject it
-// outright (see the ownership-split doc comment above) before ever
-// consulting this set, so it only ever needs to describe EVENT here.
-const JOINABLE_TYPES = new Set<PollType>([PollType.EVENT]);
-const OWNER_ROLES = new Set<OccupancyRole>([OccupancyRole.OWNER_OCCUPIER, OccupancyRole.OWNER_ABSENTEE]);
-
-type VoterOccupancy = { role: OccupancyRole; flat: { ownershipShare: Prisma.Decimal } };
-
 /**
- * Reusable poll engine (Phase 3: event polls, no money). Phase 5 reuses the
- * shared Poll/PollCommitment tables for bulk-buy Flow B
- * (PollType.BULK_BUY_RESIDENT), but OWNS that pollType's entire lifecycle
- * from the bulk-buy module instead — see
- * src/modules/bulk-buy/bulk-buy.service.ts's Flow B section
- * (createResidentPoll/vendorConfirm/vendorDecline/joinResidentPoll). This
- * module stays governance/event only: create/vote/join all reject
- * BULK_BUY_RESIDENT with 400, pointing callers at the bulk-buy routes
- * instead. GET (list/get) still work for any pollType, including
- * BULK_BUY_RESIDENT, since read access has no ownership implications.
+ * Poll engine (Phase 3), reduced in the V2.0 scope revision: resident voting
+ * — ADVISORY/BINDING polls, Vote, ownership weighting, quorum — is withdrawn
+ * (DECISIONS_V2_SCOPE.md §2.4–2.5, SDD invariant I8). What remains is the
+ * opt-in "join" mechanic: residents commit, and the poll auto-fires once
+ * minCommitments is reached. Phase 8 renames this to
+ * ServiceRequest/Participation.
  *
- * GET routes are read-only by design: they report a poll's *current*
- * persisted status plus a live tally computed on the fly. Nothing here
- * mutates a poll's status as a side effect of reading it. Expiry is only
- * ever applied by processExpired(), which today is invoked by
- * POST /polls/process-expired (committee-only) as a stand-in for a future
- * scheduler (@nestjs/schedule was deliberately not added in this phase).
- * processExpired still applies to BULK_BUY_RESIDENT polls (an unconfirmed
- * or under-subscribed tagged-vendor poll should still expire), since that's
- * generic EVENT-shaped lifecycle logic, not Flow B ownership.
+ * Phase 5 reuses the shared Poll/PollCommitment tables for bulk-buy Flow B
+ * (PollType.BULK_BUY_RESIDENT), but OWNS that pollType's entire lifecycle
+ * from the bulk-buy module — see src/modules/bulk-buy/bulk-buy.service.ts's
+ * Flow B section. create/join here reject BULK_BUY_RESIDENT with 400,
+ * pointing callers at the bulk-buy routes. GET (list/get) work for any
+ * pollType, since read access has no ownership implications.
+ *
+ * GET routes are read-only by design: nothing here mutates a poll's status
+ * as a side effect of reading it. Expiry is only ever applied by
+ * processExpired(), invoked by POST /polls/process-expired (committee-only)
+ * as a stand-in for a future scheduler. processExpired still applies to
+ * BULK_BUY_RESIDENT polls, since expiry is generic lifecycle logic rather
+ * than Flow B ownership.
  */
 @Injectable()
 export class PollsService {
@@ -56,12 +43,9 @@ export class PollsService {
     private readonly notifications: NotificationsService,
   ) {}
 
-  async create(societyId: string, creatorId: string, callerRoleKinds: RoleKind[], dto: CreatePollDto): Promise<PollDetail> {
+  async create(societyId: string, creatorId: string, dto: CreatePollDto): Promise<PollDetail> {
     if (dto.pollType === PollType.BULK_BUY_RESIDENT) {
       throw new BadRequestException('Create resident bulk-buy polls via POST /bulk-buy/polls');
-    }
-    if (dto.pollType === PollType.BINDING && !callerRoleKinds.includes(RoleKind.COMMITTEE)) {
-      throw new ForbiddenException('Only committee members can create binding polls');
     }
 
     const closesAt = new Date(dto.closesAt);
@@ -69,8 +53,8 @@ export class PollsService {
       throw new BadRequestException('closesAt must be a valid date in the future');
     }
 
-    if (JOINABLE_TYPES.has(dto.pollType) && (!dto.minCommitments || dto.minCommitments < 1)) {
-      throw new BadRequestException('minCommitments (>= 1) is required for EVENT/BULK_BUY_RESIDENT polls');
+    if (!dto.minCommitments || dto.minCommitments < 1) {
+      throw new BadRequestException('minCommitments (>= 1) is required for EVENT polls');
     }
 
     const poll = await this.prisma.poll.create({
@@ -78,12 +62,9 @@ export class PollsService {
         societyId,
         creatorId,
         pollType: dto.pollType,
-        weightMode: dto.weightMode ?? PollWeightMode.UNIFORM,
         title: dto.title,
         description: dto.description,
-        quorumPct: dto.quorumPct ?? 60,
-        passingPct: dto.passingPct ?? 50,
-        minCommitments: JOINABLE_TYPES.has(dto.pollType) ? dto.minCommitments : null,
+        minCommitments: dto.minCommitments,
         closesAt,
       },
     });
@@ -104,61 +85,22 @@ export class PollsService {
   }
 
   /**
-   * Casts a vote for the authenticated caller. Eligibility and weight are
-   * derived server-side from the caller's occupancy — never from client
-   * input. voterHash is likewise computed server-side (see Vote.voterHash
-   * doc comment in schema.prisma) so the anonymity guarantee can't be
-   * bypassed by a client claiming someone else's hash.
-   */
-  async vote(societyId: string, id: string, callerId: string, dto: VotePollDto): Promise<PollDetail> {
-    const poll = await this.getInternal(societyId, id);
-    if (poll.pollType === PollType.BULK_BUY_RESIDENT) {
-      throw new BadRequestException('BULK_BUY_RESIDENT polls are owned by the bulk-buy module — use POST /bulk-buy/polls/:id/join instead of voting');
-    }
-    if (poll.status !== PollStatus.OPEN) {
-      throw new BadRequestException('Poll is not open for voting');
-    }
-
-    const occupancy = await this.loadVoterOccupancy(societyId, callerId);
-    if (!occupancy) {
-      throw new ForbiddenException('Not a resident of this society');
-    }
-    const weight = this.eligibleVoterWeight(poll, occupancy);
-
-    const voterHash = this.computeVoterHash(id, callerId);
-
-    try {
-      await this.prisma.vote.create({ data: { pollId: id, voterHash, choice: dto.choice, weight } });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ConflictException('Already voted');
-      }
-      throw error;
-    }
-
-    return this.get(societyId, id, callerId);
-  }
-
-  /**
-   * Records the caller's commitment (EVENT "join", or a future bulk-buy
-   * commitment). Triggers the auto-fire check synchronously in the same
-   * transaction that inserts the commitment, so firing is deterministic
-   * and e2e-testable rather than depending on a background job.
+   * Records the caller's commitment. Triggers the auto-fire check
+   * synchronously in the same transaction that inserts the commitment, so
+   * firing is deterministic and e2e-testable rather than depending on a
+   * background job.
    */
   async join(societyId: string, id: string, callerId: string): Promise<PollDetail> {
     const poll = await this.getInternal(societyId, id);
     if (poll.pollType === PollType.BULK_BUY_RESIDENT) {
       throw new BadRequestException('BULK_BUY_RESIDENT polls are owned by the bulk-buy module — use POST /bulk-buy/polls/:id/join instead');
     }
-    if (!JOINABLE_TYPES.has(poll.pollType)) {
-      throw new BadRequestException(`${poll.pollType} polls don't support joining — use vote instead`);
-    }
     if (poll.status !== PollStatus.OPEN) {
       throw new BadRequestException('Poll is not open for joining');
     }
 
-    const occupancy = await this.loadVoterOccupancy(societyId, callerId);
-    if (!occupancy) {
+    const isResident = await this.isActiveResident(societyId, callerId);
+    if (!isResident) {
       throw new ForbiddenException('Not a resident of this society');
     }
 
@@ -185,7 +127,7 @@ export class PollsService {
     return this.get(societyId, id, callerId);
   }
 
-  /** Creator-only close-early. ADVISORY/BINDING resolve immediately by tally; EVENT/BULK_BUY_RESIDENT close (or are already FIRED). */
+  /** Creator-only close-early. An already-FIRED poll can't be closed. */
   async closeEarly(societyId: string, id: string, callerId: string): Promise<PollDetail> {
     const poll = await this.getInternal(societyId, id);
     if (poll.creatorId !== callerId) {
@@ -195,22 +137,16 @@ export class PollsService {
       throw new BadRequestException(`Poll is already ${poll.status}`);
     }
 
-    if (poll.pollType === PollType.ADVISORY || poll.pollType === PollType.BINDING) {
-      await this.resolveDecisivePoll(poll);
-    } else {
-      await this.prisma.poll.update({ where: { id }, data: { status: PollStatus.CLOSED, closedAt: this.clock.now() } });
-    }
+    await this.prisma.poll.update({ where: { id }, data: { status: PollStatus.CLOSED, closedAt: this.clock.now() } });
 
     return this.get(societyId, id, callerId);
   }
 
   /**
-   * Resolves every OPEN poll in the society whose closesAt has passed:
-   * ADVISORY/BINDING -> PASSED/FAILED by tally; EVENT/BULK_BUY_RESIDENT
-   * with commitments still short of minCommitments -> EXPIRED (+ notify
-   * committed residents). A poll that already auto-fired before expiring
-   * is left FIRED, not touched here. This is the method a real scheduler
-   * would call periodically; for now it's driven explicitly via
+   * Expires every OPEN poll in the society whose closesAt has passed (+
+   * notifies committed residents). A poll that already auto-fired before
+   * expiring is left FIRED, not touched here. This is the method a real
+   * scheduler would call periodically; for now it's driven explicitly via
    * POST /polls/process-expired.
    */
   async processExpired(societyId: string): Promise<{ resolved: number }> {
@@ -220,14 +156,10 @@ export class PollsService {
     });
 
     for (const poll of expired) {
-      if (poll.pollType === PollType.ADVISORY || poll.pollType === PollType.BINDING) {
-        await this.resolveDecisivePoll(poll);
-      } else {
-        await this.prisma.$transaction(async (tx) => {
-          await tx.poll.update({ where: { id: poll.id }, data: { status: PollStatus.EXPIRED, closedAt: this.clock.now() } });
-          await this.notifyCommitted(tx, poll.id, poll.title, 'expired');
-        });
-      }
+      await this.prisma.$transaction(async (tx) => {
+        await tx.poll.update({ where: { id: poll.id }, data: { status: PollStatus.EXPIRED, closedAt: this.clock.now() } });
+        await this.notifyCommitted(tx, poll.id, poll.title, 'expired');
+      });
     }
 
     return { resolved: expired.length };
@@ -236,13 +168,6 @@ export class PollsService {
   // ---------------------------------------------------------------------
   // Internal helpers
   // ---------------------------------------------------------------------
-
-  private async resolveDecisivePoll(poll: PollModel): Promise<void> {
-    const tally = await this.computeLiveTally(poll);
-    const status = tally.passed ? PollStatus.PASSED : PollStatus.FAILED;
-    const now = this.clock.now();
-    await this.prisma.poll.update({ where: { id: poll.id }, data: { status, resolvedAt: now, closedAt: now } });
-  }
 
   private async notifyCommitted(tx: Prisma.TransactionClient, pollId: string, title: string, kind: 'fired' | 'expired'): Promise<void> {
     const commitments = await tx.pollCommitment.findMany({ where: { pollId }, include: { resident: true } });
@@ -255,84 +180,22 @@ export class PollsService {
     }
   }
 
-  private computeVoterHash(pollId: string, userId: string): string {
-    return sha256(Buffer.from(`${pollId}:${userId}`)).toString('hex');
-  }
-
-  /** One active occupancy per user in v1 (see UserContextService) — loaded fresh here because it carries flat.ownershipShare, which CurrentUserContext doesn't. */
-  private async loadVoterOccupancy(societyId: string, userId: string): Promise<VoterOccupancy | null> {
-    return this.prisma.occupancy.findFirst({
+  /** One active occupancy per user in v1 (see UserContextService). */
+  private async isActiveResident(societyId: string, userId: string): Promise<boolean> {
+    const occupancy = await this.prisma.occupancy.findFirst({
       where: { userId, tenureEndedAt: null, flat: { societyId } },
-      select: { role: true, flat: { select: { ownershipShare: true } } },
+      select: { id: true },
     });
-  }
-
-  /**
-   * ADVISORY / EVENT / BULK_BUY_RESIDENT: every resident is eligible,
-   * weight 1 regardless of weightMode. BINDING: only owners are eligible
-   * (a TENANT is rejected with 403); weight is the flat's ownershipShare
-   * under OWNERSHIP_WEIGHTED, else 1.
-   */
-  private eligibleVoterWeight(poll: PollModel, occupancy: VoterOccupancy): number {
-    if (poll.pollType !== PollType.BINDING) {
-      return 1;
-    }
-    if (!OWNER_ROLES.has(occupancy.role)) {
-      throw new ForbiddenException('Tenants cannot vote on binding polls');
-    }
-    return poll.weightMode === PollWeightMode.OWNERSHIP_WEIGHTED ? Number(occupancy.flat.ownershipShare) : 1;
-  }
-
-  /**
-   * Sum of weights of every resident *eligible* to vote on this poll
-   * (whether or not they have), computed fresh from current occupancies —
-   * used as the tally's quorum denominator.
-   */
-  private async computeTotalEligibleWeight(societyId: string, poll: PollModel): Promise<number> {
-    if (poll.pollType === PollType.BINDING) {
-      const owners = await this.prisma.occupancy.findMany({
-        where: { tenureEndedAt: null, flat: { societyId }, role: { in: Array.from(OWNER_ROLES) } },
-        select: { flat: { select: { ownershipShare: true } } },
-      });
-      if (poll.weightMode === PollWeightMode.OWNERSHIP_WEIGHTED) {
-        return owners.reduce((total, o) => total + Number(o.flat.ownershipShare), 0);
-      }
-      return owners.length;
-    }
-
-    // ADVISORY / EVENT / BULK_BUY_RESIDENT: every resident, weight 1 each.
-    return this.prisma.occupancy.count({ where: { tenureEndedAt: null, flat: { societyId } } });
-  }
-
-  private async computeLiveTally(poll: PollModel): Promise<TallyResult> {
-    const [totalEligibleWeight, votes] = await Promise.all([
-      this.computeTotalEligibleWeight(poll.societyId, poll),
-      this.prisma.vote.findMany({ where: { pollId: poll.id }, select: { choice: true, weight: true } }),
-    ]);
-
-    return computeTally({
-      totalEligibleWeight,
-      votes: votes.map((v) => ({ choice: v.choice, weight: Number(v.weight) })),
-      quorumPct: Number(poll.quorumPct),
-      passingPct: Number(poll.passingPct),
-    });
+    return occupancy !== null;
   }
 
   private async toDetail(poll: PollModel, callerId: string | null): Promise<PollDetail> {
-    const [tally, commitmentCount, hasVoted, hasJoined] = await Promise.all([
-      this.computeLiveTally(poll),
+    const [commitmentCount, hasJoined] = await Promise.all([
       this.prisma.pollCommitment.count({ where: { pollId: poll.id } }),
-      callerId ? this.hasVoted(poll.id, callerId) : Promise.resolve(false),
       callerId ? this.prisma.pollCommitment.findUnique({ where: { pollId_residentId: { pollId: poll.id, residentId: callerId } } }).then(Boolean) : Promise.resolve(false),
     ]);
 
-    return { ...poll, tally, commitmentCount, hasVoted, hasJoined };
-  }
-
-  private async hasVoted(pollId: string, callerId: string): Promise<boolean> {
-    const voterHash = this.computeVoterHash(pollId, callerId);
-    const vote = await this.prisma.vote.findUnique({ where: { pollId_voterHash: { pollId, voterHash } } });
-    return vote !== null;
+    return { ...poll, commitmentCount, hasJoined };
   }
 
   private async getInternal(societyId: string, id: string): Promise<PollModel> {

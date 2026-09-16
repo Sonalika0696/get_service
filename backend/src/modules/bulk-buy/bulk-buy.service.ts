@@ -16,7 +16,6 @@ import type { VendorConfirmDto } from './dto/vendor-confirm.dto.js';
 type Decimal = Prisma.Decimal;
 const Decimal = Prisma.Decimal;
 
-const DEFAULT_COMMISSION_PCT = 10;
 /** Same namespace BulkBuyService.authorisePayout has always used — see its
  * doc comment. Milestones (4D) and the SMALL single-shot payout (4C) are
  * mutually exclusive per booking (a booking is either SMALL or LARGE, never
@@ -73,25 +72,20 @@ export type ResidentPollDetail = PollModel & {
  *   commit (escrow-in, via PaymentsService.createOrderForLink + the
  *     existing Phase 4B webhook path) posts EXTERNAL -> BULK_BUY per
  *     resident, exactly like any other payment capture.
- *   payout (escrow-out) posts, in one transaction:
- *     BULK_BUY -> COMMISSION_SINK   (the platform's commission share)
- *     BULK_BUY -> EXTERNAL          (the vendor's net share leaving the
- *                                    closed ledger set — see schema.prisma's
- *                                    Ledger section doc comment for why
- *                                    crediting EXTERNAL means money leaving)
- *   This conserves the total exactly: commission + vendorNet == amount ==
- *   what BULK_BUY held for this booking, so BULK_BUY nets back to (at least)
- *   zero for this booking's contribution once paid.
+ *   payout (escrow-out) posts BULK_BUY -> EXTERNAL for the full escrowed
+ *     amount (the vendor's payment leaving the closed ledger set — see
+ *     schema.prisma's Ledger section doc comment for why crediting EXTERNAL
+ *     means money leaving). No commission is split out: the platform holds
+ *     no account in the society's chart of accounts (V2.0, invariant I2),
+ *     so BULK_BUY nets back to zero for this booking's contribution once paid.
  *
  * Money flow summary, LARGE (see authoriseMilestone / releaseRetention for
  * the code). For an escrowed total T (sum of the booking's discounted
- * job-card prices), commissionPct c, retentionPct r:
- *   commission    = T * c/100  -> BULK_BUY -> COMMISSION_SINK (once, at the
- *                                 FIRST milestone authorisation)
- *   retention     = T * r/100  -> BULK_BUY -> RETENTION       (once, at the
+ * job-card prices) and retentionPct r:
+ *   retention     = T * r/100  -> BULK_BUY -> RETENTION (once, at the
  *                                 FIRST milestone authorisation — RETENTION
  *                                 is a holding account, not the vendor's)
- *   vendorPayable = T - commission - retention, released across milestones:
+ *   vendorPayable = T - retention, released across milestones:
  *     milestone i releases vendorPayable * pct_i/100 -> BULK_BUY -> EXTERNAL
  *     (the LAST milestone by sequence instead releases whatever remains of
  *     vendorPayable, so rounding dust never gets stranded — see
@@ -513,13 +507,9 @@ export class BulkBuyService {
         throw new BadRequestException('Escrow (BULK_BUY) balance is insufficient for this payout');
       }
 
-      const commissionPct = await this.getCommissionPct(tx, societyId);
-      const commission = amount.mul(commissionPct).div(100).toDecimalPlaces(2);
-      const vendorNet = amount.minus(commission);
-
       if (!payout) {
         payout = await tx.payout.create({
-          data: { bookingId, amount, commission, vendorNet, status: PayoutStatus.PENDING },
+          data: { bookingId, amount, status: PayoutStatus.PENDING },
         });
       }
 
@@ -542,20 +532,8 @@ export class BulkBuyService {
           {
             societyId,
             debitKind: AccountKind.BULK_BUY,
-            creditKind: AccountKind.COMMISSION_SINK,
-            amount: commission,
-            reasonCode: 'BULK_BUY_PAYOUT_COMMISSION',
-            linkedEntityType: 'Payout',
-            linkedEntityId: payout.id,
-          },
-          tx,
-        );
-        await this.ledger.post(
-          {
-            societyId,
-            debitKind: AccountKind.BULK_BUY,
             creditKind: AccountKind.EXTERNAL,
-            amount: vendorNet,
+            amount,
             reasonCode: 'BULK_BUY_PAYOUT_VENDOR',
             linkedEntityType: 'Payout',
             linkedEntityId: payout.id,
@@ -565,7 +543,7 @@ export class BulkBuyService {
 
         // STUBBED — no real RazorpayX transfer, ever (hard project
         // constraint). See RazorpayService.payout's doc comment.
-        const payoutRef = await this.razorpay.payout({ vendorId: booking.vendorId, amount: Math.round(Number(vendorNet) * 100) });
+        const payoutRef = await this.razorpay.payout({ vendorId: booking.vendorId, amount: Math.round(Number(amount) * 100) });
 
         payout = await tx.payout.update({
           where: { id: payout.id },
@@ -597,21 +575,15 @@ export class BulkBuyService {
    * release strictly in order).
    *
    * On the FIRST milestone ever authorised on this booking (Booking.
-   * commissionTaken === false), this also performs the once-only
-   * commission + retention set-aside: T = sum of the booking's job-card
-   * unitPrices, commission = T * commissionPct/100, retention = T *
-   * offer.retentionPct/100 (the offer is looked up via booking.sourceId,
-   * the same loose OFFER pointer fireOffer used — read at authorise time
-   * rather than snapshotted at fire time, mirroring authorisePayout's own
-   * "read commissionPct at payout time" choice). commission is posted
-   * BULK_BUY -> COMMISSION_SINK and retention BULK_BUY -> RETENTION;
-   * Booking.retentionAmount and commissionTaken are updated so every later
-   * milestone call on this booking skips this step. On every later call,
-   * `commission` is instead read back off the LedgerEntry this step wrote
-   * (rather than recomputed) and `retention` off the persisted
-   * Booking.retentionAmount — both exact, so vendorPayable
-   * (= T - commission - retention) is bit-for-bit identical on every call
-   * regardless of whether commissionPct's config value changes in between.
+   * retentionSetAside === false), this also performs the once-only
+   * retention set-aside: T = sum of the booking's job-card unitPrices,
+   * retention = T * offer.retentionPct/100 (the offer is looked up via
+   * booking.sourceId, the same loose OFFER pointer fireOffer used). Retention
+   * is posted BULK_BUY -> RETENTION, and Booking.retentionAmount and
+   * retentionSetAside are updated so every later milestone call on this
+   * booking skips this step. On every later call `retention` is read back
+   * off the persisted Booking.retentionAmount rather than recomputed, so
+   * vendorPayable (= T - retention) is bit-for-bit identical on every call.
    *
    * Releases this milestone: amount = vendorPayable * milestone.pct/100,
    * rounded to 2dp — EXCEPT the last milestone by sequence, which instead
@@ -669,25 +641,17 @@ export class BulkBuyService {
 
       const total = booking.jobCards.reduce((sum, jc) => sum.plus(new Decimal(jc.unitPrice)), new Decimal(0));
 
-      let commission: Decimal;
       let retention: Decimal;
-      const isFirstMilestone = !booking.commissionTaken;
+      const isFirstMilestone = !booking.retentionSetAside;
 
       if (isFirstMilestone) {
-        const commissionPct = await this.getCommissionPct(tx, societyId);
-        commission = total.mul(commissionPct).div(100).toDecimalPlaces(2);
-
         const offer = await tx.offer.findUniqueOrThrow({ where: { id: booking.sourceId } });
         retention = total.mul(new Decimal(offer.retentionPct)).div(100).toDecimalPlaces(2);
       } else {
-        const commissionEntry = await tx.ledgerEntry.findFirst({
-          where: { societyId, linkedEntityType: 'Booking', linkedEntityId: booking.id, reasonCode: 'BULK_BUY_MILESTONE_COMMISSION' },
-        });
-        commission = commissionEntry ? new Decimal(commissionEntry.amount) : new Decimal(0);
         retention = new Decimal(booking.retentionAmount);
       }
 
-      const vendorPayable = total.minus(commission).minus(retention);
+      const vendorPayable = total.minus(retention);
       const maxSequence = Math.max(...booking.milestones.map((m) => m.sequence));
       const isLastMilestone = milestone.sequence === maxSequence;
 
@@ -702,24 +666,12 @@ export class BulkBuyService {
       }
 
       const bulkBuyAccount = await this.ledger.getOrCreateAccount(societyId, AccountKind.BULK_BUY, tx);
-      const totalMovingOut = isFirstMilestone ? amount.plus(commission).plus(retention) : amount;
+      const totalMovingOut = isFirstMilestone ? amount.plus(retention) : amount;
       if (new Decimal(bulkBuyAccount.balance).lessThan(totalMovingOut)) {
         throw new BadRequestException('Escrow (BULK_BUY) balance is insufficient for this milestone release');
       }
 
       if (isFirstMilestone) {
-        await this.ledger.post(
-          {
-            societyId,
-            debitKind: AccountKind.BULK_BUY,
-            creditKind: AccountKind.COMMISSION_SINK,
-            amount: commission,
-            reasonCode: 'BULK_BUY_MILESTONE_COMMISSION',
-            linkedEntityType: 'Booking',
-            linkedEntityId: booking.id,
-          },
-          tx,
-        );
         await this.ledger.post(
           {
             societyId,
@@ -732,9 +684,9 @@ export class BulkBuyService {
           },
           tx,
         );
-        await tx.booking.update({ where: { id: booking.id }, data: { retentionAmount: retention, commissionTaken: true } });
+        await tx.booking.update({ where: { id: booking.id }, data: { retentionAmount: retention, retentionSetAside: true } });
         booking.retentionAmount = retention;
-        booking.commissionTaken = true;
+        booking.retentionSetAside = true;
       }
 
       // Both authorisation rows are upserts: replaying this call (before
@@ -1190,12 +1142,6 @@ export class BulkBuyService {
   // -------------------------------------------------------------------
   // Internal helpers
   // -------------------------------------------------------------------
-
-  private async getCommissionPct(tx: Prisma.TransactionClient, societyId: string): Promise<number> {
-    const society = await tx.society.findUniqueOrThrow({ where: { id: societyId }, select: { config: true } });
-    const config = society.config as Record<string, unknown>;
-    return typeof config.commissionPct === 'number' ? config.commissionPct : DEFAULT_COMMISSION_PCT;
-  }
 
   private async getOfferInternal(societyId: string, id: string): Promise<OfferModel> {
     const offer = await this.prisma.offer.findUnique({ where: { id } });

@@ -121,9 +121,6 @@ model Flat {
   societyId         String
   unitNo            String
   maintenanceAmount Decimal  @db.Decimal(10, 2)
-  /// Undivided share of the flat, consulted only when a binding poll uses
-  /// OWNERSHIP_WEIGHTED. Defaults to 1.0 (uniform weight) until bylaws say otherwise.
-  ownershipShare    Decimal  @default(1.0) @db.Decimal(5, 4)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -399,40 +396,29 @@ model KycDocument {
 }
 
 // ---------------------------------------------------------------------------
-// Poll engine — Phase 3. Event polls first, no money involved; kept general
-// so Phase 5 (bulk-buy Flow B, PollType.BULK_BUY_RESIDENT) can reuse it
-// without a schema change. See src/modules/polls for eligibility/weighting/
-// tally logic — this file only carries structure and constraints.
+// Poll engine — Phase 3, reduced in the V2.0 scope revision. Resident voting
+// (ADVISORY/BINDING polls, Vote, weighting, quorum) is withdrawn — see
+// DECISIONS_V2_SCOPE.md §2.4–2.5 and SDD invariant I8. What remains is the
+// opt-in "join" mechanic: residents commit, and the poll auto-fires at its
+// minimum. Phase 8 renames this to ServiceRequest/Participation.
 // ---------------------------------------------------------------------------
 
-/// ADVISORY: non-binding poll, any resident may vote, uniform weight.
-/// BINDING: only owners (OWNER_OCCUPIER/OWNER_ABSENTEE) may vote; may be
-///   uniform or ownership-weighted. Only a COMMITTEE member may create one.
-/// EVENT: no binding vote — residents "join" (PollCommitment) and the poll
-///   auto-fires once minCommitments is reached.
+/// EVENT: residents "join" (PollCommitment) and the poll auto-fires once
+///   minCommitments is reached. Not a vote — no choice, no weight.
 /// BULK_BUY_RESIDENT: same commitment mechanics as EVENT (PollCommitment /
 ///   minCommitments / auto-fire), but OWNED end-to-end by the bulk-buy
 ///   module (Phase 5 Flow B), not by PollsService — see
 ///   src/modules/bulk-buy/bulk-buy.service.ts's Flow B section and this
 ///   model's taggedVendorId/vendorConfirmed*/vendorDeclinedAt fields.
-///   PollsService.create/join/vote all reject this pollType with 400,
+///   PollsService.create/join both reject this pollType with 400,
 ///   directing callers to the bulk-buy routes instead.
 enum PollType {
-  ADVISORY
-  BINDING
   EVENT
   BULK_BUY_RESIDENT
 }
 
-enum PollWeightMode {
-  UNIFORM
-  OWNERSHIP_WEIGHTED
-}
-
 enum PollStatus {
   OPEN
-  PASSED
-  FAILED
   FIRED
   EXPIRED
   CLOSED
@@ -442,21 +428,12 @@ enum PollStatus {
   CANCELLED
 }
 
-enum VoteChoice {
-  YES
-  NO
-  ABSTAIN
-}
-
 model Poll {
   id        String @id @default(cuid())
   societyId String
   creatorId String
 
-  pollType   PollType
-  /// Ignored for ADVISORY/EVENT/BULK_BUY_RESIDENT — only BINDING polls
-  /// consult this to decide whether votes are ownership-weighted.
-  weightMode PollWeightMode @default(UNIFORM)
+  pollType PollType
 
   title       String
   description String?
@@ -468,25 +445,16 @@ model Poll {
   /// than silently dropped.
   category    String?
 
-  /// Share of total eligible weight that must be cast for the poll to be
-  /// decided at all (ADVISORY/BINDING only).
-  quorumPct  Decimal @default(60) @db.Decimal(5, 2)
-  /// Share of (yes + no) weight that must be YES for the poll to pass.
-  passingPct Decimal @default(50) @db.Decimal(5, 2)
-
-  /// EVENT / BULK_BUY_RESIDENT only: number of PollCommitment rows that
-  /// auto-fires the poll.
+  /// Number of PollCommitment rows that auto-fires the poll.
   minCommitments Int?
 
   closesAt DateTime
   status   PollStatus @default(OPEN)
 
-  /// EVENT/BULK_BUY_RESIDENT auto-fire timestamp.
-  firedAt    DateTime?
-  /// Set when a poll is closed (early, by its creator, or resolved via processExpired).
-  closedAt   DateTime?
-  /// Set when an ADVISORY/BINDING poll is resolved to PASSED/FAILED.
-  resolvedAt DateTime?
+  /// Auto-fire timestamp.
+  firedAt  DateTime?
+  /// Set when a poll is closed early by its creator or expired via processExpired.
+  closedAt DateTime?
 
   /// Phase 5 Flow B (BULK_BUY_RESIDENT only): the vendor a resident tagged
   /// when opening this poll. Null for every other pollType. SetNull rather
@@ -517,7 +485,6 @@ model Poll {
   society            Society          @relation(fields: [societyId], references: [id], onDelete: Cascade)
   creator            User             @relation(fields: [creatorId], references: [id], onDelete: Cascade)
   taggedVendor       Vendor?          @relation(fields: [taggedVendorId], references: [id], onDelete: SetNull)
-  votes              Vote[]
   commitments        PollCommitment[]
   /// Phase 5 Flow B: Commitment rows sourced from this poll once fired (see Commitment.pollId).
   bulkBuyCommitments Commitment[]
@@ -528,38 +495,8 @@ model Poll {
   @@map("polls")
 }
 
-/// No direct user FK — see voterHash. This is a deliberate anonymity
-/// measure: a raw row in this table doesn't reveal who cast it, only that
-/// *some* eligible voter did (the unique constraint on [pollId, voterHash]
-/// still blocks a double vote, since the hash is deterministic per user).
-model Vote {
-  id     String @id @default(cuid())
-  pollId String
-
-  /// sha256(pollId + ':' + userId), hex-encoded. Deterministic per
-  /// (poll, user) so the DB can enforce one-vote-per-eligible-voter without
-  /// storing the user id itself. Known limitation: with a small resident
-  /// set this is brute-forceable by hashing every society member's id and
-  /// matching — a keyed HMAC (server-side secret) would harden this, but
-  /// that's out of scope for v1. Computed server-side from the
-  /// authenticated caller only; never accepted as client input.
-  voterHash String
-  choice    VoteChoice
-  /// UNIFORM = 1; OWNERSHIP_WEIGHTED (BINDING only) = the voter's flat's
-  /// ownershipShare at the time of voting.
-  weight    Decimal    @db.Decimal(6, 4)
-
-  createdAt DateTime @default(now())
-
-  poll Poll @relation(fields: [pollId], references: [id], onDelete: Cascade)
-
-  @@unique([pollId, voterHash])
-  @@index([pollId])
-  @@map("votes")
-}
-
-/// An EVENT "join" (or, later, a BULK_BUY_RESIDENT commitment to buy). Has
-/// its own user FK — unlike Vote, commitments aren't anonymous.
+/// An EVENT "join" or a BULK_BUY_RESIDENT commitment to buy. Has its own
+/// user FK — commitments are not anonymous.
 model PollCommitment {
   id         String @id @default(cuid())
   pollId     String
@@ -597,13 +534,15 @@ model PollCommitment {
 /// The ARCHITECTURE.md v0.2 account set, plus EXTERNAL (the PSP/bank
 /// boundary) so Phase 4B/4C can post real money movement without a schema
 /// migration. One canonical Account per [societyId, kind] in v1.
+///
+/// V2.0: VOUCHER, LENDING_SIM and COMMISSION_SINK are removed. No wallet or
+/// lending exists, and invariant I2 forbids any platform-owned account —
+/// the platform takes no commission (revenue is a vendor listing fee,
+/// contracted outside the society's rails).
 enum AccountKind {
   SOCIETY_MASTER
   BULK_BUY
-  VOUCHER
   DISPUTE
-  LENDING_SIM
-  COMMISSION_SINK
   EXTERNAL
   /// Phase 4C: reserved vendor payable/settlement account. Not used by the
   /// v1 payout flow (which posts BULK_BUY -> EXTERNAL directly for the
@@ -652,8 +591,7 @@ model LedgerEntry {
   creditAccountId String
   /// Always > 0 and debitAccountId != creditAccountId — enforced in
   /// LedgerService.post at the application layer (no DB CHECK constraint in
-  /// v1, matching how other invariants in this schema are enforced — see
-  /// e.g. Vote.voterHash's doc comment).
+  /// v1, matching how other invariants in this schema are enforced).
   amount          Decimal @db.Decimal(14, 2)
 
   reasonCode       String
@@ -772,7 +710,7 @@ model WebhookEvent {
 //
 // SMALL bookings (Phase 4C, unchanged): once every JobCard is signed off and
 // every Commitment is FUNDED, a TREASURER's dual-authorised payout releases
-// the vendor's net share (minus platform commission) in one shot — see
+// the full escrowed total to the vendor in one shot — see
 // bulk-buy.service.ts's authorisePayout for the exact money flow.
 //
 // LARGE bookings (Phase 4D): the vendor is instead paid across an ordered
@@ -903,7 +841,7 @@ model Offer {
 /// (Flow B) — exactly one of offerId/pollId is set, never both and never
 /// neither; enforced in application code (BulkBuyService), not a DB
 /// constraint (Prisma has no portable CHECK-constraint support here). Not
-/// anonymous (unlike Vote) — this is a financial commitment, not a ballot.
+/// anonymous — this is a financial commitment.
 model Commitment {
   id         String           @id @default(cuid())
   /// Flow A (vendor-initiated Offer). Null for a Flow B (poll-sourced) commitment.
@@ -957,10 +895,10 @@ model Booking {
   /// its presence is this booking's idempotency guard for that route.
   retentionReleasedAt DateTime?
   /// LARGE only. Flips true the first time a milestone is authorised on this
-  /// booking, marking that the once-only commission + retention set-aside
-  /// (BULK_BUY -> COMMISSION_SINK, BULK_BUY -> RETENTION) has already
-  /// happened — every later milestone authorisation skips it.
-  commissionTaken     Boolean   @default(false)
+  /// booking, marking that the once-only retention set-aside
+  /// (BULK_BUY -> RETENTION) has already happened — every later milestone
+  /// authorisation skips it.
+  retentionSetAside   Boolean   @default(false)
 
   society    Society     @relation(fields: [societyId], references: [id], onDelete: Cascade)
   vendor     Vendor      @relation(fields: [vendorId], references: [id], onDelete: Cascade)
@@ -1003,9 +941,9 @@ model JobCard {
 model Payout {
   id                String       @id @default(cuid())
   bookingId         String       @unique
+  /// The full escrowed total, paid to the vendor in full. No commission is
+  /// split out (V2.0, invariant I2).
   amount            Decimal      @db.Decimal(14, 2)
-  commission        Decimal      @db.Decimal(14, 2)
-  vendorNet         Decimal      @db.Decimal(14, 2)
   status            PayoutStatus @default(PENDING)
   /// The STUBBED RazorpayService.payout() reference — see its doc comment.
   /// Never a real RazorpayX transfer id in this phase.
@@ -1049,8 +987,8 @@ model Milestone {
   /// array index at fire time.
   sequence          Int
   name              String
-  /// Share of vendorPayable (escrowed total minus commission minus
-  /// retention) this milestone releases. The template's pcts sum to 100,
+  /// Share of vendorPayable (escrowed total minus retention) this
+  /// milestone releases. The template's pcts sum to 100,
   /// but the LAST milestone by sequence always releases whatever remains of
   /// vendorPayable rather than exactly amount*pct/100, to avoid rounding
   /// dust — see authoriseMilestone's doc comment.

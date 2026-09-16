@@ -163,7 +163,7 @@ describe('Ledger (e2e)', () => {
     const postRes = await committee.agent
       .post('/api/v1/ledger/adjustments')
       .set('Idempotency-Key', randomUUID())
-      .send({ debitKind: AccountKind.SOCIETY_MASTER, creditKind: AccountKind.COMMISSION_SINK, amount: 500, reasonCode: 'TEST_ADJUSTMENT_BASIC' })
+      .send({ debitKind: AccountKind.SOCIETY_MASTER, creditKind: AccountKind.DISPUTE, amount: 500, reasonCode: 'TEST_ADJUSTMENT_BASIC' })
       .expect(201);
     const entry = postRes.body as LedgerEntryBody;
     expect(entry.reasonCode).toBe('TEST_ADJUSTMENT_BASIC');
@@ -175,9 +175,9 @@ describe('Ledger (e2e)', () => {
     expect(ledger.balancesIntact).toBe(true);
 
     const masterBalance = ledger.balances.find((b) => b.kind === AccountKind.SOCIETY_MASTER);
-    const sinkBalance = ledger.balances.find((b) => b.kind === AccountKind.COMMISSION_SINK);
+    const disputeBalance = ledger.balances.find((b) => b.kind === AccountKind.DISPUTE);
     expect(Number(masterBalance?.balance)).toBe(-500);
-    expect(Number(sinkBalance?.balance)).toBe(500);
+    expect(Number(disputeBalance?.balance)).toBe(500);
   });
 
   it('is idempotent: replaying the same request + Idempotency-Key returns the same response and creates no second entry; a different key creates a new one', async () => {
@@ -209,7 +209,7 @@ describe('Ledger (e2e)', () => {
 
     await committee.agent
       .post('/api/v1/ledger/adjustments')
-      .send({ debitKind: AccountKind.SOCIETY_MASTER, creditKind: AccountKind.COMMISSION_SINK, amount: 10, reasonCode: 'TEST_NO_HEADER' })
+      .send({ debitKind: AccountKind.SOCIETY_MASTER, creditKind: AccountKind.DISPUTE, amount: 10, reasonCode: 'TEST_NO_HEADER' })
       .expect(400);
   });
 
@@ -219,7 +219,7 @@ describe('Ledger (e2e)', () => {
     await resident.agent
       .post('/api/v1/ledger/adjustments')
       .set('Idempotency-Key', randomUUID())
-      .send({ debitKind: AccountKind.SOCIETY_MASTER, creditKind: AccountKind.COMMISSION_SINK, amount: 10, reasonCode: 'TEST_FORBIDDEN' })
+      .send({ debitKind: AccountKind.SOCIETY_MASTER, creditKind: AccountKind.DISPUTE, amount: 10, reasonCode: 'TEST_FORBIDDEN' })
       .expect(403);
     await resident.agent.get('/api/v1/ledger').expect(403);
     await resident.agent.get('/api/v1/ledger/reconciliation').expect(403);
@@ -240,7 +240,7 @@ describe('Ledger (e2e)', () => {
     await treasurer.agent
       .post('/api/v1/ledger/adjustments')
       .set('Idempotency-Key', randomUUID())
-      .send({ debitKind: AccountKind.SOCIETY_MASTER, creditKind: AccountKind.VOUCHER, amount: 20, reasonCode: 'TEST_TREASURER_CAN_POST' })
+      .send({ debitKind: AccountKind.SOCIETY_MASTER, creditKind: AccountKind.RETENTION, amount: 20, reasonCode: 'TEST_TREASURER_CAN_POST' })
       .expect(201);
 
     const recRes = await treasurer.agent.get('/api/v1/ledger/reconciliation').expect(200);
@@ -267,8 +267,8 @@ describe('Ledger (e2e)', () => {
 
     const posts = [
       { debitKind: AccountKind.SOCIETY_MASTER, creditKind: AccountKind.DISPUTE, amount: 75, reasonCode: 'TEST_CONSERVE_1' },
-      { debitKind: AccountKind.DISPUTE, creditKind: AccountKind.LENDING_SIM, amount: 30, reasonCode: 'TEST_CONSERVE_2' },
-      { debitKind: AccountKind.LENDING_SIM, creditKind: AccountKind.SOCIETY_MASTER, amount: 10, reasonCode: 'TEST_CONSERVE_3' },
+      { debitKind: AccountKind.DISPUTE, creditKind: AccountKind.RETENTION, amount: 30, reasonCode: 'TEST_CONSERVE_2' },
+      { debitKind: AccountKind.RETENTION, creditKind: AccountKind.SOCIETY_MASTER, amount: 10, reasonCode: 'TEST_CONSERVE_3' },
     ];
     for (const post of posts) {
       await committee.agent.post('/api/v1/ledger/adjustments').set('Idempotency-Key', randomUUID()).send(post).expect(201);

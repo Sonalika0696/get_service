@@ -10,18 +10,18 @@ import { PrismaService } from '../src/infra/prisma/prisma.service.js';
 import { AppConfigService } from '../src/config/config.service.js';
 import { MailerService, type SendMailInput } from '../src/infra/mailer/mailer.service.js';
 import { createGlobalValidationPipe } from '../src/common/pipes/validation.pipe.js';
-import { OccupancyRole, PollStatus, PollType, PollWeightMode, RoleKind, VoteChoice } from '../src/generated/prisma/enums.js';
+import { OccupancyRole, PollStatus, PollType, RoleKind } from '../src/generated/prisma/enums.js';
 
 /**
  * Phase 3 (poll engine) Definition of Done, end-to-end against real
- * Postgres:
- *  - ADVISORY, uniform weight: every resident (owner or tenant) votes at
- *    weight 1; closing early resolves PASSED/FAILED by simple majority.
- *  - BINDING, ownership-weighted: only committee can create one; a TENANT
- *    is rejected with 403; owners vote at their flat's ownershipShare.
+ * Postgres, as reduced by the V2.0 scope revision:
+ *  - No resident voting (SDD invariant I8): the ADVISORY and BINDING poll
+ *    types are rejected at validation, and POST /polls/:id/vote does not
+ *    exist.
  *  - EVENT auto-fire: joining (PollCommitment) flips the poll to FIRED the
  *    moment minCommitments is reached, synchronously, and emails every
  *    committed resident.
+ *  - Close early: only the creator may close an OPEN poll; it becomes CLOSED.
  *  - Expiry: an OPEN EVENT poll whose closesAt has passed and which never
  *    reached minCommitments is resolved to EXPIRED by
  *    POST /polls/process-expired (the stand-in for a future scheduler).
@@ -29,20 +29,12 @@ import { OccupancyRole, PollStatus, PollType, PollWeightMode, RoleKind, VoteChoi
  * Expiry approach: CreatePollDto requires closesAt to be strictly in the
  * future (see PollsService.create), so there's no way to create an
  * already-expired poll through the API. The test instead creates a poll
- * with a near-future closesAt, then reaches into Postgres via Prisma to
- * push that one row's closesAt into the past — exactly the "update the
- * row's closesAt to the past via Prisma" option the task called out — and
- * then drives resolution explicitly via POST /polls/process-expired
- * (committee-only), which stands in for a periodic scheduler that doesn't
- * exist yet (no @nestjs/schedule dependency was added in this phase).
+ * with a near-future closesAt, then pushes that one row's closesAt into the
+ * past via Prisma, and drives resolution explicitly via
+ * POST /polls/process-expired (committee-only).
  *
- * Isolation note: eligibility/quorum for ADVISORY and BINDING polls is
- * computed over *every* active occupancy in the poll's society (see
- * PollsService.computeTotalEligibleWeight) — that's the whole point of a
- * quorum. So each `it` below creates its own fresh society (own flats, own
- * residents) rather than sharing one across the suite; otherwise residents
- * signed up by an earlier test would silently inflate the quorum
- * denominator for a later test and make the tally assertions flaky.
+ * Each `it` creates its own fresh society, so residents signed up by one
+ * test never leak into another.
  */
 
 class CapturingMailer {
@@ -62,20 +54,9 @@ interface PollDetailBody {
   id: string;
   status: PollStatus;
   pollType: PollType;
-  weightMode: PollWeightMode;
   creatorId: string;
   commitmentCount: number;
-  hasVoted: boolean;
   hasJoined: boolean;
-  tally: {
-    totalEligibleWeight: number | string;
-    castWeight: number | string;
-    yesWeight: number | string;
-    noWeight: number | string;
-    abstainWeight: number | string;
-    quorumMet: boolean;
-    passed: boolean;
-  };
 }
 
 describe('Polls (e2e)', () => {
@@ -94,21 +75,15 @@ describe('Polls (e2e)', () => {
     return last;
   }
 
-  /** Every test gets its own society so quorum/eligibility math never crosses tests — see the isolation note above. */
   async function newSociety(): Promise<string> {
     const society = await prisma.society.create({ data: { name: `Polls Test Society ${randomUUID().slice(0, 8)}`, address: 'n/a' } });
     societyIds.push(society.id);
     return society.id;
   }
 
-  async function makeFlat(societyId: string, ownershipShare?: number): Promise<string> {
+  async function makeFlat(societyId: string): Promise<string> {
     const flat = await prisma.flat.create({
-      data: {
-        societyId,
-        unitNo: `P-${randomUUID().slice(0, 8)}`,
-        maintenanceAmount: 1000,
-        ...(ownershipShare !== undefined ? { ownershipShare } : {}),
-      },
+      data: { societyId, unitNo: `P-${randomUUID().slice(0, 8)}`, maintenanceAmount: 1000 },
     });
     flatIds.push(flat.id);
     return flat.id;
@@ -161,7 +136,6 @@ describe('Polls (e2e)', () => {
 
   afterAll(async () => {
     // FK-respecting cleanup, children before parents.
-    await prisma.vote.deleteMany({ where: { poll: { societyId: { in: societyIds } } } });
     await prisma.pollCommitment.deleteMany({ where: { poll: { societyId: { in: societyIds } } } });
     await prisma.poll.deleteMany({ where: { societyId: { in: societyIds } } });
     await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
@@ -176,112 +150,31 @@ describe('Polls (e2e)', () => {
     await app.close();
   });
 
-  it('ADVISORY poll: a tenant and an owner each vote at weight 1; closing early resolves it by simple majority', async () => {
+  it('has no resident voting surface: ADVISORY/BINDING poll types are rejected and the vote route does not exist (invariant I8)', async () => {
     const societyId = await newSociety();
     const flatA = await makeFlat(societyId);
-    const flatB = await makeFlat(societyId);
-
-    const creator = await signupAndLogin(`poll-advisory-creator-${randomUUID()}@example.com`, societyId, flatA, OccupancyRole.OWNER_OCCUPIER);
-    const tenant = await signupAndLogin(`poll-advisory-tenant-${randomUUID()}@example.com`, societyId, flatB, OccupancyRole.TENANT);
-
-    const createRes = await creator.agent
-      .post('/api/v1/polls')
-      .send({ pollType: PollType.ADVISORY, title: 'Repaint the gate?', closesAt: futureIso(60 * 60 * 1000) })
-      .expect(201);
-    const poll = createRes.body as PollDetailBody;
-    expect(poll.status).toBe(PollStatus.OPEN);
-    expect(poll.weightMode).toBe(PollWeightMode.UNIFORM);
-
-    await creator.agent.post(`/api/v1/polls/${poll.id}/vote`).send({ choice: VoteChoice.YES }).expect(201);
-    const afterTenantVote = await tenant.agent.post(`/api/v1/polls/${poll.id}/vote`).send({ choice: VoteChoice.NO }).expect(201);
-    const midTally = (afterTenantVote.body as PollDetailBody).tally;
-    // Exactly two residents in this society: only the two active occupancies count as eligible.
-    expect(Number(midTally.totalEligibleWeight)).toBe(2);
-    expect(Number(midTally.yesWeight)).toBe(1); // TENANT and OWNER both weigh 1 on ADVISORY, regardless of role
-    expect(Number(midTally.noWeight)).toBe(1);
-    expect(Number(midTally.castWeight)).toBe(2);
-
-    const closed = await creator.agent.post(`/api/v1/polls/${poll.id}/close`).expect(201);
-    const closedBody = closed.body as PollDetailBody;
-    // Tied 1-1 at the default passingPct=50 passes on the inclusive >= comparison; quorum 2/2 clears the default 60%.
-    expect(closedBody.status).toBe(PollStatus.PASSED);
-    expect(Number(closedBody.tally.yesWeight)).toBe(1);
-    expect(Number(closedBody.tally.noWeight)).toBe(1);
-
-    const getRes = await creator.agent.get(`/api/v1/polls/${poll.id}`).expect(200);
-    expect((getRes.body as PollDetailBody).hasVoted).toBe(true);
-  });
-
-  it('double-voting the same poll is rejected with 409', async () => {
-    const societyId = await newSociety();
-    const flatA = await makeFlat(societyId);
-    const voter = await signupAndLogin(`poll-doublevote-${randomUUID()}@example.com`, societyId, flatA, OccupancyRole.OWNER_OCCUPIER);
-
-    const createRes = await voter.agent
-      .post('/api/v1/polls')
-      .send({ pollType: PollType.ADVISORY, title: 'Double vote test', closesAt: futureIso(60 * 60 * 1000) })
-      .expect(201);
-    const pollId = (createRes.body as PollDetailBody).id;
-
-    await voter.agent.post(`/api/v1/polls/${pollId}/vote`).send({ choice: VoteChoice.YES }).expect(201);
-    await voter.agent.post(`/api/v1/polls/${pollId}/vote`).send({ choice: VoteChoice.NO }).expect(409);
-  });
-
-  it('BINDING + OWNERSHIP_WEIGHTED poll: only committee can create it, a tenant is rejected, and owners vote at their ownershipShare', async () => {
-    const societyId = await newSociety();
-    const committeeFlat = await makeFlat(societyId);
-    const ownerOccupierFlat = await makeFlat(societyId, 1.0);
-    const ownerAbsenteeFlat = await makeFlat(societyId, 1.5);
-    const tenantFlat = await makeFlat(societyId);
-
-    const committee = await signupAndLogin(`poll-binding-committee-${randomUUID()}@example.com`, societyId, committeeFlat, OccupancyRole.OWNER_OCCUPIER);
+    const committee = await signupAndLogin(`poll-novote-committee-${randomUUID()}@example.com`, societyId, flatA, OccupancyRole.OWNER_OCCUPIER);
     await makeCommittee(societyId, committee.userId);
 
-    const ownerOccupier = await signupAndLogin(`poll-binding-owner-occ-${randomUUID()}@example.com`, societyId, ownerOccupierFlat, OccupancyRole.OWNER_OCCUPIER);
-    const ownerAbsentee = await signupAndLogin(`poll-binding-owner-abs-${randomUUID()}@example.com`, societyId, ownerAbsenteeFlat, OccupancyRole.OWNER_ABSENTEE);
-    const tenant = await signupAndLogin(`poll-binding-tenant-${randomUUID()}@example.com`, societyId, tenantFlat, OccupancyRole.TENANT);
-
-    // A non-committee resident cannot create a BINDING poll.
-    await ownerOccupier.agent
-      .post('/api/v1/polls')
-      .send({ pollType: PollType.BINDING, weightMode: PollWeightMode.OWNERSHIP_WEIGHTED, title: 'Should fail', closesAt: futureIso(60 * 60 * 1000) })
-      .expect(403);
+    // Even a committee member cannot create a voting poll — the types no longer exist.
+    for (const pollType of ['ADVISORY', 'BINDING']) {
+      await committee.agent.post('/api/v1/polls').send({ pollType, title: 'Repaint the gate?', closesAt: futureIso(60 * 60 * 1000) }).expect(400);
+    }
 
     const createRes = await committee.agent
       .post('/api/v1/polls')
-      .send({
-        pollType: PollType.BINDING,
-        weightMode: PollWeightMode.OWNERSHIP_WEIGHTED,
-        title: 'Approve the new elevator contract',
-        quorumPct: 50,
-        passingPct: 50,
-        closesAt: futureIso(60 * 60 * 1000),
-      })
+      .send({ pollType: PollType.EVENT, title: 'Diwali dinner', minCommitments: 2, closesAt: futureIso(60 * 60 * 1000) })
       .expect(201);
-    const poll = createRes.body as PollDetailBody;
-    expect(poll.pollType).toBe(PollType.BINDING);
-    expect(poll.weightMode).toBe(PollWeightMode.OWNERSHIP_WEIGHTED);
+    const pollId = (createRes.body as PollDetailBody).id;
 
-    // Tenants cannot vote on binding polls.
-    await tenant.agent.post(`/api/v1/polls/${poll.id}/vote`).send({ choice: VoteChoice.YES }).expect(403);
+    await committee.agent.post(`/api/v1/polls/${pollId}/vote`).send({ choice: 'YES' }).expect(404);
 
-    // Eligible owners in this society: committee (share 1.0, default), ownerOccupier (1.0), ownerAbsentee (1.5) = 3.5 total.
-    const afterOwnerOccVote = await ownerOccupier.agent.post(`/api/v1/polls/${poll.id}/vote`).send({ choice: VoteChoice.YES }).expect(201);
-    expect(Number((afterOwnerOccVote.body as PollDetailBody).tally.totalEligibleWeight)).toBeCloseTo(3.5, 4);
-    expect(Number((afterOwnerOccVote.body as PollDetailBody).tally.yesWeight)).toBeCloseTo(1.0, 4);
-
-    const afterOwnerAbsVote = await ownerAbsentee.agent.post(`/api/v1/polls/${poll.id}/vote`).send({ choice: VoteChoice.YES }).expect(201);
-    const tallyAfterBoth = (afterOwnerAbsVote.body as PollDetailBody).tally;
-    // Weights equal ownershipShare, not a flat count of 1 per voter.
-    expect(Number(tallyAfterBoth.yesWeight)).toBeCloseTo(2.5, 4); // 1.0 (occupier) + 1.5 (absentee)
-    expect(Number(tallyAfterBoth.noWeight)).toBe(0);
-    // 2.5 / 3.5 ≈ 0.714 >= 50% quorum.
-    expect(tallyAfterBoth.quorumMet).toBe(true);
-
-    const closed = await committee.agent.post(`/api/v1/polls/${poll.id}/close`).expect(201);
-    const closedBody = closed.body as PollDetailBody;
-    expect(closedBody.status).toBe(PollStatus.PASSED);
-    expect(Number(closedBody.tally.yesWeight)).toBeCloseTo(2.5, 4);
+    // No tally or vote fields leak into the response shape.
+    const getRes = await committee.agent.get(`/api/v1/polls/${pollId}`).expect(200);
+    const body = getRes.body as Record<string, unknown>;
+    for (const removedField of ['tally', 'hasVoted', 'weightMode', 'quorumPct', 'passingPct', 'resolvedAt']) {
+      expect(body).not.toHaveProperty(removedField);
+    }
   });
 
   it('EVENT poll auto-fires the moment minCommitments is reached, and notifies every committed resident', async () => {
@@ -304,6 +197,7 @@ describe('Polls (e2e)', () => {
     const afterFirstJoin = await joinerOne.agent.post(`/api/v1/polls/${poll.id}/join`).expect(201);
     expect((afterFirstJoin.body as PollDetailBody).status).toBe(PollStatus.OPEN);
     expect((afterFirstJoin.body as PollDetailBody).commitmentCount).toBe(1);
+    expect((afterFirstJoin.body as PollDetailBody).hasJoined).toBe(true);
 
     const afterSecondJoin = await joinerTwo.agent.post(`/api/v1/polls/${poll.id}/join`).expect(201);
     const firedBody = afterSecondJoin.body as PollDetailBody;
@@ -331,6 +225,28 @@ describe('Polls (e2e)', () => {
 
     await joiner.agent.post(`/api/v1/polls/${pollId}/join`).expect(201);
     await joiner.agent.post(`/api/v1/polls/${pollId}/join`).expect(409);
+  });
+
+  it('only the creator can close an OPEN poll early; it becomes CLOSED and can no longer be joined', async () => {
+    const societyId = await newSociety();
+    const flatA = await makeFlat(societyId);
+    const flatB = await makeFlat(societyId);
+    const creator = await signupAndLogin(`poll-close-creator-${randomUUID()}@example.com`, societyId, flatA, OccupancyRole.OWNER_OCCUPIER);
+    const other = await signupAndLogin(`poll-close-other-${randomUUID()}@example.com`, societyId, flatB, OccupancyRole.TENANT);
+
+    const createRes = await creator.agent
+      .post('/api/v1/polls')
+      .send({ pollType: PollType.EVENT, title: 'Close early test', minCommitments: 5, closesAt: futureIso(60 * 60 * 1000) })
+      .expect(201);
+    const pollId = (createRes.body as PollDetailBody).id;
+
+    await other.agent.post(`/api/v1/polls/${pollId}/close`).expect(403);
+
+    const closed = await creator.agent.post(`/api/v1/polls/${pollId}/close`).expect(201);
+    expect((closed.body as PollDetailBody).status).toBe(PollStatus.CLOSED);
+
+    await other.agent.post(`/api/v1/polls/${pollId}/join`).expect(400);
+    await creator.agent.post(`/api/v1/polls/${pollId}/close`).expect(400);
   });
 
   it('an EVENT poll that never reaches minCommitments is resolved to EXPIRED by POST /polls/process-expired', async () => {

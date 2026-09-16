@@ -37,7 +37,7 @@ import { AccountKind, OccupancyRole, RoleKind } from '../src/generated/prisma/en
  *    resident "pays" via the same signed payment.captured webhook path,
  *    each signs off their own job card, the booking flips COMPLETED once
  *    both are signed off, and a treasurer's dual-authorised payout
- *    (commission + vendorNet) drains escrow back to zero with the ledger's
+ *    (the full amount, no commission) drains escrow back to zero with the ledger's
  *    balancesIntact holding throughout;
  *  - a vendor decline (POST /vendor-decline) sets the poll CANCELLED
  *    outright; further joins against it are rejected (400);
@@ -98,8 +98,6 @@ interface PayoutBody {
   id: string;
   status: 'PENDING' | 'AUTHORISED' | 'PAID';
   amount: string | number;
-  commission: string | number;
-  vendorNet: string | number;
 }
 
 interface BookingBody {
@@ -317,7 +315,6 @@ describe('Bulk-buy Flow B — resident polls (e2e)', () => {
 
     const startLedger = await ledgerBalances(committee.agent);
     const bulkBuyStart = balanceOf(startLedger, AccountKind.BULK_BUY);
-    const commissionStart = balanceOf(startLedger, AccountKind.COMMISSION_SINK);
 
     const createRes = await resident1.agent
       .post('/api/v1/bulk-buy/polls')
@@ -404,13 +401,10 @@ describe('Bulk-buy Flow B — resident polls (e2e)', () => {
     const paidBooking = payoutRes.body as BookingBody;
     expect(paidBooking.payout!.status).toBe('PAID');
     expect(Number(paidBooking.payout!.amount)).toBe(2000);
-    expect(Number(paidBooking.payout!.commission)).toBe(200); // 10% default commissionPct
-    expect(Number(paidBooking.payout!.vendorNet)).toBe(1800);
 
     const finalLedger = await ledgerBalances(committee.agent);
     expect(finalLedger.balancesIntact).toBe(true);
     expect(balanceOf(finalLedger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(0, 6);
-    expect(balanceOf(finalLedger, AccountKind.COMMISSION_SINK) - commissionStart).toBeCloseTo(200, 6);
   });
 
   it('vendor confirms first (with a discount ladder); the join that tips the count over vendorConfirmedMinimum fires the poll', async () => {

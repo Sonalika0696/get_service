@@ -36,7 +36,7 @@ export class BookingsController {
    * TREASURER-only dual-authorisation call — LARGE bookings only (SMALL
    * bookings are rejected with 400). See
    * BulkBuyService.authoriseMilestone's doc comment for the ordering,
-   * idempotency, and once-only commission/retention set-aside rules.
+   * idempotency, and once-only retention set-aside rules.
    */
   @Post(':id/milestones/:mid/authorise')
   @UseGuards(AuthGuard, RolesGuard)

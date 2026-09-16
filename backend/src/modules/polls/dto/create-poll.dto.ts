@@ -1,14 +1,9 @@
-import { IsEnum, IsISO8601, IsInt, IsNumber, IsOptional, IsPositive, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
-import { PollType, PollWeightMode } from '../../../generated/prisma/enums.js';
+import { IsEnum, IsISO8601, IsInt, IsOptional, IsPositive, IsString, MaxLength, MinLength } from 'class-validator';
+import { PollType } from '../../../generated/prisma/enums.js';
 
 export class CreatePollDto {
   @IsEnum(PollType)
   pollType!: PollType;
-
-  /** Ignored for ADVISORY/EVENT/BULK_BUY_RESIDENT — only consulted for BINDING. */
-  @IsOptional()
-  @IsEnum(PollWeightMode)
-  weightMode?: PollWeightMode;
 
   @IsString()
   @MinLength(3)
@@ -20,19 +15,7 @@ export class CreatePollDto {
   @MaxLength(5000)
   description?: string;
 
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(100)
-  quorumPct?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(100)
-  passingPct?: number;
-
-  /** Required for EVENT/BULK_BUY_RESIDENT polls; ignored for ADVISORY/BINDING. */
+  /** Required for EVENT polls. */
   @IsOptional()
   @IsInt()
   @IsPositive()
