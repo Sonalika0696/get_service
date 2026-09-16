@@ -159,7 +159,12 @@ model Society {
   address       String
   latitude      Float?
   longitude     Float?
-  /// Society-level feature/config toggles (e.g. job-post rate limit).
+  /// Society-level feature/config toggles (e.g. job-post rate limit). Phase
+  /// 6.4 (BACKEND_PLAN.md Phase 6.4, M14) adds an `approval` sub-object here:
+  /// `{ approval: { lowerThreshold, upperThreshold, majorityFraction } }` —
+  /// the per-society bulk-buy payout/milestone approval-ladder thresholds.
+  /// See approval-ladder.util.ts's doc comment for the shape, validation and
+  /// documented defaults used when this key is absent or malformed.
   config        Json          @default("{}")
   /// Phase 6.3: operator-managed lifecycle state. ARCHIVED societies are
   /// excluded from the operator's default listing but not deleted — see
@@ -905,10 +910,12 @@ model WebhookEvent {
 // + one JobCard per commitment; each resident's escrow-in is a Payment
 // (Phase 4B) linked to their Commitment.
 //
-// SMALL bookings (Phase 4C, unchanged): once every JobCard is signed off and
-// every Commitment is FUNDED, a TREASURER's dual-authorised payout releases
-// the full escrowed total to the vendor in one shot — see
-// bulk-buy.service.ts's authorisePayout for the exact money flow.
+// SMALL bookings (Phase 4C; Phase 6.4 generalises the authorisation count —
+// see below): once every JobCard is signed off and every Commitment is
+// FUNDED, an N-officer approval ladder (1/2/committee-majority, by amount —
+// see approval-ladder.util.ts) releases the full escrowed total to the
+// vendor in one shot — see bulk-buy.service.ts's authorisePayout for the
+// exact money flow.
 //
 // LARGE bookings (Phase 4D): the vendor is instead paid across an ordered
 // sequence of Milestones, and a defect-liability Retention share is held
@@ -969,11 +976,6 @@ enum PayoutStatus {
   PENDING
   AUTHORISED
   PAID
-}
-
-enum PayoutAuthKind {
-  SYSTEM
-  TREASURER
 }
 
 model Offer {
@@ -1154,21 +1156,26 @@ model Payout {
   @@map("payouts")
 }
 
-/// Two rows per Payout in the happy path: one SYSTEM (auto, authoriserId
-/// null — the automated rule-check: all job cards signed off, all
-/// commitments funded, escrow covers the amount) and one TREASURER (a real
-/// user). See BulkBuyService.authorisePayout's doc comment for exactly when
-/// each row is written and why both are created together in v1.
+/// Phase 6.4 (BACKEND_PLAN.md Phase 6.4, M14) rework: one row per DISTINCT
+/// human officer (TREASURER/DEPUTY_TREASURER/COMMITTEE) who has authorised
+/// this Payout — keyed by authoriserId instead of the old SYSTEM/TREASURER
+/// `kind` pair, so the SAME identity physically cannot be counted twice
+/// (`@@unique([payoutId, authoriserId])`, belt-and-suspenders with the
+/// explicit upsert-based no-op in BulkBuyService.authorisePayout). The old
+/// automated SYSTEM row is gone — the rule-check it stood for (every job
+/// card signed off, every commitment funded, escrow covers the amount) is
+/// still enforced on every call, it just isn't persisted as an
+/// authorisation any more, because a rung is about DISTINCT HUMAN officers
+/// (see BulkBuyService.authorisePayout's doc comment for the full ladder).
 model PayoutAuthorisation {
-  id           String         @id @default(cuid())
+  id           String   @id @default(cuid())
   payoutId     String
-  kind         PayoutAuthKind
-  authoriserId String?
-  createdAt    DateTime       @default(now())
+  authoriserId String
+  createdAt    DateTime @default(now())
 
   payout Payout @relation(fields: [payoutId], references: [id], onDelete: Cascade)
 
-  @@unique([payoutId, kind])
+  @@unique([payoutId, authoriserId])
   @@map("payout_authorisations")
 }
 
@@ -1207,18 +1214,17 @@ model Milestone {
   @@map("milestones")
 }
 
-/// Two rows per Milestone in the happy path — same SYSTEM (automated
-/// rule-check) + TREASURER (real user) shape as PayoutAuthorisation, just
-/// scoped to one Milestone instead of one Payout.
+/// Phase 6.4 rework — same distinct-officer shape as PayoutAuthorisation
+/// (see its doc comment), just scoped to one Milestone instead of one
+/// Payout.
 model MilestoneAuthorisation {
-  id           String         @id @default(cuid())
+  id           String   @id @default(cuid())
   milestoneId  String
-  kind         PayoutAuthKind
-  authoriserId String?
-  createdAt    DateTime       @default(now())
+  authoriserId String
+  createdAt    DateTime @default(now())
 
   milestone Milestone @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
 
-  @@unique([milestoneId, kind])
+  @@unique([milestoneId, authoriserId])
   @@map("milestone_authorisations")
 }

@@ -35,13 +35,16 @@ import { AccountKind, OccupancyRole, RoleKind } from '../src/generated/prisma/en
  *    someone else's card gets 403); the booking flips to COMPLETED only
  *    once every job card is signed off;
  *  - authorising a payout before the booking is COMPLETED is rejected
- *    (400) — the sign-off-before-payout gate; a non-treasurer gets 403;
- *  - a treasurer's authorisation call both records the dual authorisation
- *    (SYSTEM + TREASURER) AND executes the payout in the same call, exactly
- *    once: the full escrowed amount to EXTERNAL (no commission — V2.0
- *    invariant I2), BULK_BUY back to its pre-booking level, and EXTERNAL
- *    netting to zero: every rupee that came in went back out.
- *    Re-calling authorise does NOT double-pay;
+ *    (400) — the sign-off-before-payout gate; a plain resident gets 403;
+ *  - Phase 6.4 (M14): a treasurer's authorisation call records ONE distinct
+ *    officer authorisation and — since this suite's amounts are under the
+ *    society's default approval-ladder lowerThreshold (rung 1: 1 officer
+ *    suffices) — executes the payout in the same call, exactly once: the
+ *    full escrowed amount to EXTERNAL (no commission — V2.0 invariant I2),
+ *    BULK_BUY back to its pre-booking level, and EXTERNAL netting to zero:
+ *    every rupee that came in went back out. Re-calling authorise does NOT
+ *    double-pay. The multi-rung ladder itself (rung 2/3, DEPUTY_TREASURER,
+ *    same-identity no-op) is exercised in approval-ladder.e2e-spec.ts;
  *  - committing to an already-FIRED offer is rejected (400);
  *  - conservation holds throughout: GET /ledger's balancesIntact stays true.
  *
@@ -411,10 +414,15 @@ describe('Bulk-buy Flow A (e2e)', () => {
     expect(Number(paidBooking.payout!.amount)).toBe(1900);
     expect(paidBooking.payout!.razorpayPayoutRef).toMatch(/^payout_stub_/);
 
+    // Phase 6.4: authorisation rows are keyed by DISTINCT authoriserId, not
+    // a SYSTEM/TREASURER kind pair (see bulk-buy.service.ts's
+    // authorisePayout doc comment) — 1 officer suffices here because the
+    // amount (1900) is under the society's default approval-ladder
+    // lowerThreshold (rung 1), so the treasurer's single call both
+    // authorises and executes.
     const authorisations = await prisma.payoutAuthorisation.findMany({ where: { payoutId: paidBooking.payout!.id } });
-    expect(authorisations).toHaveLength(2);
-    expect(authorisations.some((a) => a.kind === 'SYSTEM' && a.authoriserId === null)).toBe(true);
-    expect(authorisations.some((a) => a.kind === 'TREASURER' && a.authoriserId === treasurer.userId)).toBe(true);
+    expect(authorisations).toHaveLength(1);
+    expect(authorisations[0].authoriserId).toBe(treasurer.userId);
 
     const afterPayoutLedger = await ledgerBalances(committee.agent);
     expect(afterPayoutLedger.balancesIntact).toBe(true);
@@ -520,7 +528,13 @@ describe('Bulk-buy Flow A (e2e)', () => {
 
     const payoutId = body1.payout!.id;
     const authorisations = await prisma.payoutAuthorisation.findMany({ where: { payoutId } });
-    expect(authorisations).toHaveLength(2); // SYSTEM + TREASURER — the race didn't duplicate either row (upsert + unique [payoutId, kind])
+    // Phase 6.4: both racing calls are the SAME treasurer identity, so this
+    // also exercises the same-identity no-double-count guard (@@unique on
+    // [payoutId, authoriserId] + the upsert no-op) at the same time as the
+    // advisory-lock double-pay guard — exactly 1 distinct-officer row,
+    // which is already >= this amount's rung-1 requirement (1 officer).
+    expect(authorisations).toHaveLength(1);
+    expect(authorisations[0].authoriserId).toBe(treasurer2.userId);
 
     const vendorEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Payout', linkedEntityId: payoutId, reasonCode: 'BULK_BUY_PAYOUT_VENDOR' } });
     expect(vendorEntryCount).toBe(1); // paid exactly once, despite the race
@@ -660,10 +674,11 @@ describe('Bulk-buy Flow A (e2e)', () => {
     expect(Number(bookingAfterM1.retentionAmount)).toBe(190);
     expect(bookingAfterM1.retentionSetAside).toBe(true);
 
+    // Phase 6.4: 1 distinct-officer row suffices — 684 is under the
+    // society's default approval-ladder lowerThreshold (rung 1).
     const m1Authorisations = await prisma.milestoneAuthorisation.findMany({ where: { milestoneId: milestoneRows[0].id } });
-    expect(m1Authorisations).toHaveLength(2);
-    expect(m1Authorisations.some((a) => a.kind === 'SYSTEM' && a.authoriserId === null)).toBe(true);
-    expect(m1Authorisations.some((a) => a.kind === 'TREASURER' && a.authoriserId === treasurer.userId)).toBe(true);
+    expect(m1Authorisations).toHaveLength(1);
+    expect(m1Authorisations[0].authoriserId).toBe(treasurer.userId);
 
     const afterM1Ledger = await ledgerBalances(committee.agent);
     expect(afterM1Ledger.balancesIntact).toBe(true);
@@ -796,8 +811,12 @@ describe('Bulk-buy Flow A (e2e)', () => {
     expect(m1.status).toBe('PAID');
     expect(m2.status).toBe('PAID');
 
+    // Phase 6.4: same-identity race (both calls are treasurer3) — exactly 1
+    // distinct-officer row, already sufficient for this amount's rung-1
+    // requirement (1 officer).
     const authorisations = await prisma.milestoneAuthorisation.findMany({ where: { milestoneId: milestone.id } });
-    expect(authorisations).toHaveLength(2); // SYSTEM + TREASURER — the race didn't duplicate either row
+    expect(authorisations).toHaveLength(1);
+    expect(authorisations[0].authoriserId).toBe(treasurer3.userId);
 
     const payoutEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Milestone', linkedEntityId: milestone.id, reasonCode: 'BULK_BUY_MILESTONE_PAYOUT' } });
     const retentionHoldEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Booking', linkedEntityId: booking.id, reasonCode: 'BULK_BUY_MILESTONE_RETENTION_HOLD' } });

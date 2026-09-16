@@ -4,14 +4,17 @@ import { Clock } from '../../infra/clock/clock.service.js';
 import { RazorpayService } from '../../infra/razorpay/razorpay.service.js';
 import { LedgerService } from '../ledger/ledger.service.js';
 import { PaymentsService } from '../payments/payments.service.js';
+import { AuditService, type AppendAuditLogInput } from '../audit/audit.service.js';
 import { Prisma } from '../../generated/prisma/client.js';
-import { AccountKind, BookingStatus, CommitmentStatus, JobCardStatus, JobCardTier, OfferRecurrence, OfferStatus, PayoutAuthKind, PayoutStatus, PollStatus, PollType } from '../../generated/prisma/enums.js';
+import { AccountKind, BookingStatus, CommitmentStatus, JobCardStatus, JobCardTier, OfferRecurrence, OfferStatus, PayoutStatus, PollStatus, PollType, RoleKind } from '../../generated/prisma/enums.js';
 import type { BookingModel, JobCardModel, MilestoneModel, OfferModel, PayoutModel, PollModel } from '../../generated/prisma/models.js';
 import { appliedTier, minCommitmentsOf, nextTierThreshold, validateLadder, type LadderRung } from './discount-ladder.util.js';
 import { validateMilestoneTemplate, type MilestoneTemplateRung } from './milestone-template.util.js';
+import { parseApprovalConfig, requiredApprovers, validateApprovalConfig, type ApprovalConfig } from './approval-ladder.util.js';
 import type { CreateOfferDto } from './dto/create-offer.dto.js';
 import type { CreateResidentPollDto } from './dto/create-resident-poll.dto.js';
 import type { VendorConfirmDto } from './dto/vendor-confirm.dto.js';
+import type { SetApprovalConfigDto } from './dto/set-approval-config.dto.js';
 
 type Decimal = Prisma.Decimal;
 const Decimal = Prisma.Decimal;
@@ -122,6 +125,7 @@ export class BulkBuyService {
     private readonly ledger: LedgerService,
     private readonly payments: PaymentsService,
     private readonly razorpay: RazorpayService,
+    private readonly auditService: AuditService,
   ) {}
 
   // -------------------------------------------------------------------
@@ -446,31 +450,45 @@ export class BulkBuyService {
   }
 
   /**
-   * Dual-authorisation payout — SMALL bookings only (see the LARGE-tier
-   * guard just below; LARGE bookings use authoriseMilestone instead).
-   * Modeling choice (documented, since the task spec left the
-   * SYSTEM-vs-TREASURER sequencing to us): the SYSTEM authorisation is NOT a
-   * standing background check — it is the automated rule-check ("every job
-   * card signed off, every commitment funded, escrow covers the amount")
-   * run and recorded the moment a TREASURER calls this endpoint. Since
-   * RolesGuard already blocks any non-TREASURER from reaching this method at
-   * all, a SYSTEM row is never persisted by itself without a TREASURER also
-   * present in the same call — so "only the SYSTEM rule-check, no
-   * treasurer" never pays, and a treasurer's very first (successful) call
-   * authorises AND executes in one shot. Re-calling this endpoint after PAID
-   * is a verified no-op (idempotent via the Payout.status guard below) — no
-   * second ledger postings, no second razorpay.payout call.
+   * N-officer approval-ladder payout (Phase 6.4, M14) — SMALL bookings only
+   * (see the LARGE-tier guard just below; LARGE bookings use
+   * authoriseMilestone instead).
+   *
+   * Replaces the old implied "2 approvers" (an auto SYSTEM row + 1
+   * TREASURER) with a per-society ladder driven by Society.config.approval
+   * (see approval-ladder.util.ts's doc comment for the full rung table and
+   * the "amount basis" design choice — here, the Payout's full amount).
+   * `authoriserId` is any of TREASURER/DEPUTY_TREASURER/COMMITTEE (enforced
+   * by BookingsController's `@Roles(...)`) — each DISTINCT such officer who
+   * calls this endpoint gets exactly one PayoutAuthorisation row
+   * (`@@unique([payoutId, authoriserId])`, plus the upsert below being a
+   * no-op on repeat): the SAME officer calling twice never increments the
+   * distinct count, so it alone can never cross a >1 rung. The old
+   * automated "every job card signed off, every commitment funded, escrow
+   * covers the amount" rule-check still runs on every call (the guards
+   * below) — it's just no longer persisted as a countable authorisation,
+   * because a rung is about distinct HUMAN officers only.
+   *
+   * Execution (the ledger post + stubbed razorpay payout + Payout ->PAID)
+   * happens the moment the distinct officer count reaches the required
+   * rung, INSIDE the same per-booking advisory lock (namespace 52) as
+   * every call — so two officers racing the threshold-crossing call still
+   * pay exactly once (see this method's own concurrency test). Re-calling
+   * after PAID is a verified no-op (idempotent via the Payout.status guard
+   * below) — no second ledger postings, no second razorpay.payout call.
    */
-  async authorisePayout(societyId: string, bookingId: string, treasurerId: string): Promise<BookingDetail> {
-    return this.prisma.$transaction(async (tx) => {
+  async authorisePayout(societyId: string, bookingId: string, authoriserId: string): Promise<BookingDetail> {
+    let executedAudit: AppendAuditLogInput | null = null;
+
+    const detail = await this.prisma.$transaction(async (tx) => {
       // Serializes concurrent authorise calls for the SAME booking (namespace
       // 52 = "payout", distinct from AuditService.append's 42 and
-      // IdempotencyService.runOnce's 51): without this, two racing treasurer
+      // IdempotencyService.runOnce's 51): without this, two racing officer
       // requests can both read the same pre-payout snapshot, both pass the
-      // authCount>=2 && status!==PAID guard, and both post the payout ledger
-      // entries — double-paying the vendor. With the lock, the second call
-      // blocks until the first commits, then re-reads and sees PAID, so its
-      // own guard below is a true no-op.
+      // requiredApprovers-crossing && status!==PAID guard, and both post the
+      // payout ledger entries — double-paying the vendor. With the lock, the
+      // second call blocks until the first commits, then re-reads and sees
+      // PAID, so its own guard below is a true no-op.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${PAYOUT_LOCK_NAMESPACE}, hashtext(${bookingId}))`;
 
       const booking = await tx.booking.findUnique({ where: { id: bookingId }, include: { jobCards: true, payout: true, milestones: true } });
@@ -513,21 +531,23 @@ export class BulkBuyService {
         });
       }
 
-      // Both authorisation rows are upserts: replaying this call (before
-      // PAID) is a safe no-op for whichever row(s) already exist.
+      // Upsert: replaying this call (before PAID), whether by the same
+      // officer or a genuinely new one, is a safe no-op / single-insert —
+      // the @@unique([payoutId, authoriserId]) constraint is the
+      // belt-and-suspenders backstop against the same identity ever being
+      // counted twice.
       await tx.payoutAuthorisation.upsert({
-        where: { payoutId_kind: { payoutId: payout.id, kind: PayoutAuthKind.SYSTEM } },
+        where: { payoutId_authoriserId: { payoutId: payout.id, authoriserId } },
         update: {},
-        create: { payoutId: payout.id, kind: PayoutAuthKind.SYSTEM, authoriserId: null },
-      });
-      await tx.payoutAuthorisation.upsert({
-        where: { payoutId_kind: { payoutId: payout.id, kind: PayoutAuthKind.TREASURER } },
-        update: {},
-        create: { payoutId: payout.id, kind: PayoutAuthKind.TREASURER, authoriserId: treasurerId },
+        create: { payoutId: payout.id, authoriserId },
       });
 
-      const authCount = await tx.payoutAuthorisation.count({ where: { payoutId: payout.id } });
-      if (authCount >= 2 && payout.status !== PayoutStatus.PAID) {
+      const distinctApprovers = await tx.payoutAuthorisation.count({ where: { payoutId: payout.id } });
+      const [society, committeeRosterSize] = await Promise.all([tx.society.findUniqueOrThrow({ where: { id: societyId }, select: { config: true } }), this.committeeRosterSize(tx, societyId)]);
+      const approvalConfig = parseApprovalConfig(society.config);
+      const required = requiredApprovers(Number(amount), approvalConfig, committeeRosterSize);
+
+      if (distinctApprovers >= required && payout.status !== PayoutStatus.PAID) {
         await this.ledger.post(
           {
             societyId,
@@ -549,10 +569,35 @@ export class BulkBuyService {
           where: { id: payout.id },
           data: { status: PayoutStatus.PAID, paidAt: this.clock.now(), razorpayPayoutRef: payoutRef.id },
         });
+
+        // Stashed, not written yet — see below the transaction for why.
+        executedAudit = {
+          societyId,
+          actorId: authoriserId,
+          action: 'BULK_BUY_PAYOUT_EXECUTED',
+          subjectType: 'Payout',
+          subjectId: payout.id,
+          payload: { bookingId, amount: amount.toString(), distinctApprovers, required },
+        };
       }
 
       return this.toBookingDetail(booking, payout, booking.milestones);
     });
+
+    // Explicit execution audit entry — stronger than the generic
+    // @AuditLog('PAYOUT_AUTHORISE', ...) on the controller route (which
+    // fires post-response on EVERY call, executed or not): this one marks
+    // the exact moment money actually moved, with the ladder context that
+    // decided it. Written AFTER the transaction above has committed (never
+    // from inside it) so this can never claim an execution that the
+    // transaction itself then rolled back — still awaited before returning
+    // to the caller, the same "stronger than fire-and-forget" stance
+    // SocietyRolesService's own doc comment documents for its own writes.
+    if (executedAudit) {
+      await this.auditService.appendBestEffort(executedAudit);
+    }
+
+    return detail;
   }
 
   // -------------------------------------------------------------------
@@ -560,12 +605,17 @@ export class BulkBuyService {
   // -------------------------------------------------------------------
 
   /**
-   * Dual-authorisation milestone release — LARGE bookings only (the
-   * SMALL-tier guard below; SMALL bookings use authorisePayout instead).
-   * Mirrors authorisePayout's SYSTEM+TREASURER shape and its per-booking
-   * advisory lock (same namespace — see PAYOUT_LOCK_NAMESPACE's doc
-   * comment), one level down: SYSTEM+TREASURER authorisation rows and the
-   * PAID idempotency guard are per-Milestone here instead of per-Payout.
+   * N-officer approval-ladder milestone release (Phase 6.4, M14) — LARGE
+   * bookings only (the SMALL-tier guard below; SMALL bookings use
+   * authorisePayout instead). Mirrors authorisePayout's distinct-officer
+   * ladder and its per-booking advisory lock (same namespace — see
+   * PAYOUT_LOCK_NAMESPACE's doc comment and authorisePayout's own doc
+   * comment for the full rung table), one level down: MilestoneAuthorisation
+   * rows (one per distinct officer, `@@unique([milestoneId, authoriserId])`)
+   * and the PAID idempotency guard are per-Milestone here instead of
+   * per-Payout. Amount basis (see approval-ladder.util.ts): THIS
+   * milestone's own release amount, computed below — never the booking's
+   * overall escrowed total, and never including the retention share.
    *
    * Rule-check (400 otherwise, exactly like authorisePayout's): booking is
    * LARGE; booking is COMPLETED (every job card signed off); every
@@ -574,31 +624,37 @@ export class BulkBuyService {
    * lower-sequence milestone on this booking is already PAID (milestones
    * release strictly in order).
    *
-   * On the FIRST milestone ever authorised on this booking (Booking.
-   * retentionSetAside === false), this also performs the once-only
-   * retention set-aside: T = sum of the booking's job-card unitPrices,
-   * retention = T * offer.retentionPct/100 (the offer is looked up via
-   * booking.sourceId, the same loose OFFER pointer fireOffer used). Retention
-   * is posted BULK_BUY -> RETENTION, and Booking.retentionAmount and
-   * retentionSetAside are updated so every later milestone call on this
-   * booking skips this step. On every later call `retention` is read back
-   * off the persisted Booking.retentionAmount rather than recomputed, so
-   * vendorPayable (= T - retention) is bit-for-bit identical on every call.
+   * Every call (including one that doesn't yet cross the required rung)
+   * records this officer's distinct MilestoneAuthorisation row. EXECUTION —
+   * the once-only retention set-aside on the first milestone (BULK_BUY ->
+   * RETENTION, Booking.retentionAmount/retentionSetAside), the milestone's
+   * own BULK_BUY -> EXTERNAL release, the stubbed razorpay call, and
+   * Milestone -> PAID — only happens the moment the distinct officer count
+   * reaches the amount-derived requirement, inside the same per-booking
+   * advisory lock as every call (see this method's own concurrency test:
+   * two officers racing the threshold-crossing call still release exactly
+   * once). Until then the milestone stays PENDING and nothing moves,
+   * INCLUDING retention — so a rung-2/3 milestone's retention set-aside
+   * waits for the same threshold as its own release, not the first
+   * (possibly insufficient) approval call.
    *
-   * Releases this milestone: amount = vendorPayable * milestone.pct/100,
-   * rounded to 2dp — EXCEPT the last milestone by sequence, which instead
-   * releases whatever remains of vendorPayable (vendorPayable minus the sum
-   * of every already-PAID milestone's snapshotted amount), so the
-   * milestones sum to vendorPayable exactly with no rounding dust left
-   * stranded in BULK_BUY. Posts BULK_BUY -> EXTERNAL (reasonCode
-   * 'BULK_BUY_MILESTONE_PAYOUT', linked to this Milestone), records the
-   * SYSTEM + TREASURER MilestoneAuthorisation rows, and marks the milestone
-   * PAID with its snapshotted amount and a STUBBED razorpay.payout ref
-   * (same hard constraint as authorisePayout — never a real RazorpayX
-   * call).
+   * T = sum of the booking's job-card unitPrices. On the first EXECUTED
+   * milestone, retention = T * offer.retentionPct/100 (the offer is looked
+   * up via booking.sourceId, the same loose OFFER pointer fireOffer used);
+   * on every later call `retention` is read back off the persisted
+   * Booking.retentionAmount rather than recomputed, so vendorPayable
+   * (= T - retention) is bit-for-bit identical on every call. This
+   * milestone's amount = vendorPayable * milestone.pct/100, rounded to 2dp
+   * — EXCEPT the last milestone by sequence, which instead releases
+   * whatever remains of vendorPayable (vendorPayable minus the sum of every
+   * already-PAID milestone's snapshotted amount), so the milestones sum to
+   * vendorPayable exactly with no rounding dust left stranded in BULK_BUY.
+   * Re-calling after PAID is a verified no-op (same as authorisePayout).
    */
-  async authoriseMilestone(societyId: string, bookingId: string, milestoneId: string, treasurerId: string): Promise<BookingDetail> {
-    return this.prisma.$transaction(async (tx) => {
+  async authoriseMilestone(societyId: string, bookingId: string, milestoneId: string, authoriserId: string): Promise<BookingDetail> {
+    let executedAudit: AppendAuditLogInput | null = null;
+
+    const detail = await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${PAYOUT_LOCK_NAMESPACE}, hashtext(${bookingId}))`;
 
       const booking = await tx.booking.findUnique({ where: { id: bookingId }, include: { jobCards: true, payout: true, milestones: { orderBy: { sequence: 'asc' } } } });
@@ -641,6 +697,10 @@ export class BulkBuyService {
 
       const total = booking.jobCards.reduce((sum, jc) => sum.plus(new Decimal(jc.unitPrice)), new Decimal(0));
 
+      // Pure computation only below — isFirstMilestone here means "no
+      // execution has set retention aside yet", not "this call will
+      // execute". Nothing is written until the distinct-approver threshold
+      // is actually reached, further down.
       let retention: Decimal;
       const isFirstMilestone = !booking.retentionSetAside;
 
@@ -671,6 +731,27 @@ export class BulkBuyService {
         throw new BadRequestException('Escrow (BULK_BUY) balance is insufficient for this milestone release');
       }
 
+      // Upsert: replaying this call (before PAID), whether by the same
+      // officer or a genuinely new one, is a safe no-op / single-insert —
+      // @@unique([milestoneId, authoriserId]) is the belt-and-suspenders
+      // backstop against the same identity ever being counted twice.
+      await tx.milestoneAuthorisation.upsert({
+        where: { milestoneId_authoriserId: { milestoneId: milestone.id, authoriserId } },
+        update: {},
+        create: { milestoneId: milestone.id, authoriserId },
+      });
+
+      const distinctApprovers = await tx.milestoneAuthorisation.count({ where: { milestoneId: milestone.id } });
+      const [society, committeeRosterSize] = await Promise.all([tx.society.findUniqueOrThrow({ where: { id: societyId }, select: { config: true } }), this.committeeRosterSize(tx, societyId)]);
+      const approvalConfig = parseApprovalConfig(society.config);
+      const required = requiredApprovers(Number(amount), approvalConfig, committeeRosterSize);
+
+      if (distinctApprovers < required) {
+        // Rung not yet met — nothing moves (not even retention). Return the
+        // still-PENDING state as-is.
+        return this.toBookingDetail(booking, booking.payout, booking.milestones);
+      }
+
       if (isFirstMilestone) {
         await this.ledger.post(
           {
@@ -688,20 +769,6 @@ export class BulkBuyService {
         booking.retentionAmount = retention;
         booking.retentionSetAside = true;
       }
-
-      // Both authorisation rows are upserts: replaying this call (before
-      // PAID) is a safe no-op for whichever row(s) already exist — same
-      // pattern as authorisePayout's PayoutAuthorisation upserts.
-      await tx.milestoneAuthorisation.upsert({
-        where: { milestoneId_kind: { milestoneId: milestone.id, kind: PayoutAuthKind.SYSTEM } },
-        update: {},
-        create: { milestoneId: milestone.id, kind: PayoutAuthKind.SYSTEM, authoriserId: null },
-      });
-      await tx.milestoneAuthorisation.upsert({
-        where: { milestoneId_kind: { milestoneId: milestone.id, kind: PayoutAuthKind.TREASURER } },
-        update: {},
-        create: { milestoneId: milestone.id, kind: PayoutAuthKind.TREASURER, authoriserId: treasurerId },
-      });
 
       await this.ledger.post(
         {
@@ -725,9 +792,26 @@ export class BulkBuyService {
         data: { status: PayoutStatus.PAID, amount, paidAt: this.clock.now(), razorpayPayoutRef: payoutRef.id },
       });
 
+      executedAudit = {
+        societyId,
+        actorId: authoriserId,
+        action: 'BULK_BUY_MILESTONE_EXECUTED',
+        subjectType: 'Milestone',
+        subjectId: updatedMilestone.id,
+        payload: { bookingId, amount: amount.toString(), retentionSetAsideNow: isFirstMilestone, distinctApprovers, required },
+      };
+
       const milestones = booking.milestones.map((m) => (m.id === updatedMilestone.id ? updatedMilestone : m));
       return this.toBookingDetail(booking, booking.payout, milestones);
     });
+
+    // See authorisePayout's identical comment: written after the
+    // transaction commits, never from inside it.
+    if (executedAudit) {
+      await this.auditService.appendBestEffort(executedAudit);
+    }
+
+    return detail;
   }
 
   /**
@@ -798,6 +882,63 @@ export class BulkBuyService {
 
       return this.toBookingDetail({ ...booking, ...updatedBooking }, booking.payout, booking.milestones);
     });
+  }
+
+  // -------------------------------------------------------------------
+  // Approval-ladder config — Phase 6.4 (M14)
+  // -------------------------------------------------------------------
+
+  /** Read-only: the society's effective approval-ladder config — the stored `config.approval` if present and valid, else DEFAULT_APPROVAL_CONFIG (see approval-ladder.util.ts's parseApprovalConfig). */
+  async getApprovalConfig(societyId: string): Promise<ApprovalConfig> {
+    const society = await this.prisma.society.findUniqueOrThrow({ where: { id: societyId } });
+    return parseApprovalConfig(society.config);
+  }
+
+  /**
+   * Sets this society's approval-ladder thresholds (BACKEND_PLAN.md Phase
+   * 6.4 item 6) — writes `{ ...existingConfig, approval: {...} }` onto
+   * Society.config, i.e. merges only the `approval` sub-key, leaving any
+   * other config key (e.g. the job-post rate limit, or an operator-set
+   * feature toggle) untouched. This is deliberately NOT the same as
+   * UpdateSocietyDto's operator-facing `config` field, which replaces the
+   * whole object — see that DTO's doc comment; the two would otherwise
+   * clobber each other.
+   *
+   * Committee-scoped, not operator-only (see BookingsController/
+   * ApprovalConfigController's `@Roles(...)`): thresholds for a bulk-buy
+   * disbursement's approval ladder are a SOCIETY governance decision (how
+   * many of ITS OWN officers must sign off, and when a full committee
+   * majority kicks in) — the same category of decision SocietyRolesService
+   * already lets a COMMITTEE member make (who holds TREASURER/
+   * DEPUTY_TREASURER/COMMITTEE at all). A platform operator has no visibility
+   * into a specific society's officer roster or risk appetite and
+   * shouldn't be setting its money-movement policy; that's why this is
+   * COMMITTEE/TREASURER-gated in this module rather than folded into the
+   * operator-only `PATCH /operator/societies/:id`.
+   */
+  async setApprovalConfig(societyId: string, actorId: string, dto: SetApprovalConfigDto): Promise<ApprovalConfig> {
+    const candidate: ApprovalConfig = { lowerThreshold: dto.lowerThreshold, upperThreshold: dto.upperThreshold, majorityFraction: dto.majorityFraction };
+    const validationError = validateApprovalConfig(candidate);
+    if (validationError) {
+      throw new BadRequestException(validationError);
+    }
+
+    const society = await this.prisma.society.findUniqueOrThrow({ where: { id: societyId } });
+    const existingConfig = typeof society.config === 'object' && society.config !== null ? (society.config as Record<string, unknown>) : {};
+    const newConfig = { ...existingConfig, approval: candidate };
+
+    await this.prisma.society.update({ where: { id: societyId }, data: { config: newConfig as unknown as Prisma.InputJsonValue } });
+
+    await this.auditService.appendBestEffort({
+      societyId,
+      actorId,
+      action: 'APPROVAL_CONFIG_SET',
+      subjectType: 'Society',
+      subjectId: societyId,
+      payload: candidate,
+    });
+
+    return candidate;
   }
 
   // -------------------------------------------------------------------
@@ -1142,6 +1283,23 @@ export class BulkBuyService {
   // -------------------------------------------------------------------
   // Internal helpers
   // -------------------------------------------------------------------
+
+  /**
+   * Phase 6.4 rung-3 input: the count of DISTINCT users holding at least one
+   * of COMMITTEE/TREASURER/DEPUTY_TREASURER in this society right now — "the
+   * committee roster" the ladder's majorityFraction is a fraction of. Reads
+   * through `tx` so it's evaluated inside the same advisory-locked
+   * transaction as the authorisation call it's feeding, never off a stale
+   * snapshot.
+   */
+  private async committeeRosterSize(tx: Prisma.TransactionClient, societyId: string): Promise<number> {
+    const officers = await tx.role.findMany({
+      where: { societyId, kind: { in: [RoleKind.COMMITTEE, RoleKind.TREASURER, RoleKind.DEPUTY_TREASURER] } },
+      select: { userId: true },
+      distinct: ['userId'],
+    });
+    return officers.length;
+  }
 
   private async getOfferInternal(societyId: string, id: string): Promise<OfferModel> {
     const offer = await this.prisma.offer.findUnique({ where: { id } });

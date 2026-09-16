@@ -22,30 +22,34 @@ export class BookingsController {
   }
 
   /**
-   * TREASURER-only dual-authorisation call — SMALL bookings only (LARGE
-   * bookings are rejected with 400; see authoriseMilestone below). See
-   * BulkBuyService.authorisePayout's doc comment for exactly when the
-   * SYSTEM row is added and when the payout actually executes.
+   * Approval-ladder authorisation call (Phase 6.4, M14) — SMALL bookings
+   * only (LARGE bookings are rejected with 400; see authoriseMilestone
+   * below). Open to any of TREASURER/DEPUTY_TREASURER/COMMITTEE (widened
+   * from TREASURER-only — this is what makes DEPUTY_TREASURER a live role;
+   * see BulkBuyService.authorisePayout's doc comment for the full N-officer
+   * ladder and exactly when a call actually executes the payout vs. merely
+   * records one more distinct officer's approval).
    */
   @Post(':id/payout/authorise')
   @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
   @ResidentOnly()
-  @Roles(RoleKind.TREASURER)
+  @Roles(RoleKind.TREASURER, RoleKind.DEPUTY_TREASURER, RoleKind.COMMITTEE)
   @AuditLog('PAYOUT_AUTHORISE', 'Payout')
   async authorisePayout(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<BookingDetail> {
     return this.bulkBuy.authorisePayout(currentUser.societyId, id, currentUser.id);
   }
 
   /**
-   * TREASURER-only dual-authorisation call — LARGE bookings only (SMALL
-   * bookings are rejected with 400). See
-   * BulkBuyService.authoriseMilestone's doc comment for the ordering,
-   * idempotency, and once-only retention set-aside rules.
+   * Approval-ladder authorisation call (Phase 6.4, M14) — LARGE bookings
+   * only (SMALL bookings are rejected with 400). Same role widening as
+   * authorisePayout above. See BulkBuyService.authoriseMilestone's doc
+   * comment for the ordering, idempotency, and once-only retention
+   * set-aside rules under the new N-officer ladder.
    */
   @Post(':id/milestones/:mid/authorise')
   @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
   @ResidentOnly()
-  @Roles(RoleKind.TREASURER)
+  @Roles(RoleKind.TREASURER, RoleKind.DEPUTY_TREASURER, RoleKind.COMMITTEE)
   @AuditLog('MILESTONE_AUTHORISE', 'Milestone')
   async authoriseMilestone(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string, @Param('mid') mid: string): Promise<BookingDetail> {
     return this.bulkBuy.authoriseMilestone(currentUser.societyId, id, mid, currentUser.id);
