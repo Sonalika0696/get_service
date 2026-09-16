@@ -976,6 +976,27 @@
         ]
       }
     },
+    "/api/v1/auth/session": {
+      "get": {
+        "operationId": "SessionController_session",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Session"
+        ]
+      }
+    },
     "/api/v1/auth/signup": {
       "post": {
         "operationId": "AuthController_signup",
@@ -1394,6 +1415,59 @@
         ]
       }
     },
+    "/api/v1/dashboard/operator": {
+      "get": {
+        "operationId": "DashboardController_operator",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Platform-wide KPIs. OPERATOR-only, and deliberately exposes only\ncross-society COUNTS (societies/flats/residents/vendors/pending\nratifications) — no per-society financials, unlike the committee\nroute above which includes accountBalances for its own society only.",
+        "tags": [
+          "Dashboard"
+        ]
+      }
+    },
+    "/api/v1/dashboard/society/{sid}": {
+      "get": {
+        "operationId": "DashboardController_society",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Committee-scoped KPIs for one society. Balances are included because\nthis route is gated the same way GET /ledger already is (COMMITTEE or\nTREASURER) — see LedgerController.getLedger's doc comment on why\naccount-kind balances are committee-visible, not resident-wide.",
+        "tags": [
+          "Dashboard"
+        ]
+      }
+    },
     "/api/v1/job-cards/{id}/sign-off": {
       "post": {
         "operationId": "JobCardsController_signOff",
@@ -1682,6 +1756,37 @@
           }
         },
         "summary": "Phase 6.5 Invariant I6 assertion worker trigger — see\nLedgerService.assertAllBalances' doc comment for why this is\n`@OperatorOnly()` and cross-society rather than the\n`@ResidentOnly()` + `@Roles(...)` shape every other route on this\ncontroller uses: PollsService.processExpired's \"stand-in for a future\nscheduler\" pattern, adapted to a check that inherently spans every\nsociety at once.",
+        "tags": [
+          "Ledger"
+        ]
+      }
+    },
+    "/api/v1/ledger/cashflow": {
+      "get": {
+        "operationId": "LedgerController_cashflow",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "range",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Dated income/expense/net timeseries for the web console's CashflowCard\n— see LedgerService.cashflow's doc comment for the exact definition and\nthe `range` contract. Same gate as `GET /ledger` (COMMITTEE-visible\naggregates, never per-resident rows).",
         "tags": [
           "Ledger"
         ]
