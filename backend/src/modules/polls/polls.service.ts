@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../infra/prisma/prisma.service.js';
 import { Clock } from '../../infra/clock/clock.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
@@ -12,6 +12,22 @@ export type PollDetail = PollModel & {
   commitmentCount: number;
   hasJoined: boolean;
 };
+
+/** Kind of lifecycle transition a poll notification is reporting. */
+type NotificationKind = 'fired' | 'expired';
+
+/**
+ * What notifyCommitted-style logic needs to dispatch mail AFTER a
+ * transaction has committed: just the recipient list plus enough context
+ * to pick a template. No DB handles — those only live inside the tx that
+ * produced this.
+ */
+interface PendingNotification {
+  pollId: string;
+  title: string;
+  kind: NotificationKind;
+  recipientEmails: string[];
+}
 
 /**
  * Poll engine (Phase 3), reduced in the V2.0 scope revision: resident voting
@@ -34,9 +50,19 @@ export type PollDetail = PollModel & {
  * as a stand-in for a future scheduler. processExpired still applies to
  * BULK_BUY_RESIDENT polls, since expiry is generic lifecycle logic rather
  * than Flow B ownership.
+ *
+ * Notification dispatch is post-commit and best-effort (BACKEND_PLAN.md
+ * Phase 6.5, RoU §5): join()/processExpired() only READ inside the
+ * $transaction (via collectRecipients) and return a PendingNotification;
+ * the actual mailer calls happen after the transaction has resolved, via
+ * dispatchNotifications, which swallows and logs per-recipient failures so
+ * a mail hiccup can never roll back or reverse an already-committed
+ * FIRED/EXPIRED state change.
  */
 @Injectable()
 export class PollsService {
+  private readonly logger = new Logger(PollsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly clock: Clock,
@@ -104,7 +130,13 @@ export class PollsService {
       throw new ForbiddenException('Not a resident of this society');
     }
 
-    await this.prisma.$transaction(async (tx) => {
+    // The transaction only mutates/reads state and hands back what a
+    // post-commit notification would need — it never awaits the mailer
+    // itself. That keeps a mail-sender hiccup from being able to roll back
+    // a commitment that already legitimately landed (BACKEND_PLAN.md Phase
+    // 6.5, RoU §5: notification dispatch must be post-commit and
+    // best-effort, never able to reverse committed state).
+    const pending = await this.prisma.$transaction(async (tx) => {
       try {
         await tx.pollCommitment.create({ data: { pollId: id, residentId: callerId } });
       } catch (error) {
@@ -119,10 +151,15 @@ export class PollsService {
         const stillOpen = await tx.poll.findUnique({ where: { id }, select: { status: true } });
         if (stillOpen?.status === PollStatus.OPEN) {
           await tx.poll.update({ where: { id }, data: { status: PollStatus.FIRED, firedAt: this.clock.now() } });
-          await this.notifyCommitted(tx, id, poll.title, 'fired');
+          return this.collectRecipients(tx, id, poll.title, 'fired');
         }
       }
+      return null;
     });
+
+    if (pending) {
+      await this.dispatchNotifications(pending);
+    }
 
     return this.get(societyId, id, callerId);
   }
@@ -156,10 +193,14 @@ export class PollsService {
     });
 
     for (const poll of expired) {
-      await this.prisma.$transaction(async (tx) => {
+      // Same post-commit split as join(): the transaction only flips the
+      // poll's status and reads back who to notify; dispatch happens after
+      // it has committed, so a mail failure can't un-expire a poll.
+      const pending = await this.prisma.$transaction(async (tx) => {
         await tx.poll.update({ where: { id: poll.id }, data: { status: PollStatus.EXPIRED, closedAt: this.clock.now() } });
-        await this.notifyCommitted(tx, poll.id, poll.title, 'expired');
+        return this.collectRecipients(tx, poll.id, poll.title, 'expired');
       });
+      await this.dispatchNotifications(pending);
     }
 
     return { resolved: expired.length };
@@ -169,13 +210,31 @@ export class PollsService {
   // Internal helpers
   // ---------------------------------------------------------------------
 
-  private async notifyCommitted(tx: Prisma.TransactionClient, pollId: string, title: string, kind: 'fired' | 'expired'): Promise<void> {
+  /** Read-only, runs INSIDE the transaction: just gathers who to notify — never calls the mailer. */
+  private async collectRecipients(tx: Prisma.TransactionClient, pollId: string, title: string, kind: NotificationKind): Promise<PendingNotification> {
     const commitments = await tx.pollCommitment.findMany({ where: { pollId }, include: { resident: true } });
-    for (const commitment of commitments) {
-      if (kind === 'fired') {
-        await this.notifications.sendPollFired(commitment.resident.email, title);
-      } else {
-        await this.notifications.sendPollExpired(commitment.resident.email, title);
+    return { pollId, title, kind, recipientEmails: commitments.map((commitment) => commitment.resident.email) };
+  }
+
+  /**
+   * Runs AFTER the transaction has committed. Best-effort: each send is
+   * isolated in its own try/catch so one resident's bounced/broken mailbox
+   * can't stop the rest of the batch, and any failure is logged rather than
+   * thrown — this must never be able to look like the poll itself failed.
+   */
+  private async dispatchNotifications(pending: PendingNotification): Promise<void> {
+    for (const email of pending.recipientEmails) {
+      try {
+        if (pending.kind === 'fired') {
+          await this.notifications.sendPollFired(email, pending.title);
+        } else {
+          await this.notifications.sendPollExpired(email, pending.title);
+        }
+      } catch (error) {
+        this.logger.error(
+          `Post-commit poll-${pending.kind} notification failed for poll ${pending.pollId} -> ${email} (state change already committed)`,
+          error instanceof Error ? error.stack : String(error),
+        );
       }
     }
   }
