@@ -19,9 +19,10 @@ export class BookingsController {
   }
 
   /**
-   * TREASURER-only dual-authorisation call — see BulkBuyService.authorisePayout's
-   * doc comment for exactly when the SYSTEM row is added and when the
-   * payout actually executes.
+   * TREASURER-only dual-authorisation call — SMALL bookings only (LARGE
+   * bookings are rejected with 400; see authoriseMilestone below). See
+   * BulkBuyService.authorisePayout's doc comment for exactly when the
+   * SYSTEM row is added and when the payout actually executes.
    */
   @Post(':id/payout/authorise')
   @UseGuards(AuthGuard, RolesGuard)
@@ -29,5 +30,32 @@ export class BookingsController {
   @AuditLog('PAYOUT_AUTHORISE', 'Payout')
   async authorisePayout(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string): Promise<BookingDetail> {
     return this.bulkBuy.authorisePayout(currentUser.societyId, id, currentUser.id);
+  }
+
+  /**
+   * TREASURER-only dual-authorisation call — LARGE bookings only (SMALL
+   * bookings are rejected with 400). See
+   * BulkBuyService.authoriseMilestone's doc comment for the ordering,
+   * idempotency, and once-only commission/retention set-aside rules.
+   */
+  @Post(':id/milestones/:mid/authorise')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(RoleKind.TREASURER)
+  @AuditLog('MILESTONE_AUTHORISE', 'Milestone')
+  async authoriseMilestone(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string, @Param('mid') mid: string): Promise<BookingDetail> {
+    return this.bulkBuy.authoriseMilestone(currentUser.societyId, id, mid, currentUser.id);
+  }
+
+  /**
+   * TREASURER-only release of a LARGE booking's defect-liability retention
+   * share, once every milestone is PAID and the retention period has
+   * elapsed. See BulkBuyService.releaseRetention's doc comment.
+   */
+  @Post(':id/retention/release')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(RoleKind.TREASURER)
+  @AuditLog('RETENTION_RELEASE', 'Booking')
+  async releaseRetention(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string): Promise<BookingDetail> {
+    return this.bulkBuy.releaseRetention(currentUser.societyId, id, currentUser.id);
   }
 }

@@ -44,8 +44,19 @@ import { AccountKind, OccupancyRole, RoleKind } from '../src/generated/prisma/en
  *  - committing to an already-FIRED offer is rejected (400);
  *  - conservation holds throughout: GET /ledger's balancesIntact stays true.
  *
- * No 4D (large-job milestones/defect retention) or Phase 5 (resident-
- * initiated polls/weekly-recurring bulk-buy) concepts are exercised here.
+ * Phase 4D (LARGE-tier milestones + defect-liability retention) is exercised
+ * further down this file: a LARGE offer's milestoneTemplate is validated the
+ * same way (bad templates / a LARGE offer missing one -> 400); firing
+ * creates ordered Milestone rows and a retentionReleaseAt; the SMALL
+ * payout/authorise route rejects a LARGE booking and vice versa; milestones
+ * release strictly in order; the FIRST milestone authorisation also sets
+ * aside commission + retention (BULK_BUY -> COMMISSION_SINK / -> RETENTION),
+ * the LAST milestone releases whatever of vendorPayable remains (no rounding
+ * dust); retention can only be released once every milestone is PAID and
+ * the defect-liability period has elapsed (RETENTION -> EXTERNAL); every
+ * authorisation route is idempotent and safe under concurrent calls. No
+ * Phase 5 (resident-initiated polls/weekly-recurring bulk-buy) concepts are
+ * exercised here.
  */
 
 class CapturingMailer {
@@ -92,11 +103,29 @@ interface PayoutBody {
   razorpayPayoutRef: string | null;
 }
 
+interface MilestoneBody {
+  id: string;
+  bookingId: string;
+  sequence: number;
+  name: string;
+  pct: string | number;
+  status: 'PENDING' | 'AUTHORISED' | 'PAID';
+  amount: string | number | null;
+  paidAt: string | null;
+  razorpayPayoutRef: string | null;
+}
+
 interface BookingBody {
   id: string;
   status: 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+  tier?: 'SMALL' | 'LARGE';
   jobCards: JobCardBody[];
   payout: PayoutBody | null;
+  milestones: MilestoneBody[];
+  retentionAmount?: string | number;
+  retentionReleaseAt?: string | null;
+  retentionReleasedAt?: string | null;
+  commissionTaken?: boolean;
 }
 
 interface LedgerAggregateBody {
@@ -205,10 +234,11 @@ describe('Bulk-buy Flow A (e2e)', () => {
 
     const society = await prisma.society.create({ data: { name: 'Bulk-Buy Test Society', address: 'n/a' } });
     societyId = society.id;
-    // flats 0-4 are used by the main sequential-flow test; 5-8 by the
-    // concurrent-payout-authorisation test below (kept separate so the two
-    // tests' users/bookings never overlap).
-    for (let i = 0; i < 9; i++) {
+    // flats 0-4: SMALL sequential-flow test. 5-8: SMALL concurrent-payout
+    // test. 9-12: LARGE sequential-flow test (Phase 4D). 13-16: LARGE
+    // concurrent-milestone-authorisation test (Phase 4D). Kept separate so
+    // no two tests' users/bookings ever overlap.
+    for (let i = 0; i < 17; i++) {
       const flat = await prisma.flat.create({
         data: { societyId, unitNo: `B-${i}-${randomUUID().slice(0, 8)}`, maintenanceAmount: 1000 },
       });
@@ -223,6 +253,8 @@ describe('Bulk-buy Flow A (e2e)', () => {
     await prisma.webhookEvent.deleteMany({ where: { eventId: { in: webhookEventIds } } });
     await prisma.payoutAuthorisation.deleteMany({ where: { payout: { booking: { societyId } } } });
     await prisma.payout.deleteMany({ where: { booking: { societyId } } });
+    await prisma.milestoneAuthorisation.deleteMany({ where: { milestone: { booking: { societyId } } } });
+    await prisma.milestone.deleteMany({ where: { booking: { societyId } } });
     await prisma.jobCard.deleteMany({ where: { booking: { societyId } } });
     await prisma.booking.deleteMany({ where: { societyId } });
     await prisma.commitment.deleteMany({ where: { offer: { societyId } } });
@@ -499,5 +531,292 @@ describe('Bulk-buy Flow A (e2e)', () => {
     expect(balanceOf(finalLedger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(0, 6);
     expect(balanceOf(finalLedger, AccountKind.COMMISSION_SINK) - commissionStart).toBeCloseTo(190, 6);
     expect(balanceOf(finalLedger, AccountKind.EXTERNAL) - externalStart).toBeCloseTo(-190, 6);
+  });
+
+  /**
+   * Phase 4D — LARGE-tier: offer -> commit -> fire (creates ordered
+   * Milestones + a retentionReleaseAt) -> escrow -> sign-off -> in-order
+   * dual-authorised milestone releases -> defect-liability retention
+   * release. Money flow for T=1900 (2 residents x 950, same 5%-off ladder
+   * tier as the SMALL test), commissionPct 10% (society default), 40/60
+   * milestone split, retentionPct 10%:
+   *   commission = 190 -> COMMISSION_SINK, retention = 190 -> RETENTION
+   *     (both set aside once, at milestone #1's authorisation)
+   *   vendorPayable = 1900 - 190 - 190 = 1520
+   *   milestone #1 (Advance, 40%)    = 1520 * 0.40 = 608  -> EXTERNAL
+   *   milestone #2 (Completion, 60%) = 1520 - 608  = 912  -> EXTERNAL
+   *     (the LAST milestone always takes whatever of vendorPayable remains,
+   *     rather than 1520 * 0.60 exactly, so rounding dust never gets
+   *     stranded in BULK_BUY — irrelevant to the arithmetic here since
+   *     1520 * 0.60 is exactly 912 too, but exercised by construction)
+   *   retention (190) is released later, once every milestone is PAID and
+   *     Clock.now() has reached retentionReleaseAt: RETENTION -> EXTERNAL.
+   * So EXTERNAL's net delta across the whole chain is exactly -commission
+   * (-190): -1900 in at escrow, +608 +912 +190 back out — the platform's
+   * commission share is the only part of T that never leaves via EXTERNAL.
+   */
+  it('runs the full LARGE-tier chain: ordered milestone releases + defect-liability retention (Phase 4D)', async () => {
+    const committee = await signupAndLogin(`bb-committee-large-${randomUUID()}@example.com`, flatIds[9], OccupancyRole.OWNER_OCCUPIER);
+    await makeRole(committee.userId, RoleKind.COMMITTEE);
+    const treasurer = await signupAndLogin(`bb-treasurer-large-${randomUUID()}@example.com`, flatIds[10], OccupancyRole.OWNER_OCCUPIER);
+    await makeRole(treasurer.userId, RoleKind.TREASURER);
+    const resident1 = await signupAndLogin(`bb-resident1-large-${randomUUID()}@example.com`, flatIds[11], OccupancyRole.OWNER_OCCUPIER);
+    const resident2 = await signupAndLogin(`bb-resident2-large-${randomUUID()}@example.com`, flatIds[12], OccupancyRole.OWNER_OCCUPIER);
+
+    const startLedger = await ledgerBalances(committee.agent);
+    const bulkBuyStart = balanceOf(startLedger, AccountKind.BULK_BUY);
+    const commissionStart = balanceOf(startLedger, AccountKind.COMMISSION_SINK);
+    const retentionStart = balanceOf(startLedger, AccountKind.RETENTION);
+    const externalStart = balanceOf(startLedger, AccountKind.EXTERNAL);
+
+    const baseOffer = {
+      vendorId,
+      category: 'Renovation',
+      title: 'Large lobby renovation',
+      description: 'Bulk-buy of a large renovation job',
+      unitPrice: 1000,
+      deadline: new Date(Date.now() + 86_400_000).toISOString(),
+      discountLadder: [{ minN: 2, pct: 5 }],
+      tier: 'LARGE',
+    };
+
+    // --- 1. Offer creation: bad milestone templates rejected with 400 ---
+    await committee.agent.post('/api/v1/offers').send({ ...baseOffer, milestoneTemplate: [], retentionPct: 10, retentionDays: 30 }).expect(400);
+    await committee.agent
+      .post('/api/v1/offers')
+      .send({ ...baseOffer, milestoneTemplate: [{ name: 'Advance', pct: 40 }, { name: 'Completion', pct: 50 }], retentionPct: 10, retentionDays: 30 })
+      .expect(400); // sums to 90, not 100
+    await committee.agent
+      .post('/api/v1/offers')
+      .send({ ...baseOffer, milestoneTemplate: [{ name: 'Advance', pct: 0 }, { name: 'Completion', pct: 100 }], retentionPct: 10, retentionDays: 30 })
+      .expect(400); // pct <= 0
+    // A LARGE offer missing milestoneTemplate entirely is also rejected.
+    await committee.agent.post('/api/v1/offers').send({ ...baseOffer, retentionPct: 10, retentionDays: 30 }).expect(400);
+
+    const milestoneTemplate = [
+      { name: 'Advance', pct: 40 },
+      { name: 'Completion', pct: 60 },
+    ];
+    const createRes = await committee.agent.post('/api/v1/offers').send({ ...baseOffer, milestoneTemplate, retentionPct: 10, retentionDays: 30 }).expect(201);
+    const offer = createRes.body as OfferBody;
+    expect(offer.status).toBe('OPEN');
+
+    // --- 2. Two residents commit; the 2nd fires the offer ---
+    await resident1.agent.post(`/api/v1/offers/${offer.id}/commit`).expect(201);
+    const fireRes = await resident2.agent.post(`/api/v1/offers/${offer.id}/commit`).expect(201);
+    expect((fireRes.body as OfferBody).status).toBe('FIRED');
+
+    const booking = await prisma.booking.findFirstOrThrow({ where: { societyId, sourceType: 'OFFER', sourceId: offer.id } });
+    expect(booking.tier).toBe('LARGE');
+    expect(booking.retentionReleaseAt).not.toBeNull();
+    const daysOut = (booking.retentionReleaseAt!.getTime() - booking.createdAt.getTime()) / 86_400_000;
+    expect(daysOut).toBeCloseTo(30, 0);
+
+    const milestoneRows = await prisma.milestone.findMany({ where: { bookingId: booking.id }, orderBy: { sequence: 'asc' } });
+    expect(milestoneRows).toHaveLength(2);
+    expect(milestoneRows[0].name).toBe('Advance');
+    expect(Number(milestoneRows[0].pct)).toBe(40);
+    expect(milestoneRows[0].status).toBe('PENDING');
+    expect(milestoneRows[1].name).toBe('Completion');
+    expect(Number(milestoneRows[1].pct)).toBe(60);
+    expect(milestoneRows[1].status).toBe('PENDING');
+
+    // --- 3. Both residents pay; sign off both job cards; booking completes ---
+    const commitments = await prisma.commitment.findMany({ where: { offerId: offer.id } });
+    expect(commitments).toHaveLength(2);
+    for (const c of commitments) {
+      await payCommitment(c.id, 950);
+    }
+
+    const afterEscrowLedger = await ledgerBalances(committee.agent);
+    expect(afterEscrowLedger.balancesIntact).toBe(true);
+    expect(balanceOf(afterEscrowLedger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(1900, 6);
+
+    const jobCards = await prisma.jobCard.findMany({ where: { bookingId: booking.id } });
+    expect(jobCards).toHaveLength(2);
+    for (const jc of jobCards) {
+      const resident = jc.residentId === resident1.userId ? resident1 : resident2;
+      await resident.agent.post(`/api/v1/job-cards/${jc.id}/sign-off`).expect(201);
+    }
+
+    const bookingCompleted = (await committee.agent.get(`/api/v1/bookings/${booking.id}`).expect(200)).body as BookingBody;
+    expect(bookingCompleted.status).toBe('COMPLETED');
+    expect(bookingCompleted.milestones).toHaveLength(2);
+
+    // --- 4. The SMALL payout route rejects a LARGE booking ---
+    await treasurer.agent.post(`/api/v1/bookings/${booking.id}/payout/authorise`).expect(400);
+
+    // --- 5. Out-of-order milestone authorisation is rejected ---
+    await treasurer.agent.post(`/api/v1/bookings/${booking.id}/milestones/${milestoneRows[1].id}/authorise`).expect(400);
+
+    // --- 6. Milestone #1: non-treasurer 403; treasurer sets aside commission
+    //        + retention and releases the Advance share; replay is a no-op ---
+    await resident1.agent.post(`/api/v1/bookings/${booking.id}/milestones/${milestoneRows[0].id}/authorise`).expect(403);
+
+    const m1Res = await treasurer.agent.post(`/api/v1/bookings/${booking.id}/milestones/${milestoneRows[0].id}/authorise`).expect(201);
+    const bookingAfterM1 = m1Res.body as BookingBody;
+    const m1 = bookingAfterM1.milestones.find((m) => m.id === milestoneRows[0].id)!;
+    expect(m1.status).toBe('PAID');
+    expect(Number(m1.amount)).toBe(608);
+    expect(m1.razorpayPayoutRef).toMatch(/^payout_stub_/);
+    expect(Number(bookingAfterM1.retentionAmount)).toBe(190);
+    expect(bookingAfterM1.commissionTaken).toBe(true);
+
+    const m1Authorisations = await prisma.milestoneAuthorisation.findMany({ where: { milestoneId: milestoneRows[0].id } });
+    expect(m1Authorisations).toHaveLength(2);
+    expect(m1Authorisations.some((a) => a.kind === 'SYSTEM' && a.authoriserId === null)).toBe(true);
+    expect(m1Authorisations.some((a) => a.kind === 'TREASURER' && a.authoriserId === treasurer.userId)).toBe(true);
+
+    const afterM1Ledger = await ledgerBalances(committee.agent);
+    expect(afterM1Ledger.balancesIntact).toBe(true);
+    expect(balanceOf(afterM1Ledger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(1900 - 190 - 190 - 608, 6);
+    expect(balanceOf(afterM1Ledger, AccountKind.COMMISSION_SINK) - commissionStart).toBeCloseTo(190, 6);
+    expect(balanceOf(afterM1Ledger, AccountKind.RETENTION) - retentionStart).toBeCloseTo(190, 6);
+
+    // Re-authorise #1 -> idempotent no-op: exactly one payout ledger entry,
+    // balances unchanged.
+    const m1ReplayRes = await treasurer.agent.post(`/api/v1/bookings/${booking.id}/milestones/${milestoneRows[0].id}/authorise`).expect(201);
+    expect((m1ReplayRes.body as BookingBody).milestones.find((m) => m.id === milestoneRows[0].id)!.status).toBe('PAID');
+    const m1PayoutEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Milestone', linkedEntityId: milestoneRows[0].id, reasonCode: 'BULK_BUY_MILESTONE_PAYOUT' } });
+    expect(m1PayoutEntryCount).toBe(1);
+    const m1CommissionEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Booking', linkedEntityId: booking.id, reasonCode: 'BULK_BUY_MILESTONE_COMMISSION' } });
+    expect(m1CommissionEntryCount).toBe(1);
+    const afterM1ReplayLedger = await ledgerBalances(committee.agent);
+    expect(balanceOf(afterM1ReplayLedger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(1900 - 190 - 190 - 608, 6);
+
+    // --- 7. Milestone #2 (last): releases whatever of vendorPayable remains ---
+    const m2Res = await treasurer.agent.post(`/api/v1/bookings/${booking.id}/milestones/${milestoneRows[1].id}/authorise`).expect(201);
+    const bookingAfterM2 = m2Res.body as BookingBody;
+    const m2 = bookingAfterM2.milestones.find((m) => m.id === milestoneRows[1].id)!;
+    expect(m2.status).toBe('PAID');
+    expect(Number(m2.amount)).toBe(912);
+
+    const afterM2Ledger = await ledgerBalances(committee.agent);
+    expect(afterM2Ledger.balancesIntact).toBe(true);
+    expect(balanceOf(afterM2Ledger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(0, 6); // vendorPayable fully released
+    expect(balanceOf(afterM2Ledger, AccountKind.RETENTION) - retentionStart).toBeCloseTo(190, 6); // still held — not released yet
+
+    // --- 8. Retention release: too early -> 400; then fast-forward past the
+    //        defect-liability period and release; replay is a no-op ---
+    await treasurer.agent.post(`/api/v1/bookings/${booking.id}/retention/release`).expect(400);
+
+    await prisma.booking.update({ where: { id: booking.id }, data: { retentionReleaseAt: new Date(Date.now() - 1000) } });
+
+    const releaseRes = await treasurer.agent.post(`/api/v1/bookings/${booking.id}/retention/release`).expect(201);
+    const releasedBooking = releaseRes.body as BookingBody;
+    expect(releasedBooking.retentionReleasedAt).not.toBeNull();
+
+    const afterReleaseLedger = await ledgerBalances(committee.agent);
+    expect(afterReleaseLedger.balancesIntact).toBe(true);
+    expect(balanceOf(afterReleaseLedger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(0, 6);
+    expect(balanceOf(afterReleaseLedger, AccountKind.RETENTION) - retentionStart).toBeCloseTo(0, 6);
+    expect(balanceOf(afterReleaseLedger, AccountKind.EXTERNAL) - externalStart).toBeCloseTo(-190, 6); // -commission, exactly as the SMALL flow's own invariant
+
+    const releaseReplayRes = await treasurer.agent.post(`/api/v1/bookings/${booking.id}/retention/release`).expect(201);
+    expect((releaseReplayRes.body as BookingBody).retentionReleasedAt).toBe(releasedBooking.retentionReleasedAt);
+    const retentionReleaseEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Booking', linkedEntityId: booking.id, reasonCode: 'RETENTION_RELEASE' } });
+    expect(retentionReleaseEntryCount).toBe(1); // still exactly one — no double release
+
+    const finalLedger = await ledgerBalances(committee.agent);
+    expect(finalLedger.balancesIntact).toBe(true);
+    expect(balanceOf(finalLedger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(0, 6);
+  });
+
+  /**
+   * Concurrency hardening for the LARGE-tier flow, mirroring the SMALL
+   * flow's own concurrency test above: authoriseMilestone takes the SAME
+   * per-booking advisory lock (namespace 52, hashtext(bookingId)) as
+   * authorisePayout as its very first statement, so two treasurer requests
+   * racing on the SAME milestone can't both observe a pre-release snapshot
+   * and both post the release ledger entries. A single-milestone (100%)
+   * LARGE booking keeps this focused purely on the race, independent of the
+   * ordering/last-milestone-remainder logic already covered above.
+   */
+  it('serializes concurrent milestone-authorisation calls on the same milestone so the vendor is paid exactly once', async () => {
+    const committee3 = await signupAndLogin(`bb-committee-large2-${randomUUID()}@example.com`, flatIds[13], OccupancyRole.OWNER_OCCUPIER);
+    await makeRole(committee3.userId, RoleKind.COMMITTEE);
+    const treasurer3 = await signupAndLogin(`bb-treasurer-large2-${randomUUID()}@example.com`, flatIds[14], OccupancyRole.OWNER_OCCUPIER);
+    await makeRole(treasurer3.userId, RoleKind.TREASURER);
+    const residentC = await signupAndLogin(`bb-residentC-large-${randomUUID()}@example.com`, flatIds[15], OccupancyRole.OWNER_OCCUPIER);
+    const residentD = await signupAndLogin(`bb-residentD-large-${randomUUID()}@example.com`, flatIds[16], OccupancyRole.OWNER_OCCUPIER);
+
+    const startLedger = await ledgerBalances(committee3.agent);
+    const bulkBuyStart = balanceOf(startLedger, AccountKind.BULK_BUY);
+    const commissionStart = balanceOf(startLedger, AccountKind.COMMISSION_SINK);
+    const retentionStart = balanceOf(startLedger, AccountKind.RETENTION);
+
+    const milestoneTemplate = [{ name: 'Full payment', pct: 100 }];
+    const createRes = await committee3.agent
+      .post('/api/v1/offers')
+      .send({
+        vendorId,
+        category: 'Renovation',
+        title: 'Concurrency LARGE test',
+        unitPrice: 1000,
+        deadline: new Date(Date.now() + 86_400_000).toISOString(),
+        discountLadder: [{ minN: 2, pct: 5 }],
+        tier: 'LARGE',
+        milestoneTemplate,
+        retentionPct: 10,
+        retentionDays: 30,
+      })
+      .expect(201);
+    const offer = createRes.body as OfferBody;
+
+    await residentC.agent.post(`/api/v1/offers/${offer.id}/commit`).expect(201);
+    const fireRes = await residentD.agent.post(`/api/v1/offers/${offer.id}/commit`).expect(201);
+    expect((fireRes.body as OfferBody).status).toBe('FIRED');
+
+    const booking = await prisma.booking.findFirstOrThrow({ where: { societyId, sourceType: 'OFFER', sourceId: offer.id } });
+    const commitments = await prisma.commitment.findMany({ where: { offerId: offer.id } });
+    expect(commitments).toHaveLength(2);
+    for (const c of commitments) {
+      await payCommitment(c.id, 950);
+    }
+
+    const jobCards = await prisma.jobCard.findMany({ where: { bookingId: booking.id } });
+    for (const jc of jobCards) {
+      const resident = jc.residentId === residentC.userId ? residentC : residentD;
+      await resident.agent.post(`/api/v1/job-cards/${jc.id}/sign-off`).expect(201);
+    }
+
+    const bookingReady = (await committee3.agent.get(`/api/v1/bookings/${booking.id}`).expect(200)).body as BookingBody;
+    expect(bookingReady.status).toBe('COMPLETED');
+    const milestone = bookingReady.milestones[0];
+    expect(milestone.status).toBe('PENDING');
+
+    // --- The actual race: two authorise calls in flight at once ---
+    const [res1, res2] = await Promise.all([
+      treasurer3.agent.post(`/api/v1/bookings/${booking.id}/milestones/${milestone.id}/authorise`),
+      treasurer3.agent.post(`/api/v1/bookings/${booking.id}/milestones/${milestone.id}/authorise`),
+    ]);
+    expect(res1.status).toBe(201);
+    expect(res2.status).toBe(201);
+
+    const body1 = res1.body as BookingBody;
+    const body2 = res2.body as BookingBody;
+    const m1 = body1.milestones.find((m) => m.id === milestone.id)!;
+    const m2 = body2.milestones.find((m) => m.id === milestone.id)!;
+    expect(m1.status).toBe('PAID');
+    expect(m2.status).toBe('PAID');
+
+    const authorisations = await prisma.milestoneAuthorisation.findMany({ where: { milestoneId: milestone.id } });
+    expect(authorisations).toHaveLength(2); // SYSTEM + TREASURER — the race didn't duplicate either row
+
+    const payoutEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Milestone', linkedEntityId: milestone.id, reasonCode: 'BULK_BUY_MILESTONE_PAYOUT' } });
+    const commissionEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Booking', linkedEntityId: booking.id, reasonCode: 'BULK_BUY_MILESTONE_COMMISSION' } });
+    const retentionHoldEntryCount = await prisma.ledgerEntry.count({ where: { linkedEntityType: 'Booking', linkedEntityId: booking.id, reasonCode: 'BULK_BUY_MILESTONE_RETENTION_HOLD' } });
+    expect(payoutEntryCount).toBe(1); // paid exactly once, despite the race
+    expect(commissionEntryCount).toBe(1);
+    expect(retentionHoldEntryCount).toBe(1);
+
+    const finalLedger = await ledgerBalances(committee3.agent);
+    expect(finalLedger.balancesIntact).toBe(true);
+    // T = 1900 (2 x 950), commission = 190, retention = 190, vendor = 1520 —
+    // the single (100%) milestone releases the full 1520, drained from
+    // BULK_BUY exactly once, not twice.
+    expect(balanceOf(finalLedger, AccountKind.BULK_BUY) - bulkBuyStart).toBeCloseTo(0, 6);
+    expect(balanceOf(finalLedger, AccountKind.COMMISSION_SINK) - commissionStart).toBeCloseTo(190, 6);
+    expect(balanceOf(finalLedger, AccountKind.RETENTION) - retentionStart).toBeCloseTo(190, 6);
   });
 });

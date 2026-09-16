@@ -9,8 +9,8 @@ Single source of truth for **what's shipped, what's in flight, what's blocked**.
 - The **Demo bar** at the top says what a demo shows *right now*, if the project stops today.
 - Refresh timestamps at the top of the file on each update.
 
-Last updated: *2026-09-16 (Phase 4C backend complete + e2e-verified: full Bulk-Buy Flow A — offer+ladder → commit → auto-fire → escrow-in → job cards → sign-off → dual-auth payout → reconcile, all on the Razorpay stub, zero real transactions. Supervisor caught+fixed a capture double-credit (4B) and a concurrent-payout double-pay (4C). Paused for review before 4D. Frontend not started)*
-Current active phase: *Phase 4 — Bulk-Buy + Razorpay + Ledger. 4A+4B+4C 🟢 done & e2e-green; 4D (large-job milestones) ⚪ next. Frontend ⚪ not started.*
+Last updated: *2026-09-16 (Phase 4 COMPLETE (backend): 4A ledger + 4B Razorpay + 4C Flow A + 4D large-job milestones/retention, all e2e-verified on the Razorpay stub with zero real transactions. Supervisor caught+fixed a capture double-credit (4B) and a concurrent-payout double-pay (4C). Frontend still not started)*
+Current active phase: *Phase 4 🟢 backend done & e2e-green (75 unit + 32 e2e). Next: Phase 5 (Bulk-Buy Flow B) backend, or begin the frontend track. Frontend ⚪ not started.*
 
 ---
 
@@ -158,7 +158,7 @@ Update this box on the last commit of every phase — it should read like a two-
 
 ---
 
-## Phase 4 — Bulk-Buy Flow A + Razorpay + Ledger 🟡
+## Phase 4 — Bulk-Buy Flow A + Razorpay + Ledger 🟢 *(backend; FE pending)*
 
 **Deliverable:** vendor posts an offer; residents pay via Razorpay sandbox; escrow holds funds; treasurer co-authorises payout; ledger balances.
 
@@ -204,11 +204,13 @@ Update this box on the last commit of every phase — it should read like a two-
 ### 4D — Large jobs
 | Track | Task | Status |
 |---|---|---|
-| BE | JobCard.tier `SMALL / LARGE` + milestone payouts | ⚪ |
-| BE | Defect-liability retention | ⚪ |
+| BE | JobCard.tier `SMALL / LARGE` + milestone payouts | 🟢 *(LARGE offers carry a `milestoneTemplate` (pcts sum to 100, validated in `milestone-template.util.ts`); on fire → `Milestone` rows; `POST /bookings/:id/milestones/:mid/authorise` (treasurer, dual-auth, advisory-locked) releases in sequence — first milestone sets aside commission→COMMISSION_SINK + retention→RETENTION, last milestone takes the remainder to avoid dust; SMALL/LARGE payout routes reject each other)* |
+| BE | Defect-liability retention | 🟢 *(`retentionPct`/`retentionDays` on Offer; retention held in a `RETENTION` account; `POST /bookings/:id/retention/release` (treasurer) releases RETENTION→EXTERNAL only after all milestones PAID and `Clock.now() >= retentionReleaseAt`; idempotent)* |
 | FE | Milestone cards with per-stage authorise | ⚪ |
 
 **DoD (whole phase):** end-to-end demo — offer posted → committed → paid → signed off → payout → reconciled.
+
+**4D status (2026-09-16):** verified directly — build ok, oxlint clean, **75 unit + 32 e2e green**. LARGE flow e2e proves: fire → milestones created + retention scheduled → escrow funded → in-order milestone releases (commission+retention set aside at milestone 1, remainder at the last) → retention released after the defect period → BULK_BUY and RETENTION both drain to 0, Σ balances conserved, balancesIntact. SMALL path (4C) unchanged and still green. All transfers stubbed — no real Razorpay calls. **Phase 4 is complete (4A+4B+4C+4D).**
 
 ---
 

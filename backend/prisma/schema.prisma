@@ -566,6 +566,12 @@ enum AccountKind {
   /// now so a future phase that needs a real per-vendor settlement ledger
   /// doesn't require another migration.
   VENDOR
+  /// Phase 4D: defect-liability retention holding account. A LARGE booking's
+  /// retention share is moved here (BULK_BUY -> RETENTION) at the first
+  /// milestone authorisation and held until the defect-liability period
+  /// elapses, at which point it moves on (RETENTION -> EXTERNAL) — see
+  /// BulkBuyService.authoriseMilestone / releaseRetention.
+  RETENTION
 }
 
 model Account {
@@ -711,17 +717,24 @@ model WebhookEvent {
 }
 
 // ---------------------------------------------------------------------------
-// Bulk-buy Flow A — Phase 4C. Vendor-initiated bulk-buy: a committee member
-// posts an Offer with a quantity discount ladder on a vendor's behalf (see
-// src/modules/bulk-buy for the "no vendor login yet" assumption); residents
-// commit; the offer auto-fires once minCommitments is reached, snapshotting
-// the discount tier into one Booking + one JobCard per commitment; each
-// resident's escrow-in is a Payment (Phase 4B) linked to their Commitment;
-// once every JobCard is signed off and every Commitment is FUNDED, a
-// TREASURER's dual-authorised payout releases the vendor's net share (minus
-// platform commission) — see bulk-buy.service.ts for the exact money flow
-// and ledger postings. No 4D (large-job milestones/defect retention) or
-// Phase 5 (resident-initiated polls/weekly-recurring) concepts live here.
+// Bulk-buy Flow A — Phase 4C (SMALL) / Phase 4D (LARGE). Vendor-initiated
+// bulk-buy: a committee member posts an Offer with a quantity discount
+// ladder on a vendor's behalf (see src/modules/bulk-buy for the "no vendor
+// login yet" assumption); residents commit; the offer auto-fires once
+// minCommitments is reached, snapshotting the discount tier into one Booking
+// + one JobCard per commitment; each resident's escrow-in is a Payment
+// (Phase 4B) linked to their Commitment.
+//
+// SMALL bookings (Phase 4C, unchanged): once every JobCard is signed off and
+// every Commitment is FUNDED, a TREASURER's dual-authorised payout releases
+// the vendor's net share (minus platform commission) in one shot — see
+// bulk-buy.service.ts's authorisePayout for the exact money flow.
+//
+// LARGE bookings (Phase 4D): the vendor is instead paid across an ordered
+// sequence of Milestones, and a defect-liability Retention share is held
+// back and released only after `retentionDays` elapses post-fire — see
+// bulk-buy.service.ts's authoriseMilestone / releaseRetention. Phase 5
+// (resident-initiated polls/weekly-recurring) concepts do not live here.
 // ---------------------------------------------------------------------------
 
 enum OfferStatus {
@@ -798,6 +811,24 @@ model Offer {
   appliedDiscountPct Decimal? @db.Decimal(5, 2)
   firedAt            DateTime?
 
+  /// Phase 4D: SMALL (Phase 4C's single-payout flow, default/unchanged) or
+  /// LARGE (milestone + defect-retention flow). Snapshotted onto the Booking
+  /// and every JobCard at fire time.
+  tier JobCardTier @default(SMALL)
+  /// LARGE only: non-empty array of {name: string, pct: number>0} whose pcts
+  /// sum to exactly 100 — validated by milestone-template.util.ts's
+  /// validateMilestoneTemplate before this row is ever written. Null for
+  /// SMALL offers.
+  milestoneTemplate Json?
+  /// LARGE only: the defect-liability retention share of the escrowed total,
+  /// held back (BULK_BUY -> RETENTION) at the first milestone authorisation.
+  /// 0 (and ignored) for SMALL offers.
+  retentionPct Decimal @default(0) @db.Decimal(5, 2)
+  /// LARGE only: days after firing before the retention share may be
+  /// released (RETENTION -> EXTERNAL). Null for SMALL offers, or a LARGE
+  /// offer with no defect-liability period.
+  retentionDays Int?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -847,10 +878,27 @@ model Booking {
   tier       JobCardTier   @default(SMALL)
   createdAt  DateTime      @default(now())
 
-  society  Society   @relation(fields: [societyId], references: [id], onDelete: Cascade)
-  vendor   Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-  jobCards JobCard[]
-  payout   Payout?
+  /// LARGE only. Snapshotted from Offer.retentionPct * escrowed total at the
+  /// FIRST milestone authorisation (0 until then, and unused for SMALL).
+  retentionAmount Decimal @default(0) @db.Decimal(14, 2)
+  /// LARGE only. Set at fire time from Offer.retentionDays (null if the
+  /// offer set no defect-liability period). Retention cannot be released
+  /// before Clock.now() reaches this timestamp.
+  retentionReleaseAt DateTime?
+  /// LARGE only. Set once POST /bookings/:id/retention/release succeeds —
+  /// its presence is this booking's idempotency guard for that route.
+  retentionReleasedAt DateTime?
+  /// LARGE only. Flips true the first time a milestone is authorised on this
+  /// booking, marking that the once-only commission + retention set-aside
+  /// (BULK_BUY -> COMMISSION_SINK, BULK_BUY -> RETENTION) has already
+  /// happened — every later milestone authorisation skips it.
+  commissionTaken Boolean @default(false)
+
+  society    Society    @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  vendor     Vendor     @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  jobCards   JobCard[]
+  payout     Payout?
+  milestones Milestone[]
 
   @@index([societyId])
   @@map("bookings")
@@ -919,4 +967,55 @@ model PayoutAuthorisation {
 
   @@unique([payoutId, kind])
   @@map("payout_authorisations")
+}
+
+/// Phase 4D — one row per template entry, created (all PENDING, in
+/// sequence order) when a LARGE offer fires. Mirrors Payout's role for
+/// SMALL bookings, but there are many per Booking instead of one, and they
+/// must be authorised strictly in sequence order — see
+/// BulkBuyService.authoriseMilestone.
+model Milestone {
+  id        String       @id @default(cuid())
+  bookingId String
+  /// 1-based release order, snapshotted from the offer's milestoneTemplate
+  /// array index at fire time.
+  sequence Int
+  name     String
+  /// Share of vendorPayable (escrowed total minus commission minus
+  /// retention) this milestone releases. The template's pcts sum to 100,
+  /// but the LAST milestone by sequence always releases whatever remains of
+  /// vendorPayable rather than exactly amount*pct/100, to avoid rounding
+  /// dust — see authoriseMilestone's doc comment.
+  pct    Decimal      @db.Decimal(5, 2)
+  status PayoutStatus @default(PENDING)
+  /// Snapshotted the moment this milestone is released (null until PAID).
+  amount            Decimal?  @db.Decimal(14, 2)
+  paidAt            DateTime?
+  /// The STUBBED RazorpayService.payout() reference — never a real
+  /// RazorpayX transfer id in this phase (see Payout.razorpayPayoutRef).
+  razorpayPayoutRef String?
+  createdAt         DateTime  @default(now())
+
+  booking        Booking                    @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  authorisations MilestoneAuthorisation[]
+
+  @@unique([bookingId, sequence])
+  @@index([bookingId])
+  @@map("milestones")
+}
+
+/// Two rows per Milestone in the happy path — same SYSTEM (automated
+/// rule-check) + TREASURER (real user) shape as PayoutAuthorisation, just
+/// scoped to one Milestone instead of one Payout.
+model MilestoneAuthorisation {
+  id           String         @id @default(cuid())
+  milestoneId  String
+  kind         PayoutAuthKind
+  authoriserId String?
+  createdAt    DateTime       @default(now())
+
+  milestone Milestone @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+
+  @@unique([milestoneId, kind])
+  @@map("milestone_authorisations")
 }
