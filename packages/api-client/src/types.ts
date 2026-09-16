@@ -64,3 +64,46 @@ export type JobBlogPost = {
 export type CreateJobPostBody =
   | { kind: 'SEEKING'; title: string; body: string }
   | { kind: 'HIRING'; title: string; body: string; companyEmail: string };
+
+// ------------ Resident-initiated bulk-buy polls (Flow B, M7 pooling) ------------
+
+export type PollType = 'EVENT' | 'BULK_BUY_RESIDENT';
+
+export type PollStatus = 'OPEN' | 'FIRED' | 'EXPIRED' | 'CLOSED' | 'CANCELLED';
+
+/** GET /bulk-buy/polls, GET /bulk-buy/polls/:id — the API-facing shape. */
+export type ResidentPollDetail = {
+  id: string;
+  societyId: string;
+  creatorId: string;
+  pollType: PollType;
+  title: string;
+  description: string | null;
+  category: string | null;
+  minCommitments: number | null;
+  closesAt: string;
+  status: PollStatus;
+  firedAt: string | null;
+  closedAt: string | null;
+  taggedVendorId: string | null;
+  vendorConfirmedAt: string | null;
+  vendorDeclinedAt: string | null;
+  vendorConfirmedMinimum: number | null;
+  vendorUnitPrice: string | number | null;
+  vendorDiscountLadder: unknown;
+  createdAt: string;
+  updatedAt: string;
+
+  commitmentCount: number;
+  hasJoined?: boolean;
+  bookingId: string | null;
+};
+
+export type CreateResidentPollBody = {
+  taggedVendorId: string;
+  category: string;
+  title: string;
+  description?: string;
+  proposedMinimum: number;
+  closesAt: string; // ISO-8601
+};
