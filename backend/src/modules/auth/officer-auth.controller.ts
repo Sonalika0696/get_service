@@ -1,4 +1,5 @@
-import { Body, Controller, HttpCode, HttpStatus, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { AppConfigService } from '../../config/config.service.js';
 import { OfficerAuthService } from './officer-auth.service.js';
@@ -12,24 +13,40 @@ export class OfficerAuthController {
     private readonly config: AppConfigService,
   ) {}
 
+  /** Phase 6.5: 5/min per IP — sends an email OTP, same OTP-pumping vector as /auth/otp. */
   @Post('enroll/start')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   async enrollStart(@Body() dto: OfficerEnrollStartDto): Promise<void> {
     await this.officerAuth.enrollStart(dto);
   }
 
+  /** Phase 6.5: 10/min per IP — consumes the enroll OTP and sets the password; bounded but looser than the OTP-send step. */
   @Post('enroll/complete')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   async enrollComplete(@Body() dto: OfficerEnrollCompleteDto): Promise<{ totpSecret: string; otpauthUrl: string }> {
     return this.officerAuth.enrollComplete(dto);
   }
 
+  /** Phase 6.5: 10/min per IP — TOTP brute-force vector on enrollment. */
   @Post('enroll/verify-totp')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   async enrollVerifyTotp(@Body() dto: OfficerEnrollVerifyTotpDto): Promise<void> {
     await this.officerAuth.enrollVerifyTotp(dto);
   }
 
+  /**
+   * Phase 6.5: 5/min per IP — the tightest limit here, since this is a
+   * combined password + TOTP brute-force target (officer/vendor/operator
+   * login).
+   */
   @Post('login')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   async login(
     @Body() dto: OfficerLoginDto,
     @Req() req: Request,

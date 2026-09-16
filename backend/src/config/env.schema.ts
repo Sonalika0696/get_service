@@ -60,6 +60,20 @@ export const envSchema = z.object({
   SMS_ENABLED: z.preprocess((value) => value === 'true' || value === '1', z.boolean()).default(false),
   /** Issuer name shown in an authenticator app for officer/vendor TOTP enrollment (otpauth:// URI). */
   TOTP_ISSUER: z.string().min(1).default('GateX'),
+
+  // --- Phase 6.5 (rate limiting on auth/OTP endpoints) ---
+  /**
+   * Off by default — mirrors GSTIN_API_ENABLED/RAZORPAY_ENABLED/SMS_ENABLED:
+   * dev and the automated e2e suite hammer /auth/signup, /auth/verify, and
+   * the officer enroll/login routes hundreds of times per run (every test
+   * that needs a logged-in fixture signs one up), so a naive always-on
+   * limiter would 429 the suite itself. Set THROTTLE_ENABLED=true (and keep
+   * it true) in every real deployment — the in-memory @nestjs/throttler
+   * guard is only wired onto the auth/officer-auth controllers (see
+   * AuthModule), so this flag has no effect on any other route. Accepts
+   * "true"/"1" as truthy, anything else (including unset) is false.
+   */
+  THROTTLE_ENABLED: z.preprocess((value) => value === 'true' || value === '1', z.boolean()).default(false),
 });
 
 export type Env = z.infer<typeof envSchema>;

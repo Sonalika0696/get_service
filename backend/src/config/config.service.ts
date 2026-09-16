@@ -33,6 +33,7 @@ export class AppConfigService {
       RAZORPAY_WEBHOOK_SECRET: configService.get('RAZORPAY_WEBHOOK_SECRET', { infer: true }),
       SMS_ENABLED: configService.get('SMS_ENABLED', { infer: true }),
       TOTP_ISSUER: configService.get('TOTP_ISSUER', { infer: true }),
+      THROTTLE_ENABLED: configService.get('THROTTLE_ENABLED', { infer: true }),
     };
   }
 

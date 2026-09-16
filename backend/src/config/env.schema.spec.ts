@@ -24,6 +24,7 @@ describe('validateEnv', () => {
     expect(env.RAZORPAY_KEY_ID).toBe('rzp_test_stub');
     expect(env.RAZORPAY_KEY_SECRET).toBe('stub_secret');
     expect(env.RAZORPAY_WEBHOOK_SECRET).toBe('stub_webhook_secret');
+    expect(env.THROTTLE_ENABLED).toBe(false);
   });
 
   it('coerces RAZORPAY_ENABLED from "true"/"1" and leaves anything else falsy', () => {
@@ -38,6 +39,13 @@ describe('validateEnv', () => {
     expect(validateEnv({ ...validConfig, GSTIN_API_ENABLED: '1' }).GSTIN_API_ENABLED).toBe(true);
     expect(validateEnv({ ...validConfig, GSTIN_API_ENABLED: 'false' }).GSTIN_API_ENABLED).toBe(false);
     expect(validateEnv({ ...validConfig, GSTIN_API_ENABLED: 'nonsense' }).GSTIN_API_ENABLED).toBe(false);
+  });
+
+  it('coerces THROTTLE_ENABLED from "true"/"1" and leaves anything else falsy', () => {
+    expect(validateEnv({ ...validConfig, THROTTLE_ENABLED: 'true' }).THROTTLE_ENABLED).toBe(true);
+    expect(validateEnv({ ...validConfig, THROTTLE_ENABLED: '1' }).THROTTLE_ENABLED).toBe(true);
+    expect(validateEnv({ ...validConfig, THROTTLE_ENABLED: 'false' }).THROTTLE_ENABLED).toBe(false);
+    expect(validateEnv({ ...validConfig, THROTTLE_ENABLED: 'nonsense' }).THROTTLE_ENABLED).toBe(false);
   });
 
   it('coerces API_PORT from a string', () => {
