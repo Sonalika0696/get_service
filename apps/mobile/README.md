@@ -1,4 +1,4 @@
-# @sft/mobile — Resident app
+# GateX — Resident app (`@sft/mobile`)
 
 Expo + React Native, TypeScript, Expo Router. Consumes design tokens from
 `packages/tokens` and the API client from `packages/api-client`.

@@ -59,7 +59,7 @@ export const envSchema = z.object({
    */
   SMS_ENABLED: z.preprocess((value) => value === 'true' || value === '1', z.boolean()).default(false),
   /** Issuer name shown in an authenticator app for officer/vendor TOTP enrollment (otpauth:// URI). */
-  TOTP_ISSUER: z.string().min(1).default('Society FinTech'),
+  TOTP_ISSUER: z.string().min(1).default('GateX'),
 });
 
 export type Env = z.infer<typeof envSchema>;

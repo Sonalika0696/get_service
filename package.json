@@ -1,8 +1,8 @@
 {
-  "name": "society-fintech",
+  "name": "gatex",
   "version": "0.0.1",
   "private": true,
-  "description": "Society FinTech Platform — monorepo root (backend, mobile, shared, packages).",
+  "description": "GateX — monorepo root (backend, mobile, shared, packages).",
   "workspaces": [
     "backend",
     "shared",

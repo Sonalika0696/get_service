@@ -3,7 +3,7 @@ import { TotpService } from './totp.service.js';
 import type { AppConfigService } from '../../config/config.service.js';
 
 function makeService(): TotpService {
-  const fakeConfig = { env: { TOTP_ISSUER: 'Society FinTech Test' } } as AppConfigService;
+  const fakeConfig = { env: { TOTP_ISSUER: 'GateX Test' } } as AppConfigService;
   return new TotpService(fakeConfig);
 }
 
@@ -49,7 +49,7 @@ describe('TotpService (otplib, RFC 6238)', () => {
     const secret = await service.generateSecret();
     const uri = await service.provisioningUri(secret, 'vendor@example.com');
     expect(uri).toMatch(/^otpauth:\/\/totp\//);
-    expect(uri).toContain(encodeURIComponent('Society FinTech Test'));
+    expect(uri).toContain(encodeURIComponent('GateX Test'));
     expect(uri).toContain(secret);
   });
 });

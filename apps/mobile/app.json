@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "SocietyFinTech",
-    "slug": "sft-resident",
+    "name": "GateX",
+    "slug": "gatex-resident",
     "scheme": "sft",
     "version": "0.1.0",
     "orientation": "portrait",
@@ -9,11 +9,11 @@
     "newArchEnabled": true,
     "assetBundlePatterns": ["**/*"],
     "ios": {
-      "bundleIdentifier": "com.sft.resident",
+      "bundleIdentifier": "com.gatex.resident",
       "supportsTablet": false
     },
     "android": {
-      "package": "com.sft.resident",
+      "package": "com.gatex.resident",
       "adaptiveIcon": {
         "backgroundColor": "#FBF8F4"
       }

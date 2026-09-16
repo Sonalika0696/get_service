@@ -28,7 +28,7 @@ export class NotificationsService {
   async sendOtpSms(to: string, code: string): Promise<void> {
     await this.sms.send({
       to,
-      body: `Your Society FinTech verification code is ${code}. It expires in 10 minutes.`,
+      body: `Your GateX verification code is ${code}. It expires in 10 minutes.`,
     });
   }
 
