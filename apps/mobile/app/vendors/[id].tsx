@@ -10,6 +10,8 @@ import {
   ShieldCheck,
   Star,
   Storefront,
+  Receipt,
+  CaretRight,
 } from 'phosphor-react-native';
 import { Text } from '../../src/components/Text';
 import { Button } from '../../src/components/Button';
@@ -175,6 +177,8 @@ function VendorBody({ vendor }: { vendor: NonNullable<ReturnType<typeof useVendo
         </View>
       </View>
 
+      <PricingCardLink vendorId={vendor.id} />
+
       <View>
         <SectionLabel>How to engage</SectionLabel>
         <Text variant="body" tone="secondary">
@@ -183,6 +187,38 @@ function VendorBody({ vendor }: { vendor: NonNullable<ReturnType<typeof useVendo
         </Text>
       </View>
     </>
+  );
+}
+
+function PricingCardLink({ vendorId }: { vendorId: string }) {
+  const theme = useTheme();
+  const router = useRouter();
+  return (
+    <View>
+      <SectionLabel>Pricing card</SectionLabel>
+      <View
+        onTouchEnd={() => router.push(`/vendors/${vendorId}/pricing` as never)}
+        style={{
+          backgroundColor: theme.colors.bg.elevated,
+          borderRadius: theme.radius.xl,
+          borderWidth: 1,
+          borderColor: theme.colors.border.subtle,
+          padding: theme.spacing.md,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: theme.spacing.sm,
+        }}
+      >
+        <Receipt size={22} color={theme.colors.accent[700]} weight="duotone" />
+        <View style={{ flex: 1 }}>
+          <Text variant="body" weight="semibold">Current pricing card</Text>
+          <Text variant="caption" tone="muted">
+            Visit charge, labour, materials, GST — line by line
+          </Text>
+        </View>
+        <CaretRight size={16} color={theme.colors.ink[40]} weight="bold" />
+      </View>
+    </View>
   );
 }
 

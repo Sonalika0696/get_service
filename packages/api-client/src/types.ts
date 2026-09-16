@@ -323,6 +323,68 @@ export type PayoutStatus = 'PENDING' | 'AUTHORISED' | 'PAID';
 /** MilestoneStatus subset the client actually reads. */
 export type MilestoneStatus = 'PENDING' | 'AUTHORISED' | 'PAID';
 
+// ------------ Vendor pricing cards (M4 full, FRONTEND_PLAN §5.F3) ------------
+
+/**
+ * Card status. Published cards are immutable per plan; a revision creates a
+ * new version and the previous one keeps its own row so history stays
+ * inspectable ("published cards are immutable; a revision creates a new
+ * version and the superseded one stays readable" — FRONTEND_PLAN §5.F3).
+ */
+export type PricingCardStatus = 'DRAFT' | 'PUBLISHED' | 'SUPERSEDED';
+
+/**
+ * How a labour charge scales. `perUnit` carries the unit label ("hour",
+ * "point", "sq ft") when the basis is per-unit. `flatMinor` carries the
+ * amount for one-off/flat-rate lines.
+ */
+export type LabourBasis =
+  | { kind: 'FLAT'; flatMinor: number }
+  | { kind: 'PER_UNIT'; unit: string; ratePerUnitMinor: number }
+  | { kind: 'PER_HOUR'; ratePerHourMinor: number }
+  | { kind: 'ON_QUOTE'; note: string };
+
+export type PricingLine = {
+  id: string;
+  /** Human label — "Kitchen tap replacement", "Rewire single point". */
+  label: string;
+  visitChargeMinor: number;
+  labour: LabourBasis;
+  materialsHandling: string;
+  minimumChargeMinor: number;
+  /** Per-line GST rate as a percentage (5, 12, 18, 28). */
+  gstRatePct: number;
+  conditions: string | null;
+};
+
+export type VendorPricingCard = {
+  id: string;
+  vendorId: string;
+  category: string;
+  version: number;
+  status: PricingCardStatus;
+  publishedAt: string | null;
+  supersededAt: string | null;
+  currency: string;
+  lines: PricingLine[];
+  /** Card-level GST default; a line's own gstRatePct overrides it. */
+  defaultGstRatePct: number;
+  /** Freeform notes covering everything the per-line conditions don't. */
+  notes: string | null;
+};
+
+export type VendorPricingCardHistory = {
+  vendorId: string;
+  category: string;
+  /** Chronological, newest first. Only the newest may be PUBLISHED. */
+  versions: Array<{
+    version: number;
+    status: PricingCardStatus;
+    publishedAt: string | null;
+    supersededAt: string | null;
+  }>;
+};
+
 // ------------ Utility billing trace (M5 / M6, FRONTEND_PLAN §5.F7) ------------
 
 export type Utility = 'ELECTRICITY' | 'WATER';
