@@ -1,5 +1,7 @@
 import { Controller, Param, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
+import { PrincipalGuard } from '../../common/guards/principal.guard.js';
+import { ResidentOnly } from '../../common/decorators/principal.decorator.js';
 import { CurrentResident } from '../../common/decorators/current-user.decorator.js';
 import { AuditLog } from '../../common/decorators/audit-log.decorator.js';
 import type { ResidentPrincipal } from '../../common/types/current-user.js';
@@ -11,7 +13,8 @@ export class JobCardsController {
   constructor(private readonly bulkBuy: BulkBuyService) {}
 
   @Post(':id/sign-off')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @ResidentOnly()
   @AuditLog('JOB_CARD_SIGN_OFF', 'JobCard')
   async signOff(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<JobCardModel> {
     return this.bulkBuy.signOffJobCard(currentUser.societyId, id, currentUser.id);

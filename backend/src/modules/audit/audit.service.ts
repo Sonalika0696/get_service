@@ -85,6 +85,27 @@ export class AuditService {
   }
 
   /**
+   * Fire-and-forget variant of append() for a service that needs to write
+   * the audit chain directly rather than through AuditLogInterceptor's
+   * `@AuditLog(...)` decorator — e.g. no `:sid` route param exists yet at
+   * call time (SocietiesService.create, before the Society it would scope
+   * to has been created) or the interceptor's generic `{params, body}`
+   * payload would be wrong for the call (FlatsService.importCsv, where
+   * `body` is a raw CSV blob, not a useful audit payload). Same contract as
+   * the interceptor: never throws — logs and swallows on failure, so an
+   * audit-write failure can never fail or roll back a mutation that has
+   * already succeeded (same "post-commit, best-effort" stance
+   * BACKEND_PLAN.md's notifications rework applies to mail/SMS dispatch).
+   */
+  async appendBestEffort(input: AppendAuditLogInput): Promise<void> {
+    try {
+      await this.append(input);
+    } catch (error) {
+      this.logger.error(`Failed to write audit log for ${input.action}`, error instanceof Error ? error.stack : String(error));
+    }
+  }
+
+  /**
    * Recomputes the chain forward from genesis and reports the first row
    * whose stored hash doesn't match what's recomputed (or null if intact).
    * Independent of the cached Society.auditTailHash — also cross-checks it.

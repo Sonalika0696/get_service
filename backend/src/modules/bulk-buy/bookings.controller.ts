@@ -1,5 +1,7 @@
 import { Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
+import { PrincipalGuard } from '../../common/guards/principal.guard.js';
+import { ResidentOnly } from '../../common/decorators/principal.decorator.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { CurrentResident } from '../../common/decorators/current-user.decorator.js';
@@ -13,7 +15,8 @@ export class BookingsController {
   constructor(private readonly bulkBuy: BulkBuyService) {}
 
   @Get(':id')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @ResidentOnly()
   async get(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<BookingDetail> {
     return this.bulkBuy.getBooking(currentUser.societyId, id);
   }
@@ -25,7 +28,8 @@ export class BookingsController {
    * SYSTEM row is added and when the payout actually executes.
    */
   @Post(':id/payout/authorise')
-  @UseGuards(AuthGuard, RolesGuard)
+  @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
+  @ResidentOnly()
   @Roles(RoleKind.TREASURER)
   @AuditLog('PAYOUT_AUTHORISE', 'Payout')
   async authorisePayout(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<BookingDetail> {
@@ -39,7 +43,8 @@ export class BookingsController {
    * idempotency, and once-only retention set-aside rules.
    */
   @Post(':id/milestones/:mid/authorise')
-  @UseGuards(AuthGuard, RolesGuard)
+  @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
+  @ResidentOnly()
   @Roles(RoleKind.TREASURER)
   @AuditLog('MILESTONE_AUTHORISE', 'Milestone')
   async authoriseMilestone(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string, @Param('mid') mid: string): Promise<BookingDetail> {
@@ -52,7 +57,8 @@ export class BookingsController {
    * elapsed. See BulkBuyService.releaseRetention's doc comment.
    */
   @Post(':id/retention/release')
-  @UseGuards(AuthGuard, RolesGuard)
+  @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
+  @ResidentOnly()
   @Roles(RoleKind.TREASURER)
   @AuditLog('RETENTION_RELEASE', 'Booking')
   async releaseRetention(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<BookingDetail> {

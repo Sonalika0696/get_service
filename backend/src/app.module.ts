@@ -23,6 +23,9 @@ import { LedgerModule } from './modules/ledger/ledger.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
 import { BulkBuyModule } from './modules/bulk-buy/bulk-buy.module.js';
 import { OperatorModule } from './modules/operator/operator.module.js';
+import { SocietyModule } from './modules/society/society.module.js';
+import { DelegationModule } from './modules/delegation/delegation.module.js';
+import { ConsentModule } from './modules/consent/consent.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor.js';
 
@@ -60,6 +63,9 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     PaymentsModule,
     BulkBuyModule,
     OperatorModule,
+    SocietyModule,
+    DelegationModule,
+    ConsentModule,
     HealthModule,
   ],
   providers: [

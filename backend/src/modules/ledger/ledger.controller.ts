@@ -1,5 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Headers, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
+import { PrincipalGuard } from '../../common/guards/principal.guard.js';
+import { ResidentOnly } from '../../common/decorators/principal.decorator.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { CurrentResident } from '../../common/decorators/current-user.decorator.js';
@@ -25,7 +27,8 @@ export class LedgerController {
    * resident-visible.
    */
   @Get()
-  @UseGuards(AuthGuard, RolesGuard)
+  @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
+  @ResidentOnly()
   @Roles(RoleKind.COMMITTEE)
   async getLedger(@CurrentResident() currentUser: ResidentPrincipal): Promise<{ balances: AccountBalance[]; balancesIntact: boolean }> {
     const [balances, verification] = await Promise.all([this.ledgerService.balances(currentUser.societyId), this.ledgerService.verifyBalances(currentUser.societyId)]);
@@ -33,7 +36,8 @@ export class LedgerController {
   }
 
   @Get('reconciliation')
-  @UseGuards(AuthGuard, RolesGuard)
+  @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
+  @ResidentOnly()
   @Roles(RoleKind.TREASURER)
   async reconciliation(@CurrentResident() currentUser: ResidentPrincipal, @Query('date') date?: string): Promise<ReconciliationReport> {
     return this.reconciliationService.run(currentUser.societyId, date);
@@ -46,7 +50,8 @@ export class LedgerController {
    * identical prior response without creating a second LedgerEntry.
    */
   @Post('adjustments')
-  @UseGuards(AuthGuard, RolesGuard)
+  @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
+  @ResidentOnly()
   @Roles(RoleKind.COMMITTEE, RoleKind.TREASURER)
   @AuditLog('LEDGER_ADJUSTMENT', 'LedgerEntry')
   async postAdjustment(@CurrentResident() currentUser: ResidentPrincipal, @Body() dto: PostAdjustmentDto, @Headers('idempotency-key') idempotencyKey?: string): Promise<LedgerEntryModel> {

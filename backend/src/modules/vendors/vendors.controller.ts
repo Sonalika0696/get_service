@@ -3,7 +3,7 @@ import { AuthGuard } from '../../common/guards/auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { PrincipalGuard } from '../../common/guards/principal.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
-import { VendorOnly } from '../../common/decorators/principal.decorator.js';
+import { VendorOnly, ResidentOnly } from '../../common/decorators/principal.decorator.js';
 import { CurrentResident } from '../../common/decorators/current-user.decorator.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { AuditLog } from '../../common/decorators/audit-log.decorator.js';
@@ -33,8 +33,23 @@ export class VendorsController {
     return { vendorId: vendor.vendorId, societyId: vendor.societyId };
   }
 
+  /**
+   * Phase 6.3: ConsentGrant enforced at query time — see
+   * VendorsService.getResidentContact's doc comment. Registered before
+   * `GET /:id` (same reason as `GET /me` above) so "residents" isn't
+   * swallowed as an :id param.
+   */
+  @Get('residents/:residentId/contact')
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @VendorOnly()
+  async residentContact(@CurrentUser() currentUser: CurrentUserContext, @Param('residentId') residentId: string) {
+    const vendor = currentUser as VendorPrincipal;
+    return this.vendorsService.getResidentContact(vendor.id, vendor.societyId, residentId);
+  }
+
   @Get()
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @ResidentOnly()
   async list(
     @CurrentResident() currentUser: ResidentPrincipal,
     @Query('category') category?: string,
@@ -44,13 +59,15 @@ export class VendorsController {
   }
 
   @Get(':id')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @ResidentOnly()
   async get(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<VendorDetail> {
     return this.vendorsService.get(currentUser.societyId, id);
   }
 
   @Post()
-  @UseGuards(AuthGuard, RolesGuard)
+  @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
+  @ResidentOnly()
   @Roles(RoleKind.COMMITTEE)
   @AuditLog('VENDOR_ONBOARD', 'Vendor')
   async create(@CurrentResident() currentUser: ResidentPrincipal, @Body() dto: CreateVendorDto): Promise<VendorDetail> {
@@ -58,7 +75,8 @@ export class VendorsController {
   }
 
   @Post(':id/approve')
-  @UseGuards(AuthGuard, RolesGuard)
+  @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
+  @ResidentOnly()
   @Roles(RoleKind.COMMITTEE)
   @AuditLog('VENDOR_APPROVE', 'Vendor')
   async approve(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<VendorDetail & { note: string }> {
@@ -66,13 +84,15 @@ export class VendorsController {
   }
 
   @Post(':id/rate')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @ResidentOnly()
   async rate(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string, @Body() dto: RateVendorDto): Promise<VendorDetail> {
     return this.vendorsService.rate(currentUser.societyId, id, currentUser.id, dto);
   }
 
   @Post(':id/access-request')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @ResidentOnly()
   async requestAccess(
     @CurrentResident() currentUser: ResidentPrincipal,
     @Param('id') id: string,

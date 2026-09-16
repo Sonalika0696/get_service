@@ -16,10 +16,19 @@ export class AuthService {
   ) {}
 
   /**
-   * Creates the User + Occupancy immediately (self-attested, no committee
-   * approval gate in v1 — see SUPERVISOR.md decisions log), then sends the
-   * first OTP. The account exists but is unverified/unusable until
-   * verify() succeeds.
+   * Creates the User + Occupancy immediately (self-attested) and sends the
+   * first OTP. The account exists but is unusable until verify() succeeds
+   * AND — Phase 6.3 (DECISIONS_V2_SCOPE.md §7.3, SDD §5.3 phantom-resident
+   * threat) — a committee/treasurer officer ratifies the occupancy. The
+   * Occupancy row created here relies entirely on the schema's
+   * `ratificationStatus @default(PENDING)` (see RatificationStatus's doc
+   * comment on the schema) rather than setting it explicitly, so this stays
+   * the one place self-registration happens and PENDING is never
+   * accidentally bypassed. UserContextService.load() treats a
+   * PENDING/REJECTED occupancy as no active occupancy at all — a resident
+   * who has verified their OTP but isn't yet ratified still gets 401 on
+   * every authenticated route. See RatificationService (modules/society)
+   * for the committee's queue/ratify/reject endpoints.
    *
    * Phase 6.2: when a phone is supplied, the first OTP is delivered by SMS
    * (the resident credential anchor going forward — DECISIONS_V2_SCOPE.md

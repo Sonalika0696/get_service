@@ -158,6 +158,16 @@ describe('Bulk-buy Flow B — resident polls (e2e)', () => {
     const verifyRes = await agent.post('/api/v1/auth/verify').send({ email, code }).expect(201);
     expect((verifyRes.body as { id: string }).id).toBe(userId);
 
+
+    // Phase 6.3 ratification gate: a self-registered occupancy starts
+    // PENDING and UserContextService blocks it entirely (401) until a
+    // committee officer ratifies it. This fixture helper isn't testing
+    // the ratification gate itself (see ratification.e2e-spec.ts for
+    // that) — it's standing up a normal, already-approved resident for
+    // every other suite, so ratify directly via Prisma, matching how
+    // other suites poke fixture state directly (e.g. identity.e2e-spec.ts
+    // backdating otp.createdAt).
+    await prisma.occupancy.updateMany({ where: { userId }, data: { ratificationStatus: 'RATIFIED', ratificationDecidedAt: new Date() } });
     return { userId, agent, email };
   }
 

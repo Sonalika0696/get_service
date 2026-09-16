@@ -1,5 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
+import { PrincipalGuard } from '../../common/guards/principal.guard.js';
+import { ResidentOnly } from '../../common/decorators/principal.decorator.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { CurrentResident } from '../../common/decorators/current-user.decorator.js';
@@ -18,7 +20,8 @@ export class OffersController {
    * COMMITTEE member creates the offer, naming an existing Vendor id.
    */
   @Post()
-  @UseGuards(AuthGuard, RolesGuard)
+  @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
+  @ResidentOnly()
   @Roles(RoleKind.COMMITTEE)
   @AuditLog('OFFER_CREATE', 'Offer')
   async create(@CurrentResident() currentUser: ResidentPrincipal, @Body() dto: CreateOfferDto): Promise<OfferDetail> {
@@ -26,19 +29,22 @@ export class OffersController {
   }
 
   @Get()
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @ResidentOnly()
   async list(@CurrentResident() currentUser: ResidentPrincipal, @Query('status') status?: OfferStatus): Promise<OfferDetail[]> {
     return this.bulkBuy.listOffers(currentUser.societyId, status);
   }
 
   @Get(':id')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @ResidentOnly()
   async get(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<OfferDetail> {
     return this.bulkBuy.getOffer(currentUser.societyId, id, currentUser.id);
   }
 
   @Post(':id/commit')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @ResidentOnly()
   @AuditLog('OFFER_COMMIT', 'Offer')
   async commit(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<OfferDetail> {
     return this.bulkBuy.commit(currentUser.societyId, id, currentUser.id);
@@ -52,7 +58,8 @@ export class OffersController {
    * PollsService.processExpired).
    */
   @Post(':id/roll')
-  @UseGuards(AuthGuard, RolesGuard)
+  @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
+  @ResidentOnly()
   @Roles(RoleKind.COMMITTEE)
   @AuditLog('OFFER_ROLL', 'Offer')
   async roll(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<OfferDetail> {

@@ -164,6 +164,13 @@ describe('Identity — Phase 6.2 (e2e)', () => {
     expect(afterSignup.phoneVerifiedAt).not.toBeNull();
     expect(afterSignup.principalKind).toBe(PrincipalKind.RESIDENT);
 
+    // Phase 6.3: a freshly-signed-up occupancy is PENDING ratification and
+    // UserContextService blocks it (401) — see ratification.e2e-spec.ts for
+    // that gate in isolation. This suite is about phone OTP, not
+    // ratification, so ratify directly via Prisma to unblock the `GET /me`
+    // assertion further down, same as every other suite's signupAndLogin.
+    await prisma.occupancy.updateMany({ where: { userId }, data: { ratificationStatus: 'RATIFIED', ratificationDecidedAt: new Date() } });
+
     // Now a SEPARATE login (not the signup verification): back-date the
     // consumed OTP row past the 60s resend cooldown (same technique other
     // suites use — poking Prisma directly for fixture state — rather than
@@ -310,6 +317,7 @@ describe('Identity — Phase 6.2 (e2e)', () => {
     const code = extractOtpFromSms(sms.sent.filter((s) => s.to === phone).at(-1)!);
     const verifyRes = await request(app.getHttpServer()).post('/api/v1/auth/verify').send({ phone, code }).expect(201);
     const token = extractCookieToken(verifyRes.headers['set-cookie'], cookieName);
+    await prisma.occupancy.updateMany({ where: { userId }, data: { ratificationStatus: 'RATIFIED', ratificationDecidedAt: new Date() } });
 
     // A brand-new, cookie-less request carrying only the bearer header.
     const bearerRes = await request(app.getHttpServer()).get('/api/v1/me').set('Authorization', `Bearer ${token}`).expect(200);
@@ -332,6 +340,7 @@ describe('Identity — Phase 6.2 (e2e)', () => {
     const code = extractOtpFromSms(sms.sent.filter((s) => s.to === phone).at(-1)!);
     const agent = request.agent(app.getHttpServer());
     await agent.post('/api/v1/auth/verify').send({ phone, code }).expect(201);
+    await prisma.occupancy.updateMany({ where: { userId }, data: { ratificationStatus: 'RATIFIED', ratificationDecidedAt: new Date() } });
     return agent;
   }
 

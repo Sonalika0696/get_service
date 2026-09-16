@@ -1,5 +1,7 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
+import { PrincipalGuard } from '../../common/guards/principal.guard.js';
+import { ResidentOnly } from '../../common/decorators/principal.decorator.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { CurrentResident } from '../../common/decorators/current-user.decorator.js';
@@ -22,20 +24,23 @@ export class ResidentPollsController {
 
   /** A resident opens a poll tagging an existing vendor in their own society. */
   @Post()
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @ResidentOnly()
   @AuditLog('BULKBUY_POLL_CREATE', 'Poll')
   async create(@CurrentResident() currentUser: ResidentPrincipal, @Body() dto: CreateResidentPollDto): Promise<ResidentPollDetail> {
     return this.bulkBuy.createResidentPoll(currentUser.societyId, currentUser.id, dto);
   }
 
   @Get()
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @ResidentOnly()
   async list(@CurrentResident() currentUser: ResidentPrincipal): Promise<ResidentPollDetail[]> {
     return this.bulkBuy.listResidentPolls(currentUser.societyId, currentUser.id);
   }
 
   @Get(':id')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @ResidentOnly()
   async get(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<ResidentPollDetail> {
     return this.bulkBuy.getResidentPoll(currentUser.societyId, id, currentUser.id);
   }
@@ -47,7 +52,8 @@ export class ResidentPollsController {
    * BulkBuyService.vendorConfirm's doc comment.
    */
   @Post(':id/vendor-confirm')
-  @UseGuards(AuthGuard, RolesGuard)
+  @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
+  @ResidentOnly()
   @Roles(RoleKind.COMMITTEE)
   @AuditLog('BULKBUY_VENDOR_CONFIRM', 'Poll')
   async vendorConfirm(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string, @Body() dto: VendorConfirmDto): Promise<ResidentPollDetail> {
@@ -56,7 +62,8 @@ export class ResidentPollsController {
 
   /** A COMMITTEE member, acting for the tagged vendor, declines — the poll is CANCELLED outright. */
   @Post(':id/vendor-decline')
-  @UseGuards(AuthGuard, RolesGuard)
+  @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
+  @ResidentOnly()
   @Roles(RoleKind.COMMITTEE)
   @AuditLog('BULKBUY_VENDOR_DECLINE', 'Poll')
   async vendorDecline(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<ResidentPollDetail> {
@@ -65,7 +72,8 @@ export class ResidentPollsController {
 
   /** A resident registers interest; may fire the poll immediately in the same call — see BulkBuyService.joinResidentPoll's doc comment. */
   @Post(':id/join')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @ResidentOnly()
   @AuditLog('BULKBUY_POLL_JOIN', 'Poll')
   async join(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<ResidentPollDetail> {
     return this.bulkBuy.joinResidentPoll(currentUser.societyId, id, currentUser.id);

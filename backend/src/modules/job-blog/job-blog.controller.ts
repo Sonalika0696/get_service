@@ -1,5 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
+import { PrincipalGuard } from '../../common/guards/principal.guard.js';
+import { ResidentOnly } from '../../common/decorators/principal.decorator.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { CurrentResident } from '../../common/decorators/current-user.decorator.js';
@@ -14,25 +16,29 @@ export class JobBlogController {
   constructor(private readonly jobBlogService: JobBlogService) {}
 
   @Get()
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @ResidentOnly()
   async list(@CurrentResident() currentUser: ResidentPrincipal): Promise<PublicJobBlogPost[]> {
     return this.jobBlogService.listVisible(currentUser.societyId);
   }
 
   @Get(':id')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @ResidentOnly()
   async get(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<PublicJobBlogPost> {
     return this.jobBlogService.get(currentUser.societyId, id);
   }
 
   @Post()
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @ResidentOnly()
   async create(@CurrentResident() currentUser: ResidentPrincipal, @Body() dto: CreateJobPostDto): Promise<PublicJobBlogPost> {
     return this.jobBlogService.create(currentUser.societyId, currentUser.id, dto);
   }
 
   @Post(':id/flag')
-  @UseGuards(AuthGuard, RolesGuard)
+  @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
+  @ResidentOnly()
   @Roles(RoleKind.COMMITTEE)
   @AuditLog('JOB_BLOG_FLAG', 'JobBlogPost')
   async flag(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<PublicJobBlogPost> {
@@ -40,7 +46,8 @@ export class JobBlogController {
   }
 
   @Post(':id/remove')
-  @UseGuards(AuthGuard, RolesGuard)
+  @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
+  @ResidentOnly()
   @Roles(RoleKind.COMMITTEE)
   @AuditLog('JOB_BLOG_REMOVE', 'JobBlogPost')
   async remove(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<PublicJobBlogPost> {

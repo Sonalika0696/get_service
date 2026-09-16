@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../infra/prisma/prisma.service.js';
-import { PrincipalKind } from '../../generated/prisma/enums.js';
+import { PrincipalKind, RatificationStatus } from '../../generated/prisma/enums.js';
 import type { CurrentUserContext } from '../../common/types/current-user.js';
 
 /**
@@ -53,8 +53,17 @@ export class UserContextService {
     }
 
     // RESIDENT
+    // Phase 6.3 ratification gate (DECISIONS_V2_SCOPE.md §7.3, SDD §5.3
+    // phantom-resident threat): an occupancy that is still PENDING (every
+    // self-registered signup() starts here) or was REJECTED does not count
+    // as "active" for authentication purposes, even though tenureEndedAt is
+    // null — this is the enforcement point. A resident stuck here gets the
+    // exact same 401 ("No active society membership") an occupancy-less
+    // resident always got; there is no separate "your account is pending"
+    // response, matching how AuthGuard has never distinguished "no account"
+    // from "no active occupancy".
     const occupancy = await this.prisma.occupancy.findFirst({
-      where: { userId, tenureEndedAt: null },
+      where: { userId, tenureEndedAt: null, ratificationStatus: RatificationStatus.RATIFIED },
       orderBy: { createdAt: 'desc' },
       include: { flat: true },
     });

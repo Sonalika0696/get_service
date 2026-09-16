@@ -2,6 +2,8 @@ import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Param, P
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
+import { PrincipalGuard } from '../../common/guards/principal.guard.js';
+import { ResidentOnly } from '../../common/decorators/principal.decorator.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { CurrentResident } from '../../common/decorators/current-user.decorator.js';
@@ -21,7 +23,8 @@ export class PaymentsController {
   ) {}
 
   @Post('orders')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @ResidentOnly()
   async createOrder(@CurrentResident() currentUser: ResidentPrincipal, @Body() dto: CreateOrderDto, @Headers('idempotency-key') idempotencyKey?: string): Promise<CreateOrderResult> {
     if (!idempotencyKey) {
       throw new BadRequestException('Idempotency-Key header is required');
@@ -66,7 +69,8 @@ export class PaymentsController {
    * (see test/payments.e2e-spec.ts).
    */
   @Post(':id/refund')
-  @UseGuards(AuthGuard, RolesGuard)
+  @UseGuards(AuthGuard, PrincipalGuard, RolesGuard)
+  @ResidentOnly()
   @Roles(RoleKind.TREASURER)
   @AuditLog('PAYMENT_REFUND', 'Payment')
   async refund(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<RefundInitiatedResult> {
@@ -75,7 +79,8 @@ export class PaymentsController {
 
   /** Society-scoped read: any authenticated member of the payment's own society may read it (cross-society lookups 404, matching VendorsService's pattern). */
   @Get(':id')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, PrincipalGuard)
+  @ResidentOnly()
   async get(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<PaymentModel> {
     return this.paymentsService.get(currentUser.societyId, id);
   }

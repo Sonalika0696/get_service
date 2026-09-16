@@ -145,6 +145,33 @@ export class VendorsService {
     });
   }
 
+  /**
+   * ConsentGrant enforced AT QUERY TIME (BACKEND_PLAN.md Phase 6.3 item 7;
+   * DESIGN.md's entity table) — the reference implementation the schema's
+   * ConsentGrant doc comment points to. The consent check is embedded
+   * directly in this query's `where` clause (a relational `some` filter on
+   * User.consentsGranted), so a vendor lacking consent gets a query that
+   * matches zero rows, NotFoundException, exactly the same response as the
+   * resident not existing at all. This is deliberately NOT "fetch the
+   * resident, then look at their consent grants, then decide whether to
+   * include phone/email in the response" — that shape is a display-time
+   * filter, which is what this phase's brief rules out.
+   */
+  async getResidentContact(vendorUserId: string, vendorSocietyId: string, residentId: string): Promise<{ id: string; name: string; phone: string | null; email: string }> {
+    const resident = await this.prisma.user.findFirst({
+      where: {
+        id: residentId,
+        occupancies: { some: { tenureEndedAt: null, ratificationStatus: 'RATIFIED', flat: { societyId: vendorSocietyId } } },
+        consentsGranted: { some: { granteeUserId: vendorUserId, purpose: 'CONTACT_INFO', revokedAt: null } },
+      },
+      select: { id: true, name: true, phone: true, email: true },
+    });
+    if (!resident) {
+      throw new NotFoundException('Resident not found, not in your society, or has not granted contact-info consent');
+    }
+    return resident;
+  }
+
   private async getInternal(societyId: string, id: string): Promise<VendorModel & { categories: { category: string }[] }> {
     const vendor = await this.prisma.vendor.findUnique({ where: { id }, include: { categories: true } });
     if (!vendor || vendor.societyId !== societyId) {

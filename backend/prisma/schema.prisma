@@ -76,6 +76,19 @@ model User {
 
   occupancies          Occupancy[]           @relation("OccupancyResident")
   delegatedOccupancies Occupancy[]           @relation("OccupancyDelegate")
+  /// Phase 6.3: occupancies this user (a committee/treasurer officer)
+  /// ratified or rejected — see RatificationStatus.
+  ratifiedOccupancies  Occupancy[]           @relation("OccupancyRatifiedBy")
+  /// Phase 6.3: Delegation grants where this user is the DELEGATE (the
+  /// person receiving delegated rights, e.g. a tenant). The other side —
+  /// whose occupancy is delegating — is reached via Delegation.occupancy.
+  delegationsReceived  Delegation[]          @relation("DelegationDelegate")
+  /// Phase 6.3: ConsentGrant rows this user has GIVEN (they are the data
+  /// subject / grantor).
+  consentsGranted      ConsentGrant[]        @relation("ConsentGrantor")
+  /// Phase 6.3: ConsentGrant rows naming this user as the GRANTEE (they are
+  /// the one who may see the consented data — e.g. a vendor's linked User).
+  consentsReceived     ConsentGrant[]        @relation("ConsentGrantee")
   roles                Role[]
   sessions             Session[]
   otps                 Otp[]
@@ -130,19 +143,33 @@ model Otp {
   @@map("otps")
 }
 
+/// Phase 6.3 society lifecycle (BACKEND_PLAN.md Phase 6.3 item 1). ACTIVE is
+/// the only state that matters operationally today — ARCHIVED exists so an
+/// operator can retire a society (e.g. decommissioned client) without a
+/// destructive delete, matching how VerificationTier/PollStatus/etc. model
+/// forward-only lifecycle rather than hard deletes elsewhere in this schema.
+enum SocietyStatus {
+  ACTIVE
+  ARCHIVED
+}
+
 model Society {
-  id            String   @id @default(cuid())
+  id            String        @id @default(cuid())
   name          String
   address       String
   latitude      Float?
   longitude     Float?
   /// Society-level feature/config toggles (e.g. job-post rate limit).
-  config        Json     @default("{}")
+  config        Json          @default("{}")
+  /// Phase 6.3: operator-managed lifecycle state. ARCHIVED societies are
+  /// excluded from the operator's default listing but not deleted — see
+  /// SocietyService.archive's doc comment.
+  status        SocietyStatus @default(ACTIVE)
   /// Cached tail hash of this society's AuditLog chain — see AuditService.
   /// Null means the chain hasn't been written to yet (genesis pending).
   auditTailHash Bytes?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   flats         Flat[]
   roles         Role[]
@@ -187,26 +214,57 @@ enum OccupancyRole {
   TENANT
 }
 
+/// Phase 6.3 committee ratification queue (DECISIONS_V2_SCOPE.md §7.3, SDD
+/// §5.3 phantom-resident threat). PENDING is the default for every
+/// self-registered occupancy (AuthService.signup) — UserContextService.load
+/// treats a PENDING/REJECTED occupancy as no occupancy at all, so an
+/// un-ratified resident cannot authenticate as RESIDENT on any route (see
+/// UserContextService's doc comment). An occupancy created directly by a
+/// trusted party (committee/operator move-in — OccupancyService.moveIn) is
+/// stamped RATIFIED immediately: the phantom-resident threat is specifically
+/// about a SELF-registered account nobody has vetted, not every occupancy.
+enum RatificationStatus {
+  PENDING
+  RATIFIED
+  REJECTED
+}
+
 model Occupancy {
   id                String        @id @default(cuid())
   flatId            String
   userId            String
   role              OccupancyRole
   /// Only meaningful when role = OWNER_ABSENTEE: the tenant this owner has
-  /// delegated operational rights to. Enforced at the application layer —
-  /// see job-blog / bulk-buy guards, not a DB constraint.
+  /// delegated operational rights to. Superseded in practice by the Phase
+  /// 6.3 `Delegation` entity (scoped, revocable, audit-logged) — retained,
+  /// unused by any guard, for backward compatibility with existing rows and
+  /// the Prisma column; see Delegation's doc comment for the full decision.
   delegatedToUserId String?
   tenureStartedAt   DateTime      @default(now())
   tenureEndedAt     DateTime?
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
 
-  flat        Flat  @relation(fields: [flatId], references: [id], onDelete: Cascade)
-  user        User  @relation("OccupancyResident", fields: [userId], references: [id], onDelete: Cascade)
-  delegatedTo User? @relation("OccupancyDelegate", fields: [delegatedToUserId], references: [id], onDelete: SetNull)
+  /// Phase 6.3 ratification queue — see RatificationStatus's doc comment.
+  ratificationStatus    RatificationStatus @default(PENDING)
+  /// Set once a COMMITTEE/TREASURER officer ratifies or rejects (both use
+  /// this same timestamp field; ratificationStatus disambiguates which).
+  ratificationDecidedAt DateTime?
+  ratifiedByUserId      String?
+  /// Free-text reason, required on reject, optional on ratify — see
+  /// RatificationDto.
+  ratificationNote      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  flat        Flat         @relation(fields: [flatId], references: [id], onDelete: Cascade)
+  user        User         @relation("OccupancyResident", fields: [userId], references: [id], onDelete: Cascade)
+  delegatedTo User?        @relation("OccupancyDelegate", fields: [delegatedToUserId], references: [id], onDelete: SetNull)
+  ratifiedBy  User?        @relation("OccupancyRatifiedBy", fields: [ratifiedByUserId], references: [id], onDelete: SetNull)
+  delegations Delegation[]
 
   @@index([flatId])
   @@index([userId])
+  @@index([ratificationStatus])
   @@map("occupancies")
 }
 
@@ -230,6 +288,100 @@ model Role {
 
   @@unique([societyId, userId, kind])
   @@map("roles")
+}
+
+// ---------------------------------------------------------------------------
+// Delegation — Phase 6.3 (DECISIONS_V2_SCOPE.md §7.3 area; DESIGN.md's
+// entity table). Scoped, explicit, revocable delegation of OPERATIONAL
+// rights from one occupancy to another user (e.g. an owner-absentee
+// delegating to their tenant). Complements rather than replaces
+// Occupancy.delegatedToUserId — see that field's doc comment: the old column
+// is an unstructured single pointer with no scope, no revocation trail and
+// (checked across every controller in this repo) no guard anywhere actually
+// reads it today, so nothing breaks by leaving it in place unused. Delegation
+// is the real, auditable mechanism: multiple scoped grants per occupancy,
+// each independently revocable, each an audit-logged event (DesignDoc:
+// "delegations and consents are logged, revocable events enforced at query
+// time").
+//
+// DelegationScope deliberately cannot express money or governance actions —
+// this is enforced AT THE TYPE LEVEL: the enum below has no MONEY/PAYOUT/
+// LEDGER/VOTE/APPROVAL member and structurally cannot be extended to include
+// one without a schema migration reviewers would see. Compare this to a
+// string/bitmask scope, which a caller could smuggle "PAYOUT" into and a
+// runtime check would have to reject — that failure mode isn't possible
+// here. (SDD: "financial and voting capabilities excluded from the
+// delegable set at the type level".)
+// ---------------------------------------------------------------------------
+
+enum DelegationScope {
+  /// Raise/join a ServiceRequest-equivalent (today: Poll/Offer commitments, bulk-buy).
+  SERVICE_REQUESTS
+  /// Opt in to society events on the delegating occupancy's behalf.
+  EVENT_OPT_IN
+  /// Post to the job blog / notice board as the delegating occupancy.
+  JOB_BLOG_POSTING
+  /// Request access to a vendor's contact details via the directory.
+  VENDOR_DIRECTORY_ACCESS
+}
+
+/// One row per (occupancy, delegate, scope) grant. A delegate with several
+/// scopes holds several rows — never a bitmask — so each is independently
+/// revocable and each revocation is its own auditable event.
+model Delegation {
+  id             String          @id @default(cuid())
+  occupancyId    String
+  delegateUserId String
+  scope          DelegationScope
+  grantedAt      DateTime        @default(now())
+  revokedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  occupancy Occupancy @relation(fields: [occupancyId], references: [id], onDelete: Cascade)
+  delegate  User      @relation("DelegationDelegate", fields: [delegateUserId], references: [id], onDelete: Cascade)
+
+  @@unique([occupancyId, delegateUserId, scope])
+  @@index([delegateUserId])
+  @@map("delegations")
+}
+
+// ---------------------------------------------------------------------------
+// ConsentGrant — Phase 6.3. Enforced AT QUERY TIME, not at display time: see
+// VendorsService.getResidentContact (vendors.service.ts) for the reference
+// implementation — the consent check is embedded in the Prisma `where`
+// clause of the query that fetches the data (a relational `some` filter on
+// consentsGranted), so a caller lacking consent gets a query that returns no
+// row at all, indistinguishable from the resident not existing. This is
+// deliberately NOT "fetch the resident, then check consent, then decide
+// whether to return the phone/email fields" — that shape is a display-time
+// filter, exactly what DESIGN.md's entity table rules out.
+// ---------------------------------------------------------------------------
+
+enum ConsentPurpose {
+  /// Grantee may see the grantor's phone/email via the vendor-contact route.
+  CONTACT_INFO
+}
+
+model ConsentGrant {
+  id            String         @id @default(cuid())
+  /// The data subject granting consent (today: always a RESIDENT).
+  userId        String
+  /// Who may access the consented data (today: a VENDOR-principal User).
+  granteeUserId String
+  purpose       ConsentPurpose
+  grantedAt     DateTime       @default(now())
+  revokedAt     DateTime?
+
+  createdAt DateTime @default(now())
+
+  user    User @relation("ConsentGrantor", fields: [userId], references: [id], onDelete: Cascade)
+  grantee User @relation("ConsentGrantee", fields: [granteeUserId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, granteeUserId, purpose])
+  @@index([granteeUserId])
+  @@map("consent_grants")
 }
 
 // ---------------------------------------------------------------------------
