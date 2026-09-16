@@ -24,7 +24,7 @@
       "expo-secure-store"
     ],
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": false
     },
     "extra": {
       "apiBaseUrl": "http://localhost:4000/api/v1",

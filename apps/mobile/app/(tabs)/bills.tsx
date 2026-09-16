@@ -1,33 +1,208 @@
-import React from 'react';
-import { View } from 'react-native';
-import { Receipt } from 'phosphor-react-native';
-import { Screen } from '../../src/components/Screen';
+import React, { useMemo, useState } from 'react';
+import { View, ScrollView } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { Receipt, ClockCounterClockwise } from 'phosphor-react-native';
+import type { PaymentRail } from '@sft/api-client';
 import { Text } from '../../src/components/Text';
+import { Button } from '../../src/components/Button';
+import { Money } from '../../src/components/Money';
+import { SectionLabel } from '../../src/components/SectionLabel';
+import { Segmented } from '../../src/components/Segmented';
+import { BillLineRow } from '../../src/components/BillLineRow';
+import { ListLoading, ListError, ListEmpty } from '../../src/components/ListState';
+import { OfflineBanner } from '../../src/components/OfflineBanner';
+import { useBillsHub } from '../../src/hooks/useBills';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
+type Segment = 'due' | 'all';
+
+/**
+ * Bills hub. Hero card at the top shows total due; segmented filter switches
+ * between "Due now" and "All". Sorted by due date within each group.
+ */
 export default function BillsScreen() {
   const theme = useTheme();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const [segment, setSegment] = useState<Segment>('due');
+
+  const hub = useBillsHub();
+  const lines = hub.data?.lines ?? [];
+
+  const visible = useMemo(() => {
+    const filtered = segment === 'due'
+      ? lines.filter((l) => l.status === 'DUE' || l.status === 'OVERDUE' || l.status === 'PARTIAL')
+      : lines;
+    return [...filtered].sort((a, b) => new Date(a.dueOn).getTime() - new Date(b.dueOn).getTime());
+  }, [lines, segment]);
+
+  const railBreakdown = useMemo(() => summariseRails(visible), [visible]);
+  const totalDue = hub.data?.totalDueMinor ?? 0;
+
   return (
-    <Screen>
-      <Text variant="display" weight="semibold">Bills</Text>
-      <View
-        style={{
-          backgroundColor: theme.colors.bg.elevated,
-          borderRadius: theme.radius.xl,
-          padding: theme.spacing.xl,
-          alignItems: 'center',
-          gap: theme.spacing.md,
-          borderWidth: 1,
-          borderColor: theme.colors.border.subtle,
+    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.colors.bg.primary }}>
+      <OfflineBanner />
+      <ScrollView
+        contentContainerStyle={{
+          paddingHorizontal: theme.screenPadding,
+          paddingBottom: insets.bottom + theme.spacing.xxl,
+          paddingTop: theme.spacing.md,
+          gap: theme.spacing.lg,
         }}
+        showsVerticalScrollIndicator={false}
       >
-        <Receipt size={40} color={theme.colors.accent[700]} weight="duotone" />
-        <Text variant="heading" weight="semibold">Bills hub arrives in F5</Text>
-        <Text variant="body" tone="secondary" align="center">
-          Maintenance, water, electricity and group-buy contributions land here as a single list,
-          each with the reading, formula and frozen card that produced it.
+        <View>
+          <Text variant="display" weight="semibold">Bills</Text>
+          <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
+            Every obligation for your flat, with the number that produced it.
+          </Text>
+        </View>
+
+        <HeroDueCard
+          totalMinor={totalDue}
+          railBreakdown={railBreakdown}
+          onPressHistory={() => router.push('/bills/history')}
+        />
+
+        <Segmented<Segment>
+          value={segment}
+          onChange={setSegment}
+          options={[
+            { value: 'due', label: 'Due now' },
+            { value: 'all', label: 'All' },
+          ]}
+        />
+
+        <View>
+          <SectionLabel>
+            {segment === 'due' ? 'Due now' : 'Every line'}
+          </SectionLabel>
+
+          {hub.isLoading ? <ListLoading label="Loading bills" /> : null}
+
+          {hub.isError ? (
+            <ListError
+              message={
+                (hub.error as { message?: string } | null)?.message ??
+                'Bills are unreachable right now. Check your connection and try again.'
+              }
+              onRetry={() => hub.refetch()}
+            />
+          ) : null}
+
+          {hub.isSuccess && visible.length === 0 ? (
+            <ListEmpty
+              Icon={Receipt}
+              title={segment === 'due' ? 'Nothing due' : 'No bills yet'}
+              body={
+                segment === 'due'
+                  ? "You're all caught up. Anything new lands here as soon as it's issued."
+                  : 'Bills appear here as soon as the committee publishes a cycle or a pooled request fires.'
+              }
+            />
+          ) : null}
+
+          <View style={{ gap: theme.spacing.sm }}>
+            {visible.map((l) => (
+              <BillLineRow key={l.id} line={l} onPress={() => router.push(`/bills/${l.id}`)} />
+            ))}
+          </View>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function HeroDueCard({
+  totalMinor,
+  railBreakdown,
+  onPressHistory,
+}: {
+  totalMinor: number;
+  railBreakdown: Array<{ rail: PaymentRail; count: number; amountMinor: number }>;
+  onPressHistory: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <View
+      style={{
+        backgroundColor: theme.colors.accent[800],
+        borderRadius: theme.radius.xxl,
+        padding: theme.spacing.lg,
+        gap: theme.spacing.md,
+        ...theme.shadows.md.native,
+      }}
+    >
+      <View>
+        <Text variant="caption" tone="onAccent" style={{ opacity: 0.72 }}>
+          Total due
+        </Text>
+        <Money
+          minor={totalMinor}
+          variant="display"
+          weight="semibold"
+          tone="onAccent"
+          showDecimals={false}
+        />
+        <Text variant="caption" tone="onAccent" style={{ opacity: 0.72, marginTop: 4 }}>
+          {totalMinor > 0
+            ? 'Across every rail. Pay each line on its own tap to keep the audit trail clean.'
+            : 'You are all clear.'}
         </Text>
       </View>
-    </Screen>
+
+      {railBreakdown.length > 0 ? (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+          {railBreakdown.map((r) => (
+            <View
+              key={r.rail}
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.14)',
+                borderRadius: theme.radius.pill,
+                paddingHorizontal: 10,
+                paddingVertical: 4,
+              }}
+            >
+              <Text variant="caption" weight="semibold" tone="onAccent">
+                {railLabel(r.rail)} · {r.count}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      <View>
+        <Button
+          label="Statement history"
+          variant="secondary"
+          leftIcon={<ClockCounterClockwise size={16} color={theme.colors.accent[700]} weight="regular" />}
+          onPress={onPressHistory}
+          fullWidth
+        />
+      </View>
+    </View>
   );
+}
+
+function railLabel(rail: PaymentRail): string {
+  switch (rail) {
+    case 'SOCIETY_UPI': return 'Society';
+    case 'BULK_BUY_ESCROW': return 'Escrow';
+    case 'VENDOR_DIRECT': return 'Vendor';
+  }
+}
+
+function summariseRails(
+  lines: { rail: PaymentRail; amountMinor: number; status: string }[],
+): Array<{ rail: PaymentRail; count: number; amountMinor: number }> {
+  const byRail = new Map<PaymentRail, { count: number; amountMinor: number }>();
+  for (const l of lines) {
+    if (l.status === 'PAID') continue;
+    const entry = byRail.get(l.rail) ?? { count: 0, amountMinor: 0 };
+    entry.count += 1;
+    entry.amountMinor += l.amountMinor;
+    byRail.set(l.rail, entry);
+  }
+  return [...byRail.entries()].map(([rail, e]) => ({ rail, ...e }));
 }
