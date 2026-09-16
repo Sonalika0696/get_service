@@ -1,0 +1,3169 @@
+{
+  "components": {
+    "schemas": {
+      "AssignRoleDto": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "COMMITTEE",
+              "TREASURER",
+              "DEPUTY_TREASURER"
+            ],
+            "type": "string"
+          },
+          "userId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "CreateConsentDto": {
+        "properties": {
+          "granteeUserId": {
+            "description": "Today: a VENDOR-principal User's id — see VendorsService.getResidentContact.",
+            "type": "string"
+          },
+          "purpose": {
+            "enum": [
+              "CONTACT_INFO"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "granteeUserId",
+          "purpose"
+        ],
+        "type": "object"
+      },
+      "CreateDelegationDto": {
+        "properties": {
+          "delegateUserId": {
+            "type": "string"
+          },
+          "occupancyId": {
+            "description": "One of the resident's own occupancies — see DelegationService.grant.",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "SERVICE_REQUESTS",
+              "EVENT_OPT_IN",
+              "JOB_BLOG_POSTING",
+              "VENDOR_DIRECTORY_ACCESS"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "occupancyId",
+          "delegateUserId",
+          "scope"
+        ],
+        "type": "object"
+      },
+      "CreateJobPostDto": {
+        "properties": {
+          "body": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "companyEmail": {
+            "description": "Required for HIRING posts (company-email verification gate); unused for SEEKING.",
+            "format": "email",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "HIRING",
+              "SEEKING"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 3,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "title",
+          "body"
+        ],
+        "type": "object"
+      },
+      "CreateOfferDto": {
+        "properties": {
+          "category": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "deadline": {
+            "description": "ISO-8601 timestamp; must be in the future (validated in the service, where \"now\" comes from Clock).",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 5000,
+            "type": "string"
+          },
+          "discountLadder": {
+            "items": {
+              "$ref": "#/components/schemas/DiscountLadderRungDto"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "milestoneTemplate": {
+            "description": "LARGE only — see class doc comment.",
+            "items": {
+              "$ref": "#/components/schemas/MilestoneTemplateRungDto"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "recurring": {
+            "description": "Phase 5: defaults to NONE (no recurrence) when omitted. WEEKLY offers can later be \"rolled\" via POST /offers/:id/roll — see BulkBuyService.rollOffer.",
+            "enum": [
+              "NONE",
+              "WEEKLY"
+            ],
+            "type": "string"
+          },
+          "retentionDays": {
+            "description": "LARGE only — see class doc comment.",
+            "minimum": 0,
+            "type": "number"
+          },
+          "retentionPct": {
+            "description": "LARGE only — see class doc comment.",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
+          "tier": {
+            "description": "Defaults to SMALL (Phase 4C's flow) when omitted.",
+            "enum": [
+              "SMALL",
+              "LARGE"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 3,
+            "type": "string"
+          },
+          "unitPrice": {
+            "description": "Major units (rupees), pre-discount.",
+            "minimum": 1,
+            "type": "number"
+          },
+          "vendorId": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "vendorId",
+          "category",
+          "title",
+          "unitPrice",
+          "discountLadder",
+          "deadline"
+        ],
+        "type": "object"
+      },
+      "CreateOrderDto": {
+        "properties": {
+          "amount": {
+            "minimum": 1,
+            "type": "number"
+          },
+          "purpose": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount"
+        ],
+        "type": "object"
+      },
+      "CreatePollDto": {
+        "properties": {
+          "closesAt": {
+            "description": "ISO-8601 timestamp; must be in the future (validated in the service, where \"now\" comes from Clock).",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 5000,
+            "type": "string"
+          },
+          "minCommitments": {
+            "description": "Required for EVENT polls.",
+            "minimum": 1,
+            "type": "number"
+          },
+          "pollType": {
+            "enum": [
+              "EVENT",
+              "BULK_BUY_RESIDENT"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 3,
+            "type": "string"
+          }
+        },
+        "required": [
+          "pollType",
+          "title",
+          "closesAt"
+        ],
+        "type": "object"
+      },
+      "CreateResidentPollDto": {
+        "properties": {
+          "category": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "closesAt": {
+            "description": "ISO-8601 timestamp; must be in the future (validated in the service, where \"now\" comes from Clock).",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 5000,
+            "type": "string"
+          },
+          "proposedMinimum": {
+            "minimum": 2,
+            "type": "number"
+          },
+          "taggedVendorId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 3,
+            "type": "string"
+          }
+        },
+        "required": [
+          "taggedVendorId",
+          "category",
+          "title",
+          "proposedMinimum",
+          "closesAt"
+        ],
+        "type": "object"
+      },
+      "CreateSocietyDto": {
+        "properties": {
+          "address": {
+            "maxLength": 400,
+            "minLength": 1,
+            "type": "string"
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "address"
+        ],
+        "type": "object"
+      },
+      "CreateVendorDto": {
+        "properties": {
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "contactEmail": {
+            "format": "email",
+            "type": "string"
+          },
+          "contactPhone": {
+            "maxLength": 30,
+            "type": "string"
+          },
+          "gstin": {
+            "description": "Self-declared GSTIN; checked against the GSTIN lookup API at approval time, not at onboarding.",
+            "maxLength": 15,
+            "type": "string"
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "radiusKm": {
+            "minimum": 1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "categories"
+        ],
+        "type": "object"
+      },
+      "DecideRatificationDto": {
+        "properties": {
+          "note": {
+            "maxLength": 500,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DiscountLadderRungDto": {
+        "properties": {
+          "minN": {
+            "minimum": 1,
+            "type": "number"
+          },
+          "pct": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "minN",
+          "pct"
+        ],
+        "type": "object"
+      },
+      "ImportFlatsDto": {
+        "properties": {
+          "csv": {
+            "maxLength": 500000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "csv"
+        ],
+        "type": "object"
+      },
+      "MilestoneTemplateRungDto": {
+        "properties": {
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "pct": {
+            "minimum": 1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "pct"
+        ],
+        "type": "object"
+      },
+      "MoveInDto": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "type": "string"
+          },
+          "flatId": {
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "phone": {
+            "maxLength": 20,
+            "minLength": 7,
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "OWNER_OCCUPIER",
+              "OWNER_ABSENTEE",
+              "TENANT"
+            ],
+            "type": "string"
+          },
+          "userId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "flatId",
+          "role"
+        ],
+        "type": "object"
+      },
+      "OfficerEnrollCompleteDto": {
+        "properties": {
+          "code": {
+            "maxLength": 6,
+            "minLength": 6,
+            "type": "string"
+          },
+          "email": {
+            "format": "email",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 128,
+            "minLength": 8,
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "code",
+          "password"
+        ],
+        "type": "object"
+      },
+      "OfficerEnrollStartDto": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "type": "object"
+      },
+      "OfficerEnrollVerifyTotpDto": {
+        "properties": {
+          "code": {
+            "maxLength": 6,
+            "minLength": 6,
+            "type": "string"
+          },
+          "email": {
+            "format": "email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "code"
+        ],
+        "type": "object"
+      },
+      "OfficerLoginDto": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "totpCode": {
+            "description": "Optional at the DTO level (rather than required) so an absent code is a\nclean, explicit \"invalid or missing 2FA code\" 401 from\nOfficerAuthService — same rejection reason as a wrong code — instead of\na generic 400 from the validation pipe.",
+            "maxLength": 6,
+            "minLength": 6,
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "type": "object"
+      },
+      "PostAdjustmentDto": {
+        "properties": {
+          "amount": {
+            "minimum": 1,
+            "type": "number"
+          },
+          "creditKind": {
+            "enum": [
+              "VENDOR",
+              "SOCIETY_MASTER",
+              "BULK_BUY",
+              "DISPUTE",
+              "EXTERNAL",
+              "RETENTION"
+            ],
+            "type": "string"
+          },
+          "debitKind": {
+            "enum": [
+              "VENDOR",
+              "SOCIETY_MASTER",
+              "BULK_BUY",
+              "DISPUTE",
+              "EXTERNAL",
+              "RETENTION"
+            ],
+            "type": "string"
+          },
+          "reasonCode": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "debitKind",
+          "creditKind",
+          "amount",
+          "reasonCode"
+        ],
+        "type": "object"
+      },
+      "ProvisionAccountDto": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "principalKind": {
+            "enum": [
+              "VENDOR",
+              "OPERATOR"
+            ],
+            "type": "string"
+          },
+          "vendorId": {
+            "description": "Required (and only meaningful) when principalKind is VENDOR — the existing Vendor row this login is for.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "principalKind"
+        ],
+        "type": "object"
+      },
+      "RateVendorDto": {
+        "properties": {
+          "comment": {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "rating": {
+            "maximum": 5,
+            "minimum": 1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "rating"
+        ],
+        "type": "object"
+      },
+      "RequestOtpDto": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "type": "string"
+          },
+          "phone": {
+            "maxLength": 20,
+            "minLength": 7,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SetApprovalConfigDto": {
+        "properties": {
+          "lowerThreshold": {
+            "description": "Amounts at or below this need only 1 officer.",
+            "minimum": 1,
+            "type": "number"
+          },
+          "majorityFraction": {
+            "description": "Fraction (0, 1] of the committee roster required above upperThreshold.",
+            "maximum": 1,
+            "minimum": 1,
+            "type": "number"
+          },
+          "upperThreshold": {
+            "description": "Amounts at or below this (and above lowerThreshold) need 2 distinct officers.",
+            "minimum": 1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "lowerThreshold",
+          "upperThreshold",
+          "majorityFraction"
+        ],
+        "type": "object"
+      },
+      "SignupDto": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "type": "string"
+          },
+          "flatId": {
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "phone": {
+            "maxLength": 20,
+            "minLength": 7,
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "OWNER_OCCUPIER",
+              "OWNER_ABSENTEE",
+              "TENANT"
+            ],
+            "type": "string"
+          },
+          "societyId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "societyId",
+          "flatId",
+          "role"
+        ],
+        "type": "object"
+      },
+      "UpdateProfileDto": {
+        "properties": {
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "phone": {
+            "maxLength": 20,
+            "minLength": 7,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateSocietyDto": {
+        "properties": {
+          "address": {
+            "maxLength": 400,
+            "minLength": 1,
+            "type": "string"
+          },
+          "config": {
+            "additionalProperties": true,
+            "description": "Society-level feature/config toggles — replaces the whole object, not a deep merge.",
+            "type": "object"
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UploadKycDocumentDto": {
+        "properties": {
+          "fileName": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "maxLength": 50,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "fileName"
+        ],
+        "type": "object"
+      },
+      "VendorAccessRequestDto": {
+        "properties": {
+          "purpose": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "purpose"
+        ],
+        "type": "object"
+      },
+      "VendorConfirmDto": {
+        "properties": {
+          "confirmedMinimum": {
+            "minimum": 1,
+            "type": "number"
+          },
+          "discountLadder": {
+            "items": {
+              "$ref": "#/components/schemas/DiscountLadderRungDto"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "unitPrice": {
+            "description": "Major units (rupees), pre-discount — matches Offer.unitPrice's convention.",
+            "minimum": 1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "confirmedMinimum",
+          "unitPrice"
+        ],
+        "type": "object"
+      },
+      "VerifyOtpDto": {
+        "properties": {
+          "code": {
+            "maxLength": 6,
+            "minLength": 6,
+            "type": "string"
+          },
+          "email": {
+            "format": "email",
+            "type": "string"
+          },
+          "phone": {
+            "maxLength": 20,
+            "minLength": 7,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "cookie": {
+        "in": "cookie",
+        "name": "sid",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "contact": {},
+    "description": "GateX / Society FinTech backend HTTP API, generated from the NestJS route and DTO decorators in backend/src — see backend/src/openapi/document.ts. Not hand-edited: run `npm run openapi:generate --workspace backend` to regenerate after any route/DTO change, and `npm run openapi:check --workspace backend` (wired into CI) to catch drift. Consumers generate their typed client from this file — see shared/README.md.",
+    "title": "Society FinTech API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/v1/audit/verify": {
+      "get": {
+        "operationId": "AuditController_verify",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "AuthController_logout",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/officer/enroll/complete": {
+      "post": {
+        "operationId": "OfficerAuthController_enrollComplete",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OfficerEnrollCompleteDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Phase 6.5: 10/min per IP — consumes the enroll OTP and sets the password; bounded but looser than the OTP-send step.",
+        "tags": [
+          "OfficerAuth"
+        ]
+      }
+    },
+    "/api/v1/auth/officer/enroll/start": {
+      "post": {
+        "operationId": "OfficerAuthController_enrollStart",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OfficerEnrollStartDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "summary": "Phase 6.5: 5/min per IP — sends an email OTP, same OTP-pumping vector as /auth/otp.",
+        "tags": [
+          "OfficerAuth"
+        ]
+      }
+    },
+    "/api/v1/auth/officer/enroll/verify-totp": {
+      "post": {
+        "operationId": "OfficerAuthController_enrollVerifyTotp",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OfficerEnrollVerifyTotpDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "summary": "Phase 6.5: 10/min per IP — TOTP brute-force vector on enrollment.",
+        "tags": [
+          "OfficerAuth"
+        ]
+      }
+    },
+    "/api/v1/auth/officer/login": {
+      "post": {
+        "operationId": "OfficerAuthController_login",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OfficerLoginDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Phase 6.5: 5/min per IP — the tightest limit here, since this is a\ncombined password + TOTP brute-force target (officer/vendor/operator\nlogin).",
+        "tags": [
+          "OfficerAuth"
+        ]
+      }
+    },
+    "/api/v1/auth/otp": {
+      "post": {
+        "operationId": "AuthController_requestOtp",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestOtpDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "summary": "Phase 6.5: 5 OTP requests/min per IP — the tightest limit in this\ncontroller, since this is the direct OTP-pumping / SMS-bombing vector\n(an attacker requesting codes for many phone numbers from one IP).",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/signup": {
+      "post": {
+        "operationId": "AuthController_signup",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignupDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Phase 6.5: 5 signups/min per IP. Loose enough for a legitimate resident\nonboarding session, tight enough to blunt bulk account-creation spam.",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/verify": {
+      "post": {
+        "operationId": "AuthController_verify",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyOtpDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Phase 6.5: 10 verify attempts/min per IP. Looser than /otp since a\nnormal signup-then-verify flow already spends one call here, but still\nbounded — OtpService's own 5-wrong-attempts-per-code lockout handles\nguessing a single code; this bounds an attacker cycling through many\naccounts/codes from one IP.",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/bookings/{id}": {
+      "get": {
+        "operationId": "BookingsController_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Bookings"
+        ]
+      }
+    },
+    "/api/v1/bookings/{id}/milestones/{mid}/authorise": {
+      "post": {
+        "operationId": "BookingsController_authoriseMilestone",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "mid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Approval-ladder authorisation call (Phase 6.4, M14) — LARGE bookings\nonly (SMALL bookings are rejected with 400). Same role widening as\nauthorisePayout above. See BulkBuyService.authoriseMilestone's doc\ncomment for the ordering, idempotency, and once-only retention\nset-aside rules under the new N-officer ladder.",
+        "tags": [
+          "Bookings"
+        ]
+      }
+    },
+    "/api/v1/bookings/{id}/payout/authorise": {
+      "post": {
+        "operationId": "BookingsController_authorisePayout",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Approval-ladder authorisation call (Phase 6.4, M14) — SMALL bookings\nonly (LARGE bookings are rejected with 400; see authoriseMilestone\nbelow). Open to any of TREASURER/DEPUTY_TREASURER/COMMITTEE (widened\nfrom TREASURER-only — this is what makes DEPUTY_TREASURER a live role;\nsee BulkBuyService.authorisePayout's doc comment for the full N-officer\nladder and exactly when a call actually executes the payout vs. merely\nrecords one more distinct officer's approval).",
+        "tags": [
+          "Bookings"
+        ]
+      }
+    },
+    "/api/v1/bookings/{id}/retention/release": {
+      "post": {
+        "operationId": "BookingsController_releaseRetention",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "TREASURER-only release of a LARGE booking's defect-liability retention\nshare, once every milestone is PAID and the retention period has\nelapsed. See BulkBuyService.releaseRetention's doc comment.",
+        "tags": [
+          "Bookings"
+        ]
+      }
+    },
+    "/api/v1/bulk-buy/approval-config": {
+      "get": {
+        "operationId": "ApprovalConfigController_get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "ApprovalConfig"
+        ]
+      },
+      "put": {
+        "operationId": "ApprovalConfigController_set",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetApprovalConfigDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "ApprovalConfig"
+        ]
+      }
+    },
+    "/api/v1/bulk-buy/polls": {
+      "get": {
+        "operationId": "ResidentPollsController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "ResidentPolls"
+        ]
+      },
+      "post": {
+        "operationId": "ResidentPollsController_create",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateResidentPollDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "A resident opens a poll tagging an existing vendor in their own society.",
+        "tags": [
+          "ResidentPolls"
+        ]
+      }
+    },
+    "/api/v1/bulk-buy/polls/{id}": {
+      "get": {
+        "operationId": "ResidentPollsController_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "ResidentPolls"
+        ]
+      }
+    },
+    "/api/v1/bulk-buy/polls/{id}/join": {
+      "post": {
+        "operationId": "ResidentPollsController_join",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "A resident registers interest; may fire the poll immediately in the same call — see BulkBuyService.joinResidentPoll's doc comment.",
+        "tags": [
+          "ResidentPolls"
+        ]
+      }
+    },
+    "/api/v1/bulk-buy/polls/{id}/vendor-confirm": {
+      "post": {
+        "operationId": "ResidentPollsController_vendorConfirm",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VendorConfirmDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "A COMMITTEE member, acting for the tagged vendor (no vendor login in\nv1 — see BulkBuyService's class doc comment), confirms the terms Flow B\nfires under. May fire the poll immediately in the same call — see\nBulkBuyService.vendorConfirm's doc comment.",
+        "tags": [
+          "ResidentPolls"
+        ]
+      }
+    },
+    "/api/v1/bulk-buy/polls/{id}/vendor-decline": {
+      "post": {
+        "operationId": "ResidentPollsController_vendorDecline",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "A COMMITTEE member, acting for the tagged vendor, declines — the poll is CANCELLED outright.",
+        "tags": [
+          "ResidentPolls"
+        ]
+      }
+    },
+    "/api/v1/job-cards/{id}/sign-off": {
+      "post": {
+        "operationId": "JobCardsController_signOff",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "JobCards"
+        ]
+      }
+    },
+    "/api/v1/jobs": {
+      "get": {
+        "operationId": "JobBlogController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "JobBlog"
+        ]
+      },
+      "post": {
+        "operationId": "JobBlogController_create",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateJobPostDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "JobBlog"
+        ]
+      }
+    },
+    "/api/v1/jobs/{id}": {
+      "get": {
+        "operationId": "JobBlogController_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "JobBlog"
+        ]
+      }
+    },
+    "/api/v1/jobs/{id}/flag": {
+      "post": {
+        "operationId": "JobBlogController_flag",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "JobBlog"
+        ]
+      }
+    },
+    "/api/v1/jobs/{id}/remove": {
+      "post": {
+        "operationId": "JobBlogController_remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "JobBlog"
+        ]
+      }
+    },
+    "/api/v1/jobs/{id}/verify-company-email": {
+      "get": {
+        "operationId": "JobBlogController_verifyCompanyEmail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Public — the token itself is the credential, no session required. Clicked from an email.",
+        "tags": [
+          "JobBlog"
+        ]
+      }
+    },
+    "/api/v1/kyc/documents": {
+      "post": {
+        "operationId": "KycController_uploadDocument",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadKycDocumentDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Kyc"
+        ]
+      }
+    },
+    "/api/v1/ledger": {
+      "get": {
+        "operationId": "LedgerController_getLedger",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Aggregates only, by design: account-kind balances for the caller's own\nsociety plus a cheap integrity flag. Never exposes per-resident rows —\nthat's the whole point of keeping this COMMITTEE- rather than\nresident-visible.",
+        "tags": [
+          "Ledger"
+        ]
+      }
+    },
+    "/api/v1/ledger/adjustments": {
+      "post": {
+        "operationId": "LedgerController_postAdjustment",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "idempotency-key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostAdjustmentDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Treasury tool + the proof-of-concept for unit-of-work + idempotency that\nPhase 4B's payment posting will reuse: requires an `Idempotency-Key`\nheader, and replaying the same request with the same key returns the\nidentical prior response without creating a second LedgerEntry.",
+        "tags": [
+          "Ledger"
+        ]
+      }
+    },
+    "/api/v1/ledger/assert-balances": {
+      "post": {
+        "operationId": "LedgerController_assertBalances",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Phase 6.5 Invariant I6 assertion worker trigger — see\nLedgerService.assertAllBalances' doc comment for why this is\n`@OperatorOnly()` and cross-society rather than the\n`@ResidentOnly()` + `@Roles(...)` shape every other route on this\ncontroller uses: PollsService.processExpired's \"stand-in for a future\nscheduler\" pattern, adapted to a check that inherently spans every\nsociety at once.",
+        "tags": [
+          "Ledger"
+        ]
+      }
+    },
+    "/api/v1/ledger/rebuild": {
+      "post": {
+        "operationId": "LedgerController_rebuild",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Phase 6.5 Invariant I6 \"rebuildable cache\" guarantee: rewrites every\nAccount.balance in the caller's society from LedgerEntry truth.\nTREASURER-only (not COMMITTEE, unlike POST /ledger/adjustments) — this\noverwrites the balance cache outright rather than posting a normal\ntransfer, so it's scoped to the officer most directly accountable for\ncash integrity, matching GET /ledger/reconciliation's precedent\n(also TREASURER-only) rather than the wider COMMITTEE-or-TREASURER\ngate on ordinary adjustments.\n\nNo `@AuditLog(...)` here on purpose — LedgerService.rebuildBalances\nwrites its own richer AuditService entry (per-account rebuilt\nbalances) directly, same reasoning as SocietiesService/FlatsService\n(see AuditService.appendBestEffort's doc comment), rather than the\ninterceptor's generic `{params, body}` payload.",
+        "tags": [
+          "Ledger"
+        ]
+      }
+    },
+    "/api/v1/ledger/reconciliation": {
+      "get": {
+        "operationId": "LedgerController_reconciliation",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Ledger"
+        ]
+      }
+    },
+    "/api/v1/ledger/verify": {
+      "get": {
+        "operationId": "LedgerController_verify",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Phase 6.5 Invariant I6 — surfaces LedgerService.verifyBalances()\n(the balance-cache analogue of AuditService.verifyChain) to every\nresident of the caller's own society, mirroring the just-shipped\n`GET /audit/verify`: `AuthGuard` + `@CurrentResident()` only, no\n`RolesGuard` — see AuditController.verify's doc comment for why that\nroute (and this one) is left open to any resident rather than gated to\nCOMMITTEE/TREASURER the way GET /ledger's aggregates are.",
+        "tags": [
+          "Ledger"
+        ]
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "operationId": "UsersController_me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Users"
+        ]
+      },
+      "patch": {
+        "operationId": "UsersController_updateProfile",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProfileDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/api/v1/me/consents": {
+      "get": {
+        "operationId": "ConsentController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Consent"
+        ]
+      },
+      "post": {
+        "operationId": "ConsentController_grant",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConsentDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Consent"
+        ]
+      }
+    },
+    "/api/v1/me/consents/{id}": {
+      "delete": {
+        "operationId": "ConsentController_revoke",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Consent"
+        ]
+      }
+    },
+    "/api/v1/me/delegations": {
+      "get": {
+        "operationId": "DelegationController_listGranted",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Delegation"
+        ]
+      },
+      "post": {
+        "operationId": "DelegationController_grant",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDelegationDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Delegation"
+        ]
+      }
+    },
+    "/api/v1/me/delegations/received": {
+      "get": {
+        "operationId": "DelegationController_listReceived",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Delegation"
+        ]
+      }
+    },
+    "/api/v1/me/delegations/{id}": {
+      "delete": {
+        "operationId": "DelegationController_revoke",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Delegation"
+        ]
+      }
+    },
+    "/api/v1/offers": {
+      "get": {
+        "operationId": "OffersController_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Offers"
+        ]
+      },
+      "post": {
+        "operationId": "OffersController_create",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOfferDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "v1 has no vendor login yet (see BulkBuyService's doc comment) — a\nCOMMITTEE member creates the offer, naming an existing Vendor id.",
+        "tags": [
+          "Offers"
+        ]
+      }
+    },
+    "/api/v1/offers/{id}": {
+      "get": {
+        "operationId": "OffersController_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Offers"
+        ]
+      }
+    },
+    "/api/v1/offers/{id}/commit": {
+      "post": {
+        "operationId": "OffersController_commit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Offers"
+        ]
+      }
+    },
+    "/api/v1/offers/{id}/roll": {
+      "post": {
+        "operationId": "OffersController_roll",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Phase 5: \"rolls\" a WEEKLY-recurring offer whose deadline has passed\ninto a fresh OPEN offer with deadline +7 days and empty commitments —\nsee BulkBuyService.rollOffer's doc comment. Stand-in for a scheduler\nthat doesn't exist yet in v1 (same stance as\nPollsService.processExpired).",
+        "tags": [
+          "Offers"
+        ]
+      }
+    },
+    "/api/v1/operator/accounts": {
+      "post": {
+        "operationId": "AccountsController_provision",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProvisionAccountDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "No `@AuditLog(...)` — AccountsService.provision writes its own (best-effort) entry when a society is resolvable; see its doc comment for the OPERATOR-kind gap.",
+        "tags": [
+          "Accounts"
+        ]
+      }
+    },
+    "/api/v1/operator/ping": {
+      "get": {
+        "operationId": "OperatorController_ping",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Only an OPERATOR principal may reach this — any other principalKind (or no session) gets 403/401.",
+        "tags": [
+          "Operator"
+        ]
+      }
+    },
+    "/api/v1/operator/societies": {
+      "get": {
+        "operationId": "SocietiesController_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Societies"
+        ]
+      },
+      "post": {
+        "operationId": "SocietiesController_create",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSocietyDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Societies"
+        ]
+      }
+    },
+    "/api/v1/operator/societies/{sid}": {
+      "get": {
+        "operationId": "SocietiesController_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Societies"
+        ]
+      },
+      "patch": {
+        "operationId": "SocietiesController_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSocietyDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Societies"
+        ]
+      }
+    },
+    "/api/v1/operator/societies/{sid}/archive": {
+      "post": {
+        "operationId": "SocietiesController_archive",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Societies"
+        ]
+      }
+    },
+    "/api/v1/operator/societies/{sid}/flats/import": {
+      "post": {
+        "operationId": "FlatsController_import",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportFlatsDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "No `@AuditLog(...)` here — FlatsService.importCsv writes a compact summary itself; see its doc comment.",
+        "tags": [
+          "Flats"
+        ]
+      }
+    },
+    "/api/v1/operator/societies/{sid}/ping": {
+      "get": {
+        "operationId": "OperatorController_scopedPing",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "No `@OperatorOnly()` here on purpose: this route exists to prove\nSocietyScopeGuard's operator bypass in isolation from PrincipalGuard.\nA RESIDENT/VENDOR whose own societyId doesn't match `:sid` gets 403 from\nSocietyScopeGuard; an OPERATOR always passes regardless of `:sid`,\nincluding a `:sid` that doesn't even exist as a Society row — the\nbypass is unconditional, matching \"operator is platform-level, has no\nsocietyId to compare\" (see SocietyScopeGuard's doc comment).",
+        "tags": [
+          "Operator"
+        ]
+      }
+    },
+    "/api/v1/operator/societies/{sid}/reactivate": {
+      "post": {
+        "operationId": "SocietiesController_reactivate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Societies"
+        ]
+      }
+    },
+    "/api/v1/payments/orders": {
+      "post": {
+        "operationId": "PaymentsController_createOrder",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "idempotency-key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrderDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
+    "/api/v1/payments/webhook": {
+      "post": {
+        "operationId": "PaymentsController_webhook",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-razorpay-signature",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "PUBLIC — Razorpay calls this server-to-server, so it deliberately carries\nno AuthGuard. Every byte of trust here comes from\nverifyWebhookSignature, checked against req.rawBody (the exact bytes\nRazorpay signed) BEFORE the payload is parsed or acted on in any way.\nSee main.ts (`rawBody: true`) for how req.rawBody gets populated.",
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
+    "/api/v1/payments/{id}": {
+      "get": {
+        "operationId": "PaymentsController_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Society-scoped read: any authenticated member of the payment's own society may read it (cross-society lookups 404, matching VendorsService's pattern).",
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
+    "/api/v1/payments/{id}/refund": {
+      "post": {
+        "operationId": "PaymentsController_refund",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Treasurer-only: initiates a Razorpay refund. Does not itself change\nPayment.status or post to the ledger — see PaymentsService.refund's doc\ncomment. In stub mode (RAZORPAY_ENABLED=false) there is no real\nRazorpay to deliver the follow-up webhook, so completing the flow in\ndev/tests means POSTing a signed `refund.processed` webhook yourself\n(see test/payments.e2e-spec.ts).",
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
+    "/api/v1/polls": {
+      "get": {
+        "operationId": "PollsController_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Polls"
+        ]
+      },
+      "post": {
+        "operationId": "PollsController_create",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePollDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Polls"
+        ]
+      }
+    },
+    "/api/v1/polls/process-expired": {
+      "post": {
+        "operationId": "PollsController_processExpired",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Stand-in for a scheduler: resolves every OPEN poll in the caller's society whose closesAt has passed.",
+        "tags": [
+          "Polls"
+        ]
+      }
+    },
+    "/api/v1/polls/{id}": {
+      "get": {
+        "operationId": "PollsController_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Polls"
+        ]
+      }
+    },
+    "/api/v1/polls/{id}/close": {
+      "post": {
+        "operationId": "PollsController_close",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Polls"
+        ]
+      }
+    },
+    "/api/v1/polls/{id}/join": {
+      "post": {
+        "operationId": "PollsController_join",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Polls"
+        ]
+      }
+    },
+    "/api/v1/society/{sid}/occupancies": {
+      "get": {
+        "operationId": "OccupancyController_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Occupancy"
+        ]
+      },
+      "post": {
+        "operationId": "OccupancyController_moveIn",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveInDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "No `@AuditLog(...)` — OccupancyService.moveIn writes its own (best-effort) entry; see its doc comment.",
+        "tags": [
+          "Occupancy"
+        ]
+      }
+    },
+    "/api/v1/society/{sid}/occupancies/{id}/move-out": {
+      "post": {
+        "operationId": "OccupancyController_moveOut",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "No `@AuditLog(...)` — OccupancyService.moveOut writes its own (best-effort) entry; see its doc comment.",
+        "tags": [
+          "Occupancy"
+        ]
+      }
+    },
+    "/api/v1/society/{sid}/ratifications": {
+      "get": {
+        "operationId": "RatificationController_listPending",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Ratification"
+        ]
+      }
+    },
+    "/api/v1/society/{sid}/ratifications/{id}/ratify": {
+      "post": {
+        "operationId": "RatificationController_ratify",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideRatificationDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Ratification"
+        ]
+      }
+    },
+    "/api/v1/society/{sid}/ratifications/{id}/reject": {
+      "post": {
+        "operationId": "RatificationController_reject",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideRatificationDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Ratification"
+        ]
+      }
+    },
+    "/api/v1/society/{sid}/roles": {
+      "get": {
+        "operationId": "SocietyRolesController_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SocietyRoles"
+        ]
+      },
+      "post": {
+        "operationId": "SocietyRolesController_assign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignRoleDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SocietyRoles"
+        ]
+      }
+    },
+    "/api/v1/society/{sid}/roles/{id}": {
+      "delete": {
+        "operationId": "SocietyRolesController_revoke",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "SocietyRoles"
+        ]
+      }
+    },
+    "/api/v1/vendors": {
+      "get": {
+        "operationId": "VendorsController_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Vendors"
+        ]
+      },
+      "post": {
+        "operationId": "VendorsController_create",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateVendorDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Vendors"
+        ]
+      }
+    },
+    "/api/v1/vendors/me": {
+      "get": {
+        "operationId": "VendorsController_me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Phase 6.2: a VENDOR principal's own identity echo — the same purpose\n`GET /me` serves for residents. Registered before `GET /:id` so \"me\"\nisn't swallowed as an :id param. Real vendor self-service (pricing\ncards, profile) is Phase 7.",
+        "tags": [
+          "Vendors"
+        ]
+      }
+    },
+    "/api/v1/vendors/residents/{residentId}/contact": {
+      "get": {
+        "operationId": "VendorsController_residentContact",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "residentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Phase 6.3: ConsentGrant enforced at query time — see\nVendorsService.getResidentContact's doc comment. Registered before\n`GET /:id` (same reason as `GET /me` above) so \"residents\" isn't\nswallowed as an :id param.",
+        "tags": [
+          "Vendors"
+        ]
+      }
+    },
+    "/api/v1/vendors/{id}": {
+      "get": {
+        "operationId": "VendorsController_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Vendors"
+        ]
+      }
+    },
+    "/api/v1/vendors/{id}/access-request": {
+      "post": {
+        "operationId": "VendorsController_requestAccess",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VendorAccessRequestDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Vendors"
+        ]
+      }
+    },
+    "/api/v1/vendors/{id}/approve": {
+      "post": {
+        "operationId": "VendorsController_approve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Vendors"
+        ]
+      }
+    },
+    "/api/v1/vendors/{id}/rate": {
+      "post": {
+        "operationId": "VendorsController_rate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RateVendorDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Vendors"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "HealthController_check",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Health"
+        ]
+      }
+    }
+  },
+  "servers": [],
+  "tags": []
+}
