@@ -322,3 +322,93 @@ export type PayoutStatus = 'PENDING' | 'AUTHORISED' | 'PAID';
 
 /** MilestoneStatus subset the client actually reads. */
 export type MilestoneStatus = 'PENDING' | 'AUTHORISED' | 'PAID';
+
+// ------------ Utility billing trace (M5 / M6, FRONTEND_PLAN §5.F7) ------------
+
+export type Utility = 'ELECTRICITY' | 'WATER';
+
+export type ReadingUnit = 'kWh' | 'kL';
+
+/** One tier in a piecewise tariff. `toUnits: null` means "and above". */
+export type SlabRow = {
+  fromUnits: number;
+  toUnits: number | null;
+  /** Rate per unit in MINOR units (paise per kWh, paise per kL). */
+  ratePerUnitMinor: number;
+  consumedInThisSlab: number;
+  chargeMinor: number;
+};
+
+export type MeterReading = {
+  meterId: string;
+  prevReading: number;
+  currentReading: number;
+  consumedUnits: number;
+  unit: ReadingUnit;
+  readingDate: string;
+  /** Anomaly flags surfaced by the backend's ingest step (SDD §4.4). */
+  flags: string[];
+};
+
+/**
+ * Water only. The three-source cost pool blended into a single per-kL rate
+ * (FRONTEND_PLAN §5.F7). Sum of `sources[].costMinor` divided by sum of
+ * `sources[].volumeKL` should equal `blendedRatePerKLMinor` — the client
+ * displays both so the derivation is auditable, not just believed.
+ */
+export type WaterSourceBlend = {
+  sources: Array<{
+    source: 'MUNICIPAL' | 'TANKER' | 'BOREWELL';
+    volumeKL: number;
+    costMinor: number;
+  }>;
+  totalVolumeKL: number;
+  totalCostMinor: number;
+  blendedRatePerKLMinor: number;
+};
+
+/**
+ * Common-area apportionment. `basis` is a human-readable label of the rule
+ * that split the pool ("per flat", "by area factor", "by occupancy count"),
+ * mirroring SDD §4.4's flexible-apportionment language.
+ */
+export type CommonAreaShare = {
+  totalCommonMinor: number;
+  basis: string;
+  /** Your normalised share (0..1) — the fraction of `totalCommonMinor` you owe. */
+  yourFactor: number;
+  yourShareMinor: number;
+};
+
+/**
+ * Reconciliation of the society's own aggregation against the bulk invoice
+ * from the utility provider. FRONTEND_PLAN §5.F7 is explicit that variance
+ * is *published*, not absorbed — this block exists to make that legible.
+ */
+export type UtilityReconciliation = {
+  societyTotalMinor: number;
+  bulkInvoiceMinor: number;
+  varianceMinor: number;
+  variancePct: number;
+};
+
+export type UtilityBillTrace = {
+  billId: string;
+  utility: Utility;
+  flatId: string;
+  cycleId: string;
+  periodStart: string;
+  periodEnd: string;
+  publishedAt: string;
+
+  reading: MeterReading;
+  slabs: SlabRow[];
+  slabTotalMinor: number;
+
+  commonArea: CommonAreaShare;
+  waterBlend?: WaterSourceBlend;
+  reconciliation?: UtilityReconciliation;
+
+  totalMinor: number;
+  currency: string;
+};

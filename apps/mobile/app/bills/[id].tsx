@@ -91,7 +91,9 @@ export default function BillDetail() {
               </View>
             </Card>
 
-            {line.evidence ? (
+            {line.kind === 'ELECTRICITY' || line.kind === 'WATER' ? (
+              <TraceLink billId={line.id} kind={line.kind} />
+            ) : line.evidence ? (
               <EvidenceLink evidence={line.evidence} />
             ) : null}
 
@@ -106,6 +108,39 @@ export default function BillDetail() {
         ) : null}
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function TraceLink({ billId, kind }: { billId: string; kind: 'ELECTRICITY' | 'WATER' }) {
+  const theme = useTheme();
+  const router = useRouter();
+  const label = kind === 'ELECTRICITY' ? 'Electricity computation trace' : 'Water computation trace';
+  return (
+    <View>
+      <SectionLabel>Computation trace</SectionLabel>
+      <View
+        onTouchEnd={() => router.push(`/bills/${billId}/trace` as never)}
+        style={{
+          backgroundColor: theme.colors.bg.elevated,
+          borderRadius: theme.radius.xl,
+          borderWidth: 1,
+          borderColor: theme.colors.border.subtle,
+          padding: theme.spacing.md,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: theme.spacing.sm,
+        }}
+      >
+        <FileText size={22} color={theme.colors.accent[700]} weight="duotone" />
+        <View style={{ flex: 1 }}>
+          <Text variant="body" weight="semibold">{label}</Text>
+          <Text variant="caption" tone="muted">
+            Meter reading, slab, common-area share, reconciliation
+          </Text>
+        </View>
+        <CaretRight size={16} color={theme.colors.ink[40]} weight="bold" />
+      </View>
+    </View>
   );
 }
 
