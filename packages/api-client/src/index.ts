@@ -64,6 +64,8 @@ export function createApiClient(config: ApiClientConfig) {
   };
 }
 
+export * from './types';
+
 /**
  * Provisional home aggregate — replaced by the generated DTO once the
  * backend publishes `GET /me/home` (FRONTEND_PLAN §3.2).

@@ -1,0 +1,95 @@
+import React from 'react';
+import { View, ActivityIndicator } from 'react-native';
+import type { IconProps } from 'phosphor-react-native';
+import { Warning, TrayArrowDown } from 'phosphor-react-native';
+import { Text } from './Text';
+import { Button } from './Button';
+import { useTheme } from '../theme/ThemeProvider';
+
+export function ListLoading({ label = 'Loading' }: { label?: string }) {
+  const theme = useTheme();
+  return (
+    <View
+      style={{
+        padding: theme.spacing.xxl,
+        alignItems: 'center',
+        gap: theme.spacing.md,
+      }}
+    >
+      <ActivityIndicator color={theme.colors.accent[700]} />
+      <Text variant="caption" tone="muted">{label}</Text>
+    </View>
+  );
+}
+
+export function ListError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry?: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <View
+      style={{
+        backgroundColor: theme.colors.feedback.dangerTint,
+        borderRadius: theme.radius.xl,
+        padding: theme.spacing.lg,
+        gap: theme.spacing.sm,
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Warning size={20} color={theme.colors.feedback.danger} weight="regular" />
+        <Text variant="body" weight="semibold" tone="danger">
+          Couldn't load
+        </Text>
+      </View>
+      <Text variant="caption" tone="secondary">{message}</Text>
+      {onRetry ? <Button label="Try again" variant="secondary" onPress={onRetry} /> : null}
+    </View>
+  );
+}
+
+export function ListEmpty({
+  Icon = TrayArrowDown,
+  title,
+  body,
+  action,
+}: {
+  Icon?: React.ComponentType<IconProps>;
+  title: string;
+  body: string;
+  action?: React.ReactNode;
+}) {
+  const theme = useTheme();
+  return (
+    <View
+      style={{
+        backgroundColor: theme.colors.bg.elevated,
+        borderRadius: theme.radius.xl,
+        padding: theme.spacing.xl,
+        alignItems: 'center',
+        gap: theme.spacing.md,
+        borderWidth: 1,
+        borderColor: theme.colors.border.subtle,
+      }}
+    >
+      <View
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: 999,
+          backgroundColor: theme.colors.accent.tint,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Icon size={28} color={theme.colors.accent[700]} weight="duotone" />
+      </View>
+      <Text variant="heading" weight="semibold" align="center">{title}</Text>
+      <Text variant="body" tone="secondary" align="center">{body}</Text>
+      {action}
+    </View>
+  );
+}
