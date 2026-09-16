@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "SocietyFinTech",
+    "slug": "sft-resident",
+    "scheme": "sft",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "bundleIdentifier": "com.sft.resident",
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "com.sft.resident",
+      "adaptiveIcon": {
+        "backgroundColor": "#FBF8F4"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

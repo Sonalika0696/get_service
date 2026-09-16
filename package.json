@@ -2,10 +2,12 @@
   "name": "society-fintech",
   "version": "0.0.1",
   "private": true,
-  "description": "Society FinTech Platform — monorepo root (backend, frontend, shared).",
+  "description": "Society FinTech Platform — monorepo root (backend, mobile, shared, packages).",
   "workspaces": [
     "backend",
-    "shared"
+    "shared",
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
     "dev:backend": "npm run start:dev --workspace backend",
@@ -13,6 +15,8 @@
     "lint:backend": "npm run lint --workspace backend",
     "test:backend": "npm run test --workspace backend",
     "prisma:migrate": "npm run prisma:migrate --workspace backend",
-    "prisma:seed": "npm run prisma:seed --workspace backend"
+    "prisma:seed": "npm run prisma:seed --workspace backend",
+    "dev:mobile": "npm run start --workspace @sft/mobile",
+    "typecheck:mobile": "npm run typecheck --workspace @sft/mobile"
   }
 }
