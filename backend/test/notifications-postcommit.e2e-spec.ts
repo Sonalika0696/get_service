@@ -103,6 +103,12 @@ describe('Notification dispatch is post-commit and best-effort (e2e)', () => {
     const verifyRes = await agent.post('/api/v1/auth/verify').send({ email, code }).expect(201);
     expect((verifyRes.body as { id: string }).id).toBe(userId);
 
+    // Phase 6.3 ratification gate: a self-registered occupancy starts PENDING
+    // and can't authenticate until ratified. This fixture isn't testing the
+    // gate itself, so ratify directly via Prisma — matching the convention in
+    // ledger.e2e-spec.ts and every other suite.
+    await prisma.occupancy.updateMany({ where: { userId }, data: { ratificationStatus: 'RATIFIED', ratificationDecidedAt: new Date() } });
+
     return { userId, agent, email };
   }
 
