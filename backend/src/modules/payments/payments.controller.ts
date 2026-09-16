@@ -4,9 +4,9 @@ import type { Request } from 'express';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
-import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
+import { CurrentResident } from '../../common/decorators/current-user.decorator.js';
 import { AuditLog } from '../../common/decorators/audit-log.decorator.js';
-import type { CurrentUserContext } from '../../common/types/current-user.js';
+import type { ResidentPrincipal } from '../../common/types/current-user.js';
 import { RoleKind } from '../../generated/prisma/enums.js';
 import type { PaymentModel } from '../../generated/prisma/models.js';
 import { RazorpayService } from '../../infra/razorpay/razorpay.service.js';
@@ -22,7 +22,7 @@ export class PaymentsController {
 
   @Post('orders')
   @UseGuards(AuthGuard)
-  async createOrder(@CurrentUser() currentUser: CurrentUserContext, @Body() dto: CreateOrderDto, @Headers('idempotency-key') idempotencyKey?: string): Promise<CreateOrderResult> {
+  async createOrder(@CurrentResident() currentUser: ResidentPrincipal, @Body() dto: CreateOrderDto, @Headers('idempotency-key') idempotencyKey?: string): Promise<CreateOrderResult> {
     if (!idempotencyKey) {
       throw new BadRequestException('Idempotency-Key header is required');
     }
@@ -69,14 +69,14 @@ export class PaymentsController {
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(RoleKind.TREASURER)
   @AuditLog('PAYMENT_REFUND', 'Payment')
-  async refund(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string): Promise<RefundInitiatedResult> {
+  async refund(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<RefundInitiatedResult> {
     return this.paymentsService.refund(currentUser.societyId, id);
   }
 
   /** Society-scoped read: any authenticated member of the payment's own society may read it (cross-society lookups 404, matching VendorsService's pattern). */
   @Get(':id')
   @UseGuards(AuthGuard)
-  async get(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string): Promise<PaymentModel> {
+  async get(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<PaymentModel> {
     return this.paymentsService.get(currentUser.societyId, id);
   }
 }

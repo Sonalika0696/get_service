@@ -1,14 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import { MailerService } from '../../infra/mailer/mailer.service.js';
+import { SmsService } from '../../infra/sms/sms.service.js';
 
 /**
- * Minimal, Phase 1 scope: templated emails only (no in-app/SMS channels
- * yet — those are cross-cutting concerns for a later phase). Each method
- * owns its own copy; there's no templating engine to configure.
+ * Templated notifications. Phase 1 shipped email only; Phase 6.2 adds SMS
+ * for the phone-OTP resident credential (DECISIONS_V2_SCOPE.md §7.1) via
+ * the stubbed SmsService (src/infra/sms/sms.service.ts). No templating
+ * engine: each method owns its own copy.
  */
 @Injectable()
 export class NotificationsService {
-  constructor(private readonly mailer: MailerService) {}
+  constructor(
+    private readonly mailer: MailerService,
+    private readonly sms: SmsService,
+  ) {}
 
   async sendOtpEmail(to: string, code: string): Promise<void> {
     await this.mailer.send({
@@ -16,6 +21,14 @@ export class NotificationsService {
       subject: 'Your verification code',
       text: `Your verification code is ${code}. It expires in 10 minutes.`,
       html: `<p>Your verification code is <strong>${code}</strong>.</p><p>It expires in 10 minutes.</p>`,
+    });
+  }
+
+  /** Phase 6.2 — resident phone-OTP signup/login, delivered via the (stubbed) SMS sender. */
+  async sendOtpSms(to: string, code: string): Promise<void> {
+    await this.sms.send({
+      to,
+      body: `Your Society FinTech verification code is ${code}. It expires in 10 minutes.`,
     });
   }
 

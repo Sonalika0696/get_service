@@ -2,9 +2,9 @@ import { BadRequestException, Body, Controller, Get, Headers, Post, Query, UseGu
 import { AuthGuard } from '../../common/guards/auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
-import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
+import { CurrentResident } from '../../common/decorators/current-user.decorator.js';
 import { AuditLog } from '../../common/decorators/audit-log.decorator.js';
-import type { CurrentUserContext } from '../../common/types/current-user.js';
+import type { ResidentPrincipal } from '../../common/types/current-user.js';
 import { RoleKind } from '../../generated/prisma/enums.js';
 import type { LedgerEntryModel } from '../../generated/prisma/models.js';
 import { PostAdjustmentDto } from './dto/post-adjustment.dto.js';
@@ -27,7 +27,7 @@ export class LedgerController {
   @Get()
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(RoleKind.COMMITTEE)
-  async getLedger(@CurrentUser() currentUser: CurrentUserContext): Promise<{ balances: AccountBalance[]; balancesIntact: boolean }> {
+  async getLedger(@CurrentResident() currentUser: ResidentPrincipal): Promise<{ balances: AccountBalance[]; balancesIntact: boolean }> {
     const [balances, verification] = await Promise.all([this.ledgerService.balances(currentUser.societyId), this.ledgerService.verifyBalances(currentUser.societyId)]);
     return { balances, balancesIntact: verification.ok };
   }
@@ -35,7 +35,7 @@ export class LedgerController {
   @Get('reconciliation')
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(RoleKind.TREASURER)
-  async reconciliation(@CurrentUser() currentUser: CurrentUserContext, @Query('date') date?: string): Promise<ReconciliationReport> {
+  async reconciliation(@CurrentResident() currentUser: ResidentPrincipal, @Query('date') date?: string): Promise<ReconciliationReport> {
     return this.reconciliationService.run(currentUser.societyId, date);
   }
 
@@ -49,7 +49,7 @@ export class LedgerController {
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(RoleKind.COMMITTEE, RoleKind.TREASURER)
   @AuditLog('LEDGER_ADJUSTMENT', 'LedgerEntry')
-  async postAdjustment(@CurrentUser() currentUser: CurrentUserContext, @Body() dto: PostAdjustmentDto, @Headers('idempotency-key') idempotencyKey?: string): Promise<LedgerEntryModel> {
+  async postAdjustment(@CurrentResident() currentUser: ResidentPrincipal, @Body() dto: PostAdjustmentDto, @Headers('idempotency-key') idempotencyKey?: string): Promise<LedgerEntryModel> {
     if (!idempotencyKey) {
       throw new BadRequestException('Idempotency-Key header is required');
     }

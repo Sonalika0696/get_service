@@ -19,12 +19,12 @@ export class AuthController {
   @Post('otp')
   @HttpCode(HttpStatus.NO_CONTENT)
   async requestOtp(@Body() dto: RequestOtpDto): Promise<void> {
-    await this.authService.requestOtp(dto.email);
+    await this.authService.requestOtp(dto);
   }
 
   @Post('verify')
   async verify(@Body() dto: VerifyOtpDto, @Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<{ id: string; name: string; email: string }> {
-    const { rawToken, user } = await this.authService.verify(dto.email, dto.code, {
+    const { rawToken, user } = await this.authService.verify(dto, {
       userAgent: req.headers['user-agent'],
       ip: req.ip,
     });

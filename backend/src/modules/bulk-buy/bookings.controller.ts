@@ -2,9 +2,9 @@ import { Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
-import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
+import { CurrentResident } from '../../common/decorators/current-user.decorator.js';
 import { AuditLog } from '../../common/decorators/audit-log.decorator.js';
-import type { CurrentUserContext } from '../../common/types/current-user.js';
+import type { ResidentPrincipal } from '../../common/types/current-user.js';
 import { RoleKind } from '../../generated/prisma/enums.js';
 import { BulkBuyService, type BookingDetail } from './bulk-buy.service.js';
 
@@ -14,7 +14,7 @@ export class BookingsController {
 
   @Get(':id')
   @UseGuards(AuthGuard)
-  async get(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string): Promise<BookingDetail> {
+  async get(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<BookingDetail> {
     return this.bulkBuy.getBooking(currentUser.societyId, id);
   }
 
@@ -28,7 +28,7 @@ export class BookingsController {
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(RoleKind.TREASURER)
   @AuditLog('PAYOUT_AUTHORISE', 'Payout')
-  async authorisePayout(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string): Promise<BookingDetail> {
+  async authorisePayout(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<BookingDetail> {
     return this.bulkBuy.authorisePayout(currentUser.societyId, id, currentUser.id);
   }
 
@@ -42,7 +42,7 @@ export class BookingsController {
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(RoleKind.TREASURER)
   @AuditLog('MILESTONE_AUTHORISE', 'Milestone')
-  async authoriseMilestone(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string, @Param('mid') mid: string): Promise<BookingDetail> {
+  async authoriseMilestone(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string, @Param('mid') mid: string): Promise<BookingDetail> {
     return this.bulkBuy.authoriseMilestone(currentUser.societyId, id, mid, currentUser.id);
   }
 
@@ -55,7 +55,7 @@ export class BookingsController {
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(RoleKind.TREASURER)
   @AuditLog('RETENTION_RELEASE', 'Booking')
-  async releaseRetention(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string): Promise<BookingDetail> {
+  async releaseRetention(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<BookingDetail> {
     return this.bulkBuy.releaseRetention(currentUser.societyId, id, currentUser.id);
   }
 }

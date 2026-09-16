@@ -22,6 +22,19 @@ enum KycTier {
   STANDARD
 }
 
+/// Discriminates the three authentication surfaces (Phase 6.2 — see
+/// BACKEND_PLAN.md Phase 6 and DECISIONS_V2_SCOPE.md §7.4). RESIDENT
+/// authenticates by phone OTP and is scoped to an Occupancy; VENDOR and
+/// OPERATOR authenticate by password + mandatory TOTP 2FA (§7.2) and are
+/// resolved by UserContextService without needing an Occupancy at all —
+/// previously the absence of one made a vendor/operator's login a 401
+/// regardless of kind.
+enum PrincipalKind {
+  RESIDENT
+  VENDOR
+  OPERATOR
+}
+
 model User {
   id              String    @id @default(cuid())
   name            String
@@ -29,8 +42,37 @@ model User {
   phone           String?   @unique
   kycTier         KycTier   @default(NONE)
   emailVerifiedAt DateTime?
+  /// Set the first time a phone-OTP verify() succeeds for this user. Phone
+  /// is the resident credential anchor (DECISIONS_V2_SCOPE.md §7.1); email
+  /// stays a required contact field, not flipped to optional in 6.2 — see
+  /// the officer/vendor auth doc comments for why the two channels are kept
+  /// deliberately separate rather than unified.
+  phoneVerifiedAt DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+
+  /// Defaults to RESIDENT so every pre-6.2 row (and every plain signup())
+  /// keeps working with no backfill. VENDOR/OPERATOR rows are provisioned
+  /// directly (no self-serve signup route in 6.2 — see officer-auth.service.ts).
+  principalKind PrincipalKind @default(RESIDENT)
+
+  /// VENDOR principals only: the one Vendor identity this login is for (and,
+  /// transitively, its home society — see UserContextService.load()). Null
+  /// for RESIDENT/OPERATOR. A future vendor serving multiple societies still
+  /// has one User <-> one Vendor <-> many VendorSocietyLink once Phase 7
+  /// splits Vendor from VendorSocietyLink (see BACKEND_PLAN.md Phase 7).
+  vendorId String? @unique
+
+  /// Password + mandatory TOTP 2FA path for VENDOR/OPERATOR principals
+  /// (SDD §5.1 / DECISIONS_V2_SCOPE.md §7.2) — a credential path separate
+  /// from resident phone OTP. All three null until enrollment completes;
+  /// totpEnabledAt is only set once a real TOTP code has been verified
+  /// against totpSecret (see OfficerAuthService.enrollVerifyTotp), so
+  /// "has a passwordHash but not totpEnabledAt" is a legitimate mid-enrollment
+  /// state that OfficerAuthService.login refuses to log in.
+  passwordHash  String?
+  totpSecret    String?
+  totpEnabledAt DateTime?
 
   occupancies          Occupancy[]           @relation("OccupancyResident")
   delegatedOccupancies Occupancy[]           @relation("OccupancyDelegate")
@@ -46,6 +88,7 @@ model User {
   payments             Payment[]
   bulkBuyCommitments   Commitment[]
   jobCards             JobCard[]
+  vendor               Vendor?               @relation(fields: [vendorId], references: [id], onDelete: SetNull)
 
   @@map("users")
 }
@@ -327,6 +370,8 @@ model Vendor {
   bookings       Booking[]
   /// Phase 5 — polls where a resident tagged this vendor for a Flow B bulk-buy (see Poll.taggedVendorId).
   taggedPolls    Poll[]
+  /// Phase 6.2 — the VENDOR-principal User that logs in as this vendor (see User.vendorId). Opposite side of a 1:1; the FK lives on User.
+  linkedUser     User?
 
   @@index([societyId])
   @@map("vendors")

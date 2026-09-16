@@ -8,6 +8,8 @@ import { PrismaModule } from './infra/prisma/prisma.module.js';
 import { MailerModule } from './infra/mailer/mailer.module.js';
 import { GstinApiModule } from './infra/gstinapi/gstinapi.module.js';
 import { RazorpayModule } from './infra/razorpay/razorpay.module.js';
+import { SmsModule } from './infra/sms/sms.module.js';
+import { SecurityModule } from './infra/security/security.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { AuditModule } from './modules/audit/audit.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
@@ -20,6 +22,7 @@ import { PollsModule } from './modules/polls/polls.module.js';
 import { LedgerModule } from './modules/ledger/ledger.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
 import { BulkBuyModule } from './modules/bulk-buy/bulk-buy.module.js';
+import { OperatorModule } from './modules/operator/operator.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor.js';
 
@@ -43,6 +46,8 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     MailerModule,
     GstinApiModule,
     RazorpayModule,
+    SmsModule,
+    SecurityModule,
     AuditModule,
     NotificationsModule,
     AuthModule,
@@ -54,6 +59,7 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     LedgerModule,
     PaymentsModule,
     BulkBuyModule,
+    OperatorModule,
     HealthModule,
   ],
   providers: [

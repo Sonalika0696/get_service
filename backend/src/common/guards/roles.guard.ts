@@ -9,6 +9,11 @@ import type { RequestWithUser } from './auth.guard.js';
  * request if the caller holds at least one of the RoleKinds set by
  * `@Roles(...)`; routes without that decorator are allowed through
  * unchanged.
+ *
+ * Phase 6.2: `roleKinds` only exists on a ResidentPrincipal (committee/
+ * treasurer roles are society-scoped, resident-only concepts) — a VENDOR or
+ * OPERATOR caller never has one, so it always 403s on a `@Roles(...)`
+ * route rather than crashing.
  */
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -21,7 +26,8 @@ export class RolesGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest<RequestWithUser>();
-    const userRoleKinds = request.user?.roleKinds ?? [];
+    const user = request.user;
+    const userRoleKinds = user && user.principalKind === 'RESIDENT' ? user.roleKinds : [];
     const hasRequiredRole = requiredRoles.some((role) => userRoleKinds.includes(role));
     if (!hasRequiredRole) {
       throw new ForbiddenException(`Requires one of: ${requiredRoles.join(', ')}`);

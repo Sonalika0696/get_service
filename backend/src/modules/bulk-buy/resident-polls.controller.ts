@@ -2,9 +2,9 @@ import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
-import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
+import { CurrentResident } from '../../common/decorators/current-user.decorator.js';
 import { AuditLog } from '../../common/decorators/audit-log.decorator.js';
-import type { CurrentUserContext } from '../../common/types/current-user.js';
+import type { ResidentPrincipal } from '../../common/types/current-user.js';
 import { RoleKind } from '../../generated/prisma/enums.js';
 import { CreateResidentPollDto } from './dto/create-resident-poll.dto.js';
 import { VendorConfirmDto } from './dto/vendor-confirm.dto.js';
@@ -24,19 +24,19 @@ export class ResidentPollsController {
   @Post()
   @UseGuards(AuthGuard)
   @AuditLog('BULKBUY_POLL_CREATE', 'Poll')
-  async create(@CurrentUser() currentUser: CurrentUserContext, @Body() dto: CreateResidentPollDto): Promise<ResidentPollDetail> {
+  async create(@CurrentResident() currentUser: ResidentPrincipal, @Body() dto: CreateResidentPollDto): Promise<ResidentPollDetail> {
     return this.bulkBuy.createResidentPoll(currentUser.societyId, currentUser.id, dto);
   }
 
   @Get()
   @UseGuards(AuthGuard)
-  async list(@CurrentUser() currentUser: CurrentUserContext): Promise<ResidentPollDetail[]> {
+  async list(@CurrentResident() currentUser: ResidentPrincipal): Promise<ResidentPollDetail[]> {
     return this.bulkBuy.listResidentPolls(currentUser.societyId, currentUser.id);
   }
 
   @Get(':id')
   @UseGuards(AuthGuard)
-  async get(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string): Promise<ResidentPollDetail> {
+  async get(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<ResidentPollDetail> {
     return this.bulkBuy.getResidentPoll(currentUser.societyId, id, currentUser.id);
   }
 
@@ -50,7 +50,7 @@ export class ResidentPollsController {
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(RoleKind.COMMITTEE)
   @AuditLog('BULKBUY_VENDOR_CONFIRM', 'Poll')
-  async vendorConfirm(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string, @Body() dto: VendorConfirmDto): Promise<ResidentPollDetail> {
+  async vendorConfirm(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string, @Body() dto: VendorConfirmDto): Promise<ResidentPollDetail> {
     return this.bulkBuy.vendorConfirm(currentUser.societyId, id, dto);
   }
 
@@ -59,7 +59,7 @@ export class ResidentPollsController {
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(RoleKind.COMMITTEE)
   @AuditLog('BULKBUY_VENDOR_DECLINE', 'Poll')
-  async vendorDecline(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string): Promise<ResidentPollDetail> {
+  async vendorDecline(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<ResidentPollDetail> {
     return this.bulkBuy.vendorDecline(currentUser.societyId, id);
   }
 
@@ -67,7 +67,7 @@ export class ResidentPollsController {
   @Post(':id/join')
   @UseGuards(AuthGuard)
   @AuditLog('BULKBUY_POLL_JOIN', 'Poll')
-  async join(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string): Promise<ResidentPollDetail> {
+  async join(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<ResidentPollDetail> {
     return this.bulkBuy.joinResidentPoll(currentUser.societyId, id, currentUser.id);
   }
 }

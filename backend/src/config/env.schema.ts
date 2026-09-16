@@ -47,6 +47,19 @@ export const envSchema = z.object({
   RAZORPAY_KEY_ID: z.string().default('rzp_test_stub'),
   RAZORPAY_KEY_SECRET: z.string().default('stub_secret'),
   RAZORPAY_WEBHOOK_SECRET: z.string().default('stub_webhook_secret'),
+
+  // --- Phase 6.2 (identity: phone OTP + officer/vendor password+TOTP 2FA) ---
+  /**
+   * Off by default — dev and all automated tests run SmsService against a
+   * deterministic offline stub instead of a real SMS gateway (see
+   * src/infra/sms/sms.service.ts). There is no real-gateway code path in
+   * this phase, unlike RAZORPAY_ENABLED/GSTIN_API_ENABLED: flipping this on
+   * throws rather than silently sending nothing. Accepts "true"/"1" as
+   * truthy, anything else (including unset) is false.
+   */
+  SMS_ENABLED: z.preprocess((value) => value === 'true' || value === '1', z.boolean()).default(false),
+  /** Issuer name shown in an authenticator app for officer/vendor TOTP enrollment (otpauth:// URI). */
+  TOTP_ISSUER: z.string().min(1).default('Society FinTech'),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -9,11 +9,22 @@ export interface RequestWithUser extends Request {
   user?: CurrentUserContext;
 }
 
+const BEARER_PREFIX = 'Bearer ';
+
 /**
- * Reads the session cookie, validates it against the Session table, loads
- * the user's auth context (society, occupancy role, society-level roles),
- * and attaches it to `request.user`. Apply with `@UseGuards(AuthGuard)` on
- * any controller/route that requires a signed-in resident.
+ * Reads the session token — from the session cookie, or (Phase 6.2, for the
+ * native client) an `Authorization: Bearer <token>` header — validates it
+ * against the Session table, loads the user's auth context (principal kind
+ * plus whatever that kind carries: society/occupancy/roles for a resident,
+ * vendor id + society for a vendor, nothing society-scoped for an
+ * operator), and attaches it to `request.user`. Apply with
+ * `@UseGuards(AuthGuard)` on any controller/route that requires a signed-in
+ * principal of any kind — pair with PrincipalGuard's
+ * `@ResidentOnly()`/`@VendorOnly()`/`@OperatorOnly()` to restrict to one.
+ *
+ * The cookie is checked first so existing cookie-based sessions keep
+ * working unchanged; the bearer header is only consulted when no cookie is
+ * present, not merged or preferred over it.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -26,7 +37,7 @@ export class AuthGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<RequestWithUser>();
 
-    const token = request.cookies?.[this.config.env.SESSION_COOKIE_NAME] as string | undefined;
+    const token = this.extractToken(request);
     if (!token) {
       throw new UnauthorizedException('Not authenticated');
     }
@@ -43,5 +54,18 @@ export class AuthGuard implements CanActivate {
 
     request.user = userContext;
     return true;
+  }
+
+  private extractToken(request: RequestWithUser): string | undefined {
+    const cookieToken = request.cookies?.[this.config.env.SESSION_COOKIE_NAME] as string | undefined;
+    if (cookieToken) return cookieToken;
+
+    const authHeader = request.headers.authorization;
+    if (typeof authHeader === 'string' && authHeader.startsWith(BEARER_PREFIX)) {
+      const bearerToken = authHeader.slice(BEARER_PREFIX.length).trim();
+      return bearerToken || undefined;
+    }
+
+    return undefined;
   }
 }

@@ -2,9 +2,9 @@ import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/co
 import { AuthGuard } from '../../common/guards/auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
-import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
+import { CurrentResident } from '../../common/decorators/current-user.decorator.js';
 import { AuditLog } from '../../common/decorators/audit-log.decorator.js';
-import type { CurrentUserContext } from '../../common/types/current-user.js';
+import type { ResidentPrincipal } from '../../common/types/current-user.js';
 import { PollStatus, RoleKind } from '../../generated/prisma/enums.js';
 import type { PollModel } from '../../generated/prisma/models.js';
 import { CreatePollDto } from './dto/create-poll.dto.js';
@@ -16,34 +16,34 @@ export class PollsController {
 
   @Get()
   @UseGuards(AuthGuard)
-  async list(@CurrentUser() currentUser: CurrentUserContext, @Query('status') status?: PollStatus): Promise<PollModel[]> {
+  async list(@CurrentResident() currentUser: ResidentPrincipal, @Query('status') status?: PollStatus): Promise<PollModel[]> {
     return this.pollsService.listForSociety(currentUser.societyId, status);
   }
 
   @Get(':id')
   @UseGuards(AuthGuard)
-  async get(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string): Promise<PollDetail> {
+  async get(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<PollDetail> {
     return this.pollsService.get(currentUser.societyId, id, currentUser.id);
   }
 
   @Post()
   @UseGuards(AuthGuard)
   @AuditLog('POLL_CREATE', 'Poll')
-  async create(@CurrentUser() currentUser: CurrentUserContext, @Body() dto: CreatePollDto): Promise<PollDetail> {
+  async create(@CurrentResident() currentUser: ResidentPrincipal, @Body() dto: CreatePollDto): Promise<PollDetail> {
     return this.pollsService.create(currentUser.societyId, currentUser.id, dto);
   }
 
   @Post(':id/join')
   @UseGuards(AuthGuard)
   @AuditLog('POLL_JOIN', 'Poll')
-  async join(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string): Promise<PollDetail> {
+  async join(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<PollDetail> {
     return this.pollsService.join(currentUser.societyId, id, currentUser.id);
   }
 
   @Post(':id/close')
   @UseGuards(AuthGuard)
   @AuditLog('POLL_CLOSE', 'Poll')
-  async close(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string): Promise<PollDetail> {
+  async close(@CurrentResident() currentUser: ResidentPrincipal, @Param('id') id: string): Promise<PollDetail> {
     return this.pollsService.closeEarly(currentUser.societyId, id, currentUser.id);
   }
 
@@ -51,7 +51,7 @@ export class PollsController {
   @Post('process-expired')
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(RoleKind.COMMITTEE)
-  async processExpired(@CurrentUser() currentUser: CurrentUserContext): Promise<{ resolved: number }> {
+  async processExpired(@CurrentResident() currentUser: ResidentPrincipal): Promise<{ resolved: number }> {
     return this.pollsService.processExpired(currentUser.societyId);
   }
 }
