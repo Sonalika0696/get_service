@@ -1,9 +1,12 @@
 import { Redirect } from 'expo-router';
+import { useAuth } from '../src/auth/AuthProvider';
 
 /**
- * Root redirect. Auth branching moves here in F1 — for now the app opens on
- * the tab shell so we can see it running end-to-end.
+ * Root redirect. AuthGate in _layout.tsx handles routing across the
+ * signed-in/out boundary, but /index still needs a concrete destination for
+ * the very first paint before AuthGate's effect fires.
  */
 export default function Index() {
-  return <Redirect href="/(tabs)" />;
+  const { isSignedIn } = useAuth();
+  return <Redirect href={isSignedIn ? '/(tabs)' : '/auth/sign-in'} />;
 }

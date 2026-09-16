@@ -206,3 +206,41 @@ export type Payment = {
   createdAt: string;
   updatedAt: string;
 };
+
+// ------------ Identity + auth (Phase 6.2 — shipped) ------------
+
+/** Matches backend/prisma/schema.prisma:enum OccupancyRole. */
+export type OccupancyRole = 'OWNER_OCCUPIER' | 'OWNER_ABSENTEE' | 'TENANT';
+
+export type RequestOtpBody = { phone: string } | { email: string };
+
+export type VerifyOtpBody =
+  | { phone: string; code: string }
+  | { email: string; code: string };
+
+export type VerifyOtpResult = {
+  id: string;
+  name: string;
+  email: string;
+};
+
+export type SignupBody = {
+  name: string;
+  email: string;
+  phone?: string;
+  societyId: string;
+  flatId: string;
+  role: OccupancyRole;
+};
+
+/** Response from GET /me (resident-only). */
+export type MeResponse = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  kycTier: string;
+  societyId: string;
+  occupancyRole: string;
+  roleKinds: string[];
+};

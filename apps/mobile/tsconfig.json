@@ -4,9 +4,15 @@
     "strict": true,
     "baseUrl": ".",
     "paths": {
-      "~/*": ["./src/*"],
-      "@sft/tokens": ["../../packages/tokens/src"],
-      "@sft/api-client": ["../../packages/api-client/src"]
+      "~/*": [
+        "./src/*"
+      ],
+      "@sft/tokens": [
+        "../../packages/tokens/src"
+      ],
+      "@sft/api-client": [
+        "../../packages/api-client/src"
+      ]
     },
     "jsx": "react-native",
     "moduleResolution": "bundler",
@@ -15,8 +21,6 @@
   },
   "include": [
     "**/*.ts",
-    "**/*.tsx",
-    ".expo/types/**/*.ts",
-    "expo-env.d.ts"
+    "**/*.tsx"
   ]
 }

@@ -8,11 +8,12 @@ const extra = (Constants.expoConfig?.extra ?? {}) as {
 };
 
 const baseUrl = extra.apiBaseUrl ?? 'http://localhost:4000/api/v1';
+
 /**
- * Dev-only escape hatch: F1 (phone-OTP sign-in) has not landed yet, so the
- * query hooks below need *some* bearer token to hit the guarded routes. When
- * F1 ships, real tokens live in SecureStore under `sft.auth.bearer` and this
- * field goes back to null.
+ * F1 shipped: tokens now come from SecureStore (backed by the platform
+ * keychain), minted by POST /auth/verify. `devBearerToken` remains as an
+ * emergency dev override — if it's set in app.json.extra, it takes over
+ * *only* when no real session token is present.
  */
 const devToken = extra.devBearerToken ?? null;
 
@@ -20,6 +21,7 @@ export const api = createApiClient({
   baseUrl,
   getToken: async () => (await secureStorage.getToken()) ?? devToken,
   onUnauthorized: () => {
-    // Session invalidation is wired in F1 once the auth store lands.
+    // AuthProvider.refreshMe handles the local state transition when a
+    // guarded call returns 401; nothing to do here.
   },
 });

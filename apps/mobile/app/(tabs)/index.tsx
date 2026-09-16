@@ -9,16 +9,23 @@ import { DuesCard } from '../../src/components/DuesCard';
 import { StatTile } from '../../src/components/StatTile';
 import { RequestRow } from '../../src/components/RequestRow';
 import { useTheme } from '../../src/theme/ThemeProvider';
+import { useAuth } from '../../src/auth/AuthProvider';
 
 /**
- * Home. Backed by `GET /me/home` (FRONTEND_PLAN §3.2) once F1 lands the
- * auth handshake. For now, static preview data so the design system is
- * visible end-to-end — the same aggregate shape is used, so wiring it up
- * later is a hook swap, not a rewrite.
+ * Home. Backed by `GET /me/home` (FRONTEND_PLAN §3.2) once the aggregate
+ * endpoint ships. Until then, greeting comes from the live /me identity
+ * (F1) and the dues + stats + joinable-request cards render preview data
+ * shaped like the aggregate will be.
  */
+function greeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
 const preview = {
   flat: { label: 'A-1204', society: 'Willow Grove' },
-  greeting: 'Good morning, Priya',
   amountMinor: 1245000,
   captions: ['Maintenance', 'Water', 'Group buy'],
   dueOn: '25 Sep',
@@ -37,6 +44,9 @@ const preview = {
 export default function HomeScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const { me } = useAuth();
+
+  const firstName = me?.name?.trim().split(/\s+/)[0];
 
   return (
     <Screen>
@@ -45,7 +55,7 @@ export default function HomeScreen() {
           {preview.flat.society} · {preview.flat.label}
         </Text>
         <Text variant="display" weight="semibold" style={{ marginTop: 4 }}>
-          {preview.greeting}
+          {greeting()}{firstName ? `, ${firstName}` : ''}
         </Text>
       </View>
 
