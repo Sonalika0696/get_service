@@ -18,15 +18,25 @@ export type PollDetail = PollModel & {
   hasJoined: boolean;
 };
 
-const JOINABLE_TYPES = new Set<PollType>([PollType.EVENT, PollType.BULK_BUY_RESIDENT]);
+// BULK_BUY_RESIDENT deliberately excluded: create()/join() both reject it
+// outright (see the ownership-split doc comment above) before ever
+// consulting this set, so it only ever needs to describe EVENT here.
+const JOINABLE_TYPES = new Set<PollType>([PollType.EVENT]);
 const OWNER_ROLES = new Set<OccupancyRole>([OccupancyRole.OWNER_OCCUPIER, OccupancyRole.OWNER_ABSENTEE]);
 
 type VoterOccupancy = { role: OccupancyRole; flat: { ownershipShare: Prisma.Decimal } };
 
 /**
- * Reusable poll engine (Phase 3: event polls, no money). Phase 5 extends
- * this for bulk-buy Flow B (PollType.BULK_BUY_RESIDENT) rather than
- * duplicating it — keep eligibility/weighting/tally logic here general.
+ * Reusable poll engine (Phase 3: event polls, no money). Phase 5 reuses the
+ * shared Poll/PollCommitment tables for bulk-buy Flow B
+ * (PollType.BULK_BUY_RESIDENT), but OWNS that pollType's entire lifecycle
+ * from the bulk-buy module instead — see
+ * src/modules/bulk-buy/bulk-buy.service.ts's Flow B section
+ * (createResidentPoll/vendorConfirm/vendorDecline/joinResidentPoll). This
+ * module stays governance/event only: create/vote/join all reject
+ * BULK_BUY_RESIDENT with 400, pointing callers at the bulk-buy routes
+ * instead. GET (list/get) still work for any pollType, including
+ * BULK_BUY_RESIDENT, since read access has no ownership implications.
  *
  * GET routes are read-only by design: they report a poll's *current*
  * persisted status plus a live tally computed on the fly. Nothing here
@@ -34,6 +44,9 @@ type VoterOccupancy = { role: OccupancyRole; flat: { ownershipShare: Prisma.Deci
  * ever applied by processExpired(), which today is invoked by
  * POST /polls/process-expired (committee-only) as a stand-in for a future
  * scheduler (@nestjs/schedule was deliberately not added in this phase).
+ * processExpired still applies to BULK_BUY_RESIDENT polls (an unconfirmed
+ * or under-subscribed tagged-vendor poll should still expire), since that's
+ * generic EVENT-shaped lifecycle logic, not Flow B ownership.
  */
 @Injectable()
 export class PollsService {
@@ -44,6 +57,9 @@ export class PollsService {
   ) {}
 
   async create(societyId: string, creatorId: string, callerRoleKinds: RoleKind[], dto: CreatePollDto): Promise<PollDetail> {
+    if (dto.pollType === PollType.BULK_BUY_RESIDENT) {
+      throw new BadRequestException('Create resident bulk-buy polls via POST /bulk-buy/polls');
+    }
     if (dto.pollType === PollType.BINDING && !callerRoleKinds.includes(RoleKind.COMMITTEE)) {
       throw new ForbiddenException('Only committee members can create binding polls');
     }
@@ -96,6 +112,9 @@ export class PollsService {
    */
   async vote(societyId: string, id: string, callerId: string, dto: VotePollDto): Promise<PollDetail> {
     const poll = await this.getInternal(societyId, id);
+    if (poll.pollType === PollType.BULK_BUY_RESIDENT) {
+      throw new BadRequestException('BULK_BUY_RESIDENT polls are owned by the bulk-buy module — use POST /bulk-buy/polls/:id/join instead of voting');
+    }
     if (poll.status !== PollStatus.OPEN) {
       throw new BadRequestException('Poll is not open for voting');
     }
@@ -128,6 +147,9 @@ export class PollsService {
    */
   async join(societyId: string, id: string, callerId: string): Promise<PollDetail> {
     const poll = await this.getInternal(societyId, id);
+    if (poll.pollType === PollType.BULK_BUY_RESIDENT) {
+      throw new BadRequestException('BULK_BUY_RESIDENT polls are owned by the bulk-buy module — use POST /bulk-buy/polls/:id/join instead');
+    }
     if (!JOINABLE_TYPES.has(poll.pollType)) {
       throw new BadRequestException(`${poll.pollType} polls don't support joining — use vote instead`);
     }

@@ -43,4 +43,19 @@ export class OffersController {
   async commit(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string): Promise<OfferDetail> {
     return this.bulkBuy.commit(currentUser.societyId, id, currentUser.id);
   }
+
+  /**
+   * Phase 5: "rolls" a WEEKLY-recurring offer whose deadline has passed
+   * into a fresh OPEN offer with deadline +7 days and empty commitments —
+   * see BulkBuyService.rollOffer's doc comment. Stand-in for a scheduler
+   * that doesn't exist yet in v1 (same stance as
+   * PollsService.processExpired).
+   */
+  @Post(':id/roll')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(RoleKind.COMMITTEE)
+  @AuditLog('OFFER_ROLL', 'Offer')
+  async roll(@CurrentUser() currentUser: CurrentUserContext, @Param('id') id: string): Promise<OfferDetail> {
+    return this.bulkBuy.rollOffer(currentUser.societyId, id);
+  }
 }

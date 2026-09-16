@@ -5,11 +5,13 @@ import { RazorpayService } from '../../infra/razorpay/razorpay.service.js';
 import { LedgerService } from '../ledger/ledger.service.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import { Prisma } from '../../generated/prisma/client.js';
-import { AccountKind, BookingStatus, CommitmentStatus, JobCardStatus, JobCardTier, OfferStatus, PayoutAuthKind, PayoutStatus } from '../../generated/prisma/enums.js';
-import type { BookingModel, JobCardModel, MilestoneModel, OfferModel, PayoutModel } from '../../generated/prisma/models.js';
+import { AccountKind, BookingStatus, CommitmentStatus, JobCardStatus, JobCardTier, OfferRecurrence, OfferStatus, PayoutAuthKind, PayoutStatus, PollStatus, PollType } from '../../generated/prisma/enums.js';
+import type { BookingModel, JobCardModel, MilestoneModel, OfferModel, PayoutModel, PollModel } from '../../generated/prisma/models.js';
 import { appliedTier, minCommitmentsOf, nextTierThreshold, validateLadder, type LadderRung } from './discount-ladder.util.js';
 import { validateMilestoneTemplate, type MilestoneTemplateRung } from './milestone-template.util.js';
 import type { CreateOfferDto } from './dto/create-offer.dto.js';
+import type { CreateResidentPollDto } from './dto/create-resident-poll.dto.js';
+import type { VendorConfirmDto } from './dto/vendor-confirm.dto.js';
 
 type Decimal = Prisma.Decimal;
 const Decimal = Prisma.Decimal;
@@ -21,6 +23,14 @@ const DEFAULT_COMMISSION_PCT = 10;
  * both), so sharing the namespace is safe and keeps every money-moving call
  * on a given booking serialized against every other one. */
 const PAYOUT_LOCK_NAMESPACE = 52;
+/** Phase 5 Flow B: serializes vendorConfirm and joinResidentPoll on the SAME
+ * poll against each other (both take this lock, keyed on pollId, as the
+ * FIRST statement in their transaction), so two concurrent callers racing
+ * across the fire threshold can't both observe status=OPEN and both fire —
+ * exactly the double-fire hazard authorisePayout's PAYOUT_LOCK_NAMESPACE
+ * already guards against for payouts. Distinct namespace from 52 since
+ * these lock different entities (a Poll, not a Booking). */
+const RESIDENT_POLL_FIRE_LOCK_NAMESPACE = 53;
 
 /** API-facing shape: the offer row plus a live tier readout. */
 export type OfferDetail = OfferModel & {
@@ -35,6 +45,13 @@ export type BookingDetail = BookingModel & {
   jobCards: JobCardModel[];
   payout: PayoutModel | null;
   milestones: MilestoneModel[];
+};
+
+/** API-facing shape: a Flow B (BULK_BUY_RESIDENT) poll plus a live commitment count, the caller's own join state, and (once fired) the Booking it fired into. */
+export type ResidentPollDetail = PollModel & {
+  commitmentCount: number;
+  hasJoined?: boolean;
+  bookingId: string | null;
 };
 
 /**
@@ -86,6 +103,22 @@ export type BookingDetail = BookingModel & {
  * the EXTERNAL boundary); BULK_BUY's contribution from this booking nets
  * back to zero only once every milestone AND the retention have been
  * released.
+ *
+ * Phase 5 adds Flow B (resident-initiated, tagged-vendor bulk-buy) in the
+ * "Resident polls (Flow B)" section below: a resident opens a
+ * PollType.BULK_BUY_RESIDENT poll (reusing the Phase 3 Poll/PollCommitment
+ * tables, but owned end-to-end by this module — see PollsService's own doc
+ * comment for the ownership split), a COMMITTEE member confirms terms on the
+ * vendor's behalf, and once enough residents join, Flow B fires down the
+ * EXACT SAME booking/escrow path as Flow A: fireOffer and Flow B's
+ * fireResidentPoll both delegate to createBookingWithEscrow, a private
+ * helper extracted from what used to be fireOffer's own inline booking/
+ * job-card/escrow-creation logic. Everything downstream of firing (pay via
+ * webhook, sign off, authorisePayout) is untouched Flow A code — Flow B
+ * booking rows are indistinguishable from Flow A ones except for
+ * sourceType='POLL' instead of 'OFFER'. Flow B is SMALL-tier only in v1
+ * (documented at fireResidentPoll — no LARGE-via-poll milestone/retention
+ * support yet). Phase 5 also adds weekly-recurring Offers (rollOffer).
  */
 @Injectable()
 export class BulkBuyService {
@@ -155,6 +188,7 @@ export class BulkBuyService {
         tier,
         retentionPct,
         retentionDays,
+        recurring: dto.recurring ?? OfferRecurrence.NONE,
         ...(milestoneTemplate ? { milestoneTemplate: milestoneTemplate as unknown as Prisma.InputJsonValue } : {}),
       },
     });
@@ -229,25 +263,11 @@ export class BulkBuyService {
   }
 
   /**
-   * Fires the offer: snapshots the ladder tier, creates one Booking and one
-   * JobCard per existing Commitment (there may be more than the one that
-   * just tipped commitmentCount over minCommitments, if earlier commits
-   * came in first), and creates one escrow-in Payment per commitment via
-   * PaymentsService.createOrderForLink — all inside the caller's own
-   * transaction (`tx`), so a crash partway through leaves nothing
-   * half-fired. Razorpay's createOrder is called from inside this tx too;
-   * that's safe because in stub mode (the only mode this project ever runs
-   * with real money at stake — see RAZORPAY_ENABLED) it's a synchronous,
-   * offline, in-memory computation with no network round trip.
-   *
-   * Phase 4D: when the offer is LARGE, the Booking and every JobCard it
-   * creates snapshot tier=LARGE too, one Milestone row per
-   * offer.milestoneTemplate entry is created (all PENDING, sequence 1..n),
-   * and Booking.retentionReleaseAt is set from offer.retentionDays (null if
-   * the offer set no defect-liability period). retentionAmount stays 0 and
-   * commissionTaken stays false until the first milestone is authorised —
-   * see authoriseMilestone, which mirrors SMALL's "compute commission at
-   * payout time" choice rather than snapshotting it here.
+   * Fires the offer: snapshots the ladder tier, then delegates the actual
+   * Booking/JobCard/escrow creation to createBookingWithEscrow (shared with
+   * Flow B's fireResidentPoll — see that method and this class's doc
+   * comment). All inside the caller's own transaction (`tx`), so a crash
+   * partway through leaves nothing half-fired.
    */
   private async fireOffer(tx: Prisma.TransactionClient, offer: OfferModel, commitmentCount: number): Promise<void> {
     const ladder = offer.discountLadder as unknown as LadderRung[];
@@ -258,29 +278,87 @@ export class BulkBuyService {
       throw new BadRequestException('No discount tier resolves for this commitment count');
     }
 
-    const firedAt = this.clock.now();
     await tx.offer.update({
       where: { id: offer.id },
-      data: { status: OfferStatus.FIRED, firedAt, appliedDiscountPct: pct },
+      data: { status: OfferStatus.FIRED, firedAt: this.clock.now(), appliedDiscountPct: pct },
     });
 
-    const isLarge = offer.tier === JobCardTier.LARGE;
-    const retentionReleaseAt = isLarge && offer.retentionDays != null ? new Date(firedAt.getTime() + offer.retentionDays * 24 * 60 * 60 * 1000) : null;
+    const commitments = await tx.commitment.findMany({ where: { offerId: offer.id } });
+    const discountedUnitPrice = new Decimal(offer.unitPrice).mul(new Decimal(100).minus(pct)).div(100).toDecimalPlaces(2);
+    const milestoneTemplate = offer.tier === JobCardTier.LARGE ? (offer.milestoneTemplate as unknown as MilestoneTemplateRung[]) : null;
+
+    await this.createBookingWithEscrow(tx, {
+      societyId: offer.societyId,
+      vendorId: offer.vendorId,
+      sourceType: 'OFFER',
+      sourceId: offer.id,
+      tier: offer.tier,
+      milestoneTemplate,
+      retentionDays: offer.retentionDays,
+      discountedUnitPrice,
+      appliedDiscountPct: pct,
+      scope: offer.title,
+      idempotencyPrefix: `offer:${offer.id}`,
+      participants: commitments.map((c) => ({ commitmentId: c.id, residentId: c.residentId, flatId: c.flatId })),
+    });
+  }
+
+  /**
+   * Shared by fireOffer (Flow A) and fireResidentPoll (Flow B, Phase 5) —
+   * extracted from what used to be fireOffer's own inline logic so both
+   * flows fire down the exact same path. Creates one Booking (sourceType/
+   * sourceId identify which flow/entity fired it — a loose pointer, same
+   * pattern as LedgerEntry.linkedEntityType, so this stays flow-agnostic),
+   * one JobCard per participant (unitPrice=discountedUnitPrice,
+   * appliedDiscountPct snapshotted, tier), and one escrow-in Payment per
+   * participant via PaymentsService.createOrderForLink, linked to that
+   * participant's Commitment (Commitment.paymentId is set here). For LARGE
+   * (Flow A only — Flow B is SMALL-only, see fireResidentPoll) this also
+   * creates one Milestone row per milestoneTemplate entry (all PENDING,
+   * sequence 1..n) and sets Booking.retentionReleaseAt from retentionDays
+   * (null if none). Razorpay's createOrder is called from inside this tx
+   * too; that's safe because in stub mode (the only mode this project ever
+   * runs with real money at stake — see RAZORPAY_ENABLED) it's a
+   * synchronous, offline, in-memory computation with no network round trip.
+   * Returns the created Booking.
+   */
+  private async createBookingWithEscrow(
+    tx: Prisma.TransactionClient,
+    input: {
+      societyId: string;
+      vendorId: string;
+      sourceType: string;
+      sourceId: string;
+      tier: JobCardTier;
+      milestoneTemplate: MilestoneTemplateRung[] | null;
+      retentionDays: number | null;
+      discountedUnitPrice: Decimal;
+      appliedDiscountPct: number;
+      /** Booking-level label used as every JobCard's `scope` and the escrow Payment's `purpose` (an Offer's title, or a Poll's title). */
+      scope: string;
+      /** Prefix for each participant's PaymentsService idempotency key — `${prefix}:commit:${commitmentId}`. */
+      idempotencyPrefix: string;
+      participants: { commitmentId: string; residentId: string; flatId: string }[];
+    },
+  ): Promise<BookingModel> {
+    const firedAt = this.clock.now();
+    const isLarge = input.tier === JobCardTier.LARGE;
+    const retentionReleaseAt = isLarge && input.retentionDays != null ? new Date(firedAt.getTime() + input.retentionDays * 24 * 60 * 60 * 1000) : null;
 
     const booking = await tx.booking.create({
       data: {
-        societyId: offer.societyId,
-        vendorId: offer.vendorId,
-        sourceType: 'OFFER',
-        sourceId: offer.id,
+        societyId: input.societyId,
+        vendorId: input.vendorId,
+        sourceType: input.sourceType,
+        sourceId: input.sourceId,
         status: BookingStatus.ACTIVE,
-        tier: offer.tier,
+        tier: input.tier,
         retentionReleaseAt,
       },
     });
 
     if (isLarge) {
-      const template = offer.milestoneTemplate as unknown as MilestoneTemplateRung[];
+      const template = input.milestoneTemplate ?? [];
       for (let i = 0; i < template.length; i++) {
         await tx.milestone.create({
           data: { bookingId: booking.id, sequence: i + 1, name: template[i].name, pct: template[i].pct, status: PayoutStatus.PENDING },
@@ -288,40 +366,39 @@ export class BulkBuyService {
       }
     }
 
-    const commitments = await tx.commitment.findMany({ where: { offerId: offer.id } });
-    const discountedUnitPrice = new Decimal(offer.unitPrice).mul(new Decimal(100).minus(pct)).div(100).toDecimalPlaces(2);
-
-    for (const commitment of commitments) {
+    for (const participant of input.participants) {
       const jobCard = await tx.jobCard.create({
         data: {
           bookingId: booking.id,
-          commitmentId: commitment.id,
-          residentId: commitment.residentId,
-          flatId: commitment.flatId,
-          scope: offer.title,
-          unitPrice: discountedUnitPrice,
-          appliedDiscountPct: pct,
+          commitmentId: participant.commitmentId,
+          residentId: participant.residentId,
+          flatId: participant.flatId,
+          scope: input.scope,
+          unitPrice: input.discountedUnitPrice,
+          appliedDiscountPct: input.appliedDiscountPct,
           status: JobCardStatus.PENDING,
-          tier: offer.tier,
+          tier: input.tier,
         },
       });
 
       const payment = await this.payments.createOrderForLink(
         {
-          societyId: offer.societyId,
-          residentId: commitment.residentId,
-          amount: discountedUnitPrice,
-          purpose: `Bulk-buy: ${offer.title}`,
+          societyId: input.societyId,
+          residentId: participant.residentId,
+          amount: input.discountedUnitPrice,
+          purpose: `Bulk-buy: ${input.scope}`,
           linkedEntityType: 'Commitment',
-          linkedEntityId: commitment.id,
-          idempotencyKey: `offer:${offer.id}:commit:${commitment.id}`,
+          linkedEntityId: participant.commitmentId,
+          idempotencyKey: `${input.idempotencyPrefix}:commit:${participant.commitmentId}`,
         },
         tx,
       );
 
-      await tx.commitment.update({ where: { id: commitment.id }, data: { paymentId: payment.id } });
+      await tx.commitment.update({ where: { id: participant.commitmentId }, data: { paymentId: payment.id } });
       void jobCard; // created for its side effect; not otherwise needed here
     }
+
+    return booking;
   }
 
   // -------------------------------------------------------------------
@@ -772,6 +849,345 @@ export class BulkBuyService {
   }
 
   // -------------------------------------------------------------------
+  // Resident polls (Flow B) — Phase 5
+  // -------------------------------------------------------------------
+
+  /**
+   * Resident opens a Flow B poll: a PollType.BULK_BUY_RESIDENT row (the
+   * shared Phase 3 Poll table, owned end-to-end by this module — see
+   * PollsService's own doc comment for the ownership split) tagging an
+   * existing Vendor in the caller's own society. `proposedMinimum` becomes
+   * Poll.minCommitments until (and unless) the vendor confirms a different
+   * figure via vendorConfirm. Nothing fires here — the poll starts OPEN
+   * with no vendor response yet.
+   */
+  async createResidentPoll(societyId: string, creatorId: string, dto: CreateResidentPollDto): Promise<ResidentPollDetail> {
+    const vendor = await this.prisma.vendor.findUnique({ where: { id: dto.taggedVendorId } });
+    if (!vendor || vendor.societyId !== societyId) {
+      throw new NotFoundException('Vendor not found');
+    }
+
+    const closesAt = new Date(dto.closesAt);
+    if (Number.isNaN(closesAt.getTime()) || closesAt.getTime() <= this.clock.now().getTime()) {
+      throw new BadRequestException('closesAt must be a valid date in the future');
+    }
+
+    const poll = await this.prisma.poll.create({
+      data: {
+        societyId,
+        creatorId,
+        pollType: PollType.BULK_BUY_RESIDENT,
+        title: dto.title,
+        description: dto.description,
+        category: dto.category,
+        minCommitments: dto.proposedMinimum,
+        closesAt,
+        status: PollStatus.OPEN,
+        taggedVendorId: dto.taggedVendorId,
+      },
+    });
+
+    return this.toResidentPollDetail(poll, creatorId);
+  }
+
+  async listResidentPolls(societyId: string, callerId: string): Promise<ResidentPollDetail[]> {
+    const polls = await this.prisma.poll.findMany({
+      where: { societyId, pollType: PollType.BULK_BUY_RESIDENT },
+      orderBy: { createdAt: 'desc' },
+    });
+    return Promise.all(polls.map((poll) => this.toResidentPollDetail(poll, callerId)));
+  }
+
+  async getResidentPoll(societyId: string, id: string, callerId: string): Promise<ResidentPollDetail> {
+    const poll = await this.getResidentPollInternal(societyId, id);
+    return this.toResidentPollDetail(poll, callerId);
+  }
+
+  /**
+   * A COMMITTEE member, acting for the tagged vendor (no vendor login in
+   * v1 — same stance as CreateOfferDto/createOffer), confirms the terms
+   * Flow B fires under: a minimum headcount (replacing the resident's
+   * proposedMinimum outright), a unit price, and an optional discount
+   * ladder (validated exactly like Offer.discountLadder). Guards: the poll
+   * is BULK_BUY_RESIDENT, still OPEN, and hasn't already been confirmed or
+   * declined (one vendor response per poll, whichever comes first).
+   *
+   * If the commitment count already meets confirmedMinimum (residents piled
+   * in before the vendor responded), this fires the poll immediately, in
+   * the SAME transaction as the confirmation — mirroring
+   * PollsService.join's synchronous auto-fire pattern (re-checking status
+   * inside the tx right before firing, so a poll can never be fired twice).
+   */
+  async vendorConfirm(societyId: string, pollId: string, dto: VendorConfirmDto): Promise<ResidentPollDetail> {
+    const ladderError = dto.discountLadder ? validateLadder(dto.discountLadder) : null;
+    if (ladderError) {
+      throw new BadRequestException(ladderError);
+    }
+    const ladder: LadderRung[] | null = dto.discountLadder ? dto.discountLadder.map((rung) => ({ minN: rung.minN, pct: rung.pct })) : null;
+
+    return this.prisma.$transaction(async (tx) => {
+      // Serializes against joinResidentPoll on the SAME poll (same
+      // namespace+key) — see RESIDENT_POLL_FIRE_LOCK_NAMESPACE's doc
+      // comment. Must be the first statement, before any read.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${RESIDENT_POLL_FIRE_LOCK_NAMESPACE}, hashtext(${pollId}))`;
+
+      const poll = await tx.poll.findUnique({ where: { id: pollId } });
+      if (!poll || poll.societyId !== societyId) {
+        throw new NotFoundException('Poll not found');
+      }
+      if (poll.pollType !== PollType.BULK_BUY_RESIDENT) {
+        throw new BadRequestException('Not a resident bulk-buy poll');
+      }
+      if (poll.status !== PollStatus.OPEN) {
+        throw new BadRequestException(`Poll is not open (status=${poll.status})`);
+      }
+      if (poll.vendorConfirmedAt || poll.vendorDeclinedAt) {
+        throw new BadRequestException('The vendor has already responded to this poll');
+      }
+
+      const updated = await tx.poll.update({
+        where: { id: pollId },
+        data: {
+          vendorConfirmedAt: this.clock.now(),
+          vendorConfirmedMinimum: dto.confirmedMinimum,
+          vendorUnitPrice: dto.unitPrice,
+          minCommitments: dto.confirmedMinimum,
+          ...(ladder ? { vendorDiscountLadder: ladder as unknown as Prisma.InputJsonValue } : {}),
+        },
+      });
+
+      const commitmentCount = await tx.pollCommitment.count({ where: { pollId } });
+      if (commitmentCount >= dto.confirmedMinimum) {
+        // Re-check status inside the tx (mirrors fireOffer's caller,
+        // BulkBuyService.commit): guards against firing twice.
+        const stillOpen = await tx.poll.findUnique({ where: { id: pollId }, select: { status: true } });
+        if (stillOpen?.status === PollStatus.OPEN) {
+          await this.fireResidentPoll(tx, updated, commitmentCount);
+        }
+      }
+
+      const finalPoll = await tx.poll.findUniqueOrThrow({ where: { id: pollId } });
+      return this.loadResidentPollDetail(tx, finalPoll, null);
+    });
+  }
+
+  /** Vendor declines (via a COMMITTEE member) — poll is CANCELLED outright; no fire, ever, for this poll. */
+  async vendorDecline(societyId: string, pollId: string): Promise<ResidentPollDetail> {
+    return this.prisma.$transaction(async (tx) => {
+      const poll = await tx.poll.findUnique({ where: { id: pollId } });
+      if (!poll || poll.societyId !== societyId) {
+        throw new NotFoundException('Poll not found');
+      }
+      if (poll.pollType !== PollType.BULK_BUY_RESIDENT) {
+        throw new BadRequestException('Not a resident bulk-buy poll');
+      }
+      if (poll.status !== PollStatus.OPEN) {
+        throw new BadRequestException(`Poll is not open (status=${poll.status})`);
+      }
+      if (poll.vendorConfirmedAt || poll.vendorDeclinedAt) {
+        throw new BadRequestException('The vendor has already responded to this poll');
+      }
+
+      const now = this.clock.now();
+      const updated = await tx.poll.update({
+        where: { id: pollId },
+        data: { vendorDeclinedAt: now, status: PollStatus.CANCELLED, closedAt: now },
+      });
+
+      return this.loadResidentPollDetail(tx, updated, null);
+    });
+  }
+
+  /**
+   * Resident registers interest (mirrors PollsService.join's shape exactly,
+   * but against PollType.BULK_BUY_RESIDENT specifically, and with a
+   * vendor-confirmation-aware fire condition instead of EVENT's plain
+   * commitmentCount >= minCommitments). 409 on double-join (the shared
+   * PollCommitment [pollId, residentId] unique constraint); 400 if the poll
+   * isn't OPEN (covers "declined" — vendorDecline sets status CANCELLED —
+   * and "already fired") or its closesAt has passed.
+   *
+   * After recording the join, fires in the SAME transaction iff: the vendor
+   * has confirmed (vendorConfirmedAt set), the commitment count has reached
+   * vendorConfirmedMinimum, and closesAt hasn't passed — re-checked fresh
+   * inside the tx (not off the pre-join snapshot) so a race with
+   * vendorConfirm/vendorDecline can't double-fire or fire a declined poll.
+   */
+  async joinResidentPoll(societyId: string, pollId: string, residentId: string): Promise<ResidentPollDetail> {
+    const poll = await this.getResidentPollInternal(societyId, pollId);
+    if (poll.status !== PollStatus.OPEN) {
+      throw new BadRequestException(`Poll is not open for joining (status=${poll.status})`);
+    }
+    if (poll.closesAt.getTime() <= this.clock.now().getTime()) {
+      throw new BadRequestException('Poll closesAt has passed');
+    }
+
+    const occupancy = await this.prisma.occupancy.findFirst({
+      where: { userId: residentId, tenureEndedAt: null, flat: { societyId } },
+      select: { flatId: true },
+    });
+    if (!occupancy) {
+      throw new ForbiddenException('Not a resident of this society');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      // Serializes against vendorConfirm (and other concurrent joins) on the
+      // SAME poll (same namespace+key) — see
+      // RESIDENT_POLL_FIRE_LOCK_NAMESPACE's doc comment. Must be the first
+      // statement, before any read, so two different residents racing
+      // across the fire threshold can't both observe status=OPEN and both
+      // fire (the [pollId, residentId] unique constraint below only stops
+      // the SAME resident joining twice, not two different residents
+      // racing past minCommitments together).
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${RESIDENT_POLL_FIRE_LOCK_NAMESPACE}, hashtext(${pollId}))`;
+
+      try {
+        await tx.pollCommitment.create({ data: { pollId, residentId } });
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+          throw new ConflictException('Already joined');
+        }
+        throw error;
+      }
+
+      const commitmentCount = await tx.pollCommitment.count({ where: { pollId } });
+      const current = await tx.poll.findUnique({ where: { id: pollId } });
+      const now = this.clock.now().getTime();
+      if (
+        current &&
+        current.status === PollStatus.OPEN &&
+        current.vendorConfirmedAt &&
+        current.vendorConfirmedMinimum !== null &&
+        commitmentCount >= current.vendorConfirmedMinimum &&
+        now < current.closesAt.getTime()
+      ) {
+        await this.fireResidentPoll(tx, current, commitmentCount);
+      }
+    });
+
+    return this.getResidentPoll(societyId, pollId, residentId);
+  }
+
+  /**
+   * Fires a Flow B poll: sets status FIRED (+firedAt); resolves each
+   * PollCommitment's resident to their active Occupancy in this society
+   * (skipped — shouldn't happen — if a resident who joined has since lost
+   * their occupancy here); creates one Commitment per resolved participant
+   * with pollId set (offerId null, per Commitment's "exactly one of
+   * offerId/pollId" invariant) and status PENDING; computes
+   * appliedDiscountPct from the vendor's confirmed discountLadder via
+   * appliedTier (0 if the vendor set no ladder); computes
+   * discountedUnitPrice from vendorUnitPrice; then delegates to
+   * createBookingWithEscrow — the SAME helper fireOffer uses — with
+   * tier=SMALL (Flow B is SMALL-only in v1; a LARGE-via-poll
+   * milestone/retention variant is out of scope for this phase),
+   * sourceType='POLL', sourceId=this poll's id, vendorId=taggedVendorId.
+   * Downstream (pay via webhook, sign off, authorisePayout) is the
+   * unmodified Flow A booking/payout code — it can't tell a POLL-sourced
+   * booking from an OFFER-sourced one.
+   */
+  private async fireResidentPoll(tx: Prisma.TransactionClient, poll: PollModel, commitmentCount: number): Promise<void> {
+    const ladder = poll.vendorDiscountLadder as unknown as LadderRung[] | null;
+    const pct = ladder ? (appliedTier(ladder, commitmentCount) ?? 0) : 0;
+
+    await tx.poll.update({ where: { id: poll.id }, data: { status: PollStatus.FIRED, firedAt: this.clock.now() } });
+
+    const pollCommitments = await tx.pollCommitment.findMany({ where: { pollId: poll.id }, orderBy: { createdAt: 'asc' } });
+    const discountedUnitPrice = new Decimal(poll.vendorUnitPrice ?? 0)
+      .mul(new Decimal(100).minus(pct))
+      .div(100)
+      .toDecimalPlaces(2);
+
+    const participants: { commitmentId: string; residentId: string; flatId: string }[] = [];
+    for (const pollCommitment of pollCommitments) {
+      const occupancy = await tx.occupancy.findFirst({
+        where: { userId: pollCommitment.residentId, tenureEndedAt: null, flat: { societyId: poll.societyId } },
+        select: { flatId: true },
+      });
+      if (!occupancy) {
+        // Shouldn't happen (see this method's doc comment) — skip rather
+        // than blocking the whole poll from firing for everyone else.
+        continue;
+      }
+
+      const commitment = await tx.commitment.create({
+        data: { pollId: poll.id, residentId: pollCommitment.residentId, flatId: occupancy.flatId, status: CommitmentStatus.PENDING },
+      });
+      participants.push({ commitmentId: commitment.id, residentId: pollCommitment.residentId, flatId: occupancy.flatId });
+    }
+
+    await this.createBookingWithEscrow(tx, {
+      societyId: poll.societyId,
+      vendorId: poll.taggedVendorId!,
+      sourceType: 'POLL',
+      sourceId: poll.id,
+      tier: JobCardTier.SMALL,
+      milestoneTemplate: null,
+      retentionDays: null,
+      discountedUnitPrice,
+      appliedDiscountPct: pct,
+      scope: poll.title,
+      idempotencyPrefix: `poll:${poll.id}`,
+      participants,
+    });
+  }
+
+  // -------------------------------------------------------------------
+  // Weekly-recurring offers — Phase 5
+  // -------------------------------------------------------------------
+
+  /**
+   * "Rolls" a WEEKLY-recurring Offer whose deadline has passed into a fresh
+   * OPEN offer cloned from it (same vendor/category/title/description/
+   * unitPrice/discountLadder/tier/milestoneTemplate/retentionPct/
+   * retentionDays/recurring), deadline = the just-expired offer's deadline
+   * + 7 days (anchored to the original schedule rather than to Clock.now(),
+   * so a late roll call doesn't drift the weekly cadence), and empty
+   * commitments. The rolled-from offer is left as-is if it's already
+   * FIRED/CANCELLED; if still OPEN (deadline passed but nobody ever called
+   * this), it's flipped to EXPIRED so it stops accepting commits. v1 has no
+   * scheduler (@nestjs/schedule wasn't added — same stance as
+   * PollsService.processExpired) — a periodic job would call this
+   * automatically; for now it's a committee-triggered endpoint.
+   */
+  async rollOffer(societyId: string, offerId: string): Promise<OfferDetail> {
+    const offer = await this.getOfferInternal(societyId, offerId);
+    if (offer.recurring !== OfferRecurrence.WEEKLY) {
+      throw new BadRequestException('Only a WEEKLY-recurring offer can be rolled');
+    }
+    if (offer.deadline.getTime() > this.clock.now().getTime()) {
+      throw new BadRequestException("This offer's deadline has not passed yet");
+    }
+
+    const rolled = await this.prisma.$transaction(async (tx) => {
+      if (offer.status === OfferStatus.OPEN) {
+        await tx.offer.update({ where: { id: offer.id }, data: { status: OfferStatus.EXPIRED } });
+      }
+
+      return tx.offer.create({
+        data: {
+          societyId: offer.societyId,
+          vendorId: offer.vendorId,
+          category: offer.category,
+          title: offer.title,
+          description: offer.description,
+          unitPrice: offer.unitPrice,
+          discountLadder: offer.discountLadder as unknown as Prisma.InputJsonValue,
+          minCommitments: offer.minCommitments,
+          deadline: new Date(offer.deadline.getTime() + 7 * 24 * 60 * 60 * 1000),
+          tier: offer.tier,
+          retentionPct: offer.retentionPct,
+          retentionDays: offer.retentionDays,
+          recurring: offer.recurring,
+          ...(offer.milestoneTemplate !== null ? { milestoneTemplate: offer.milestoneTemplate as unknown as Prisma.InputJsonValue } : {}),
+        },
+      });
+    });
+
+    return this.toOfferDetail(rolled, null);
+  }
+
+  // -------------------------------------------------------------------
   // Internal helpers
   // -------------------------------------------------------------------
 
@@ -816,5 +1232,33 @@ export class BulkBuyService {
   private toBookingDetail(booking: BookingModel & { jobCards: JobCardModel[] }, payout: PayoutModel | null, milestones: MilestoneModel[]): BookingDetail {
     const { jobCards, ...rest } = booking as BookingModel & { jobCards: JobCardModel[] };
     return { ...rest, jobCards, payout, milestones: [...milestones].sort((a, b) => a.sequence - b.sequence) };
+  }
+
+  private async getResidentPollInternal(societyId: string, id: string): Promise<PollModel> {
+    const poll = await this.prisma.poll.findUnique({ where: { id } });
+    if (!poll || poll.societyId !== societyId || poll.pollType !== PollType.BULK_BUY_RESIDENT) {
+      throw new NotFoundException('Poll not found');
+    }
+    return poll;
+  }
+
+  private async toResidentPollDetail(poll: PollModel, callerId: string | null): Promise<ResidentPollDetail> {
+    return this.loadResidentPollDetail(this.prisma, poll, callerId);
+  }
+
+  /** Shared by every Flow B read path (create/list/get/vendorConfirm/vendorDecline/join), including from inside a transaction client. */
+  private async loadResidentPollDetail(client: PrismaService | Prisma.TransactionClient, poll: PollModel, callerId: string | null): Promise<ResidentPollDetail> {
+    const [commitmentCount, hasJoined, booking] = await Promise.all([
+      client.pollCommitment.count({ where: { pollId: poll.id } }),
+      callerId ? client.pollCommitment.findUnique({ where: { pollId_residentId: { pollId: poll.id, residentId: callerId } } }).then(Boolean) : Promise.resolve(undefined),
+      poll.status === PollStatus.FIRED ? client.booking.findFirst({ where: { sourceType: 'POLL', sourceId: poll.id } }) : Promise.resolve(null),
+    ]);
+
+    return {
+      ...poll,
+      commitmentCount,
+      ...(callerId ? { hasJoined } : {}),
+      bookingId: booking?.id ?? null,
+    };
   }
 }

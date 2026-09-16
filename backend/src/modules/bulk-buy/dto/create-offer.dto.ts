@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import { ArrayMinSize, IsArray, IsEnum, IsISO8601, IsInt, IsNumber, IsOptional, IsPositive, IsString, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
-import { JobCardTier } from '../../../generated/prisma/enums.js';
+import { JobCardTier, OfferRecurrence } from '../../../generated/prisma/enums.js';
 
 export class DiscountLadderRungDto {
   @IsNumber()
@@ -105,4 +105,9 @@ export class CreateOfferDto {
   @IsInt()
   @Min(0)
   retentionDays?: number;
+
+  /** Phase 5: defaults to NONE (no recurrence) when omitted. WEEKLY offers can later be "rolled" via POST /offers/:id/roll — see BulkBuyService.rollOffer. */
+  @IsOptional()
+  @IsEnum(OfferRecurrence)
+  recurring?: OfferRecurrence;
 }

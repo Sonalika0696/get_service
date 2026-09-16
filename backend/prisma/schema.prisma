@@ -32,8 +32,8 @@ model User {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  occupancies          Occupancy[]    @relation("OccupancyResident")
-  delegatedOccupancies Occupancy[]    @relation("OccupancyDelegate")
+  occupancies          Occupancy[]           @relation("OccupancyResident")
+  delegatedOccupancies Occupancy[]           @relation("OccupancyDelegate")
   roles                Role[]
   sessions             Session[]
   otps                 Otp[]
@@ -88,18 +88,18 @@ model Otp {
 }
 
 model Society {
-  id        String   @id @default(cuid())
-  name      String
-  address   String
-  latitude  Float?
-  longitude Float?
+  id            String   @id @default(cuid())
+  name          String
+  address       String
+  latitude      Float?
+  longitude     Float?
   /// Society-level feature/config toggles (e.g. job-post rate limit).
-  config    Json     @default("{}")
+  config        Json     @default("{}")
   /// Cached tail hash of this society's AuditLog chain — see AuditService.
   /// Null means the chain hasn't been written to yet (genesis pending).
   auditTailHash Bytes?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   flats         Flat[]
   roles         Role[]
@@ -127,8 +127,8 @@ model Flat {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  society     Society     @relation(fields: [societyId], references: [id], onDelete: Cascade)
-  occupancies Occupancy[]
+  society            Society      @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  occupancies        Occupancy[]
   bulkBuyCommitments Commitment[]
   jobCards           JobCard[]
 
@@ -148,18 +148,18 @@ enum OccupancyRole {
 }
 
 model Occupancy {
-  id              String        @id @default(cuid())
-  flatId          String
-  userId          String
-  role            OccupancyRole
+  id                String        @id @default(cuid())
+  flatId            String
+  userId            String
+  role              OccupancyRole
   /// Only meaningful when role = OWNER_ABSENTEE: the tenant this owner has
   /// delegated operational rights to. Enforced at the application layer —
   /// see job-blog / bulk-buy guards, not a DB constraint.
   delegatedToUserId String?
-  tenureStartedAt DateTime      @default(now())
-  tenureEndedAt   DateTime?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  tenureStartedAt   DateTime      @default(now())
+  tenureEndedAt     DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
   flat        Flat  @relation(fields: [flatId], references: [id], onDelete: Cascade)
   user        User  @relation("OccupancyResident", fields: [userId], references: [id], onDelete: Cascade)
@@ -199,10 +199,10 @@ model Role {
 // ---------------------------------------------------------------------------
 
 model AuditLog {
-  id       String @id @default(cuid())
+  id       String   @id @default(cuid())
   /// Global auto-increment, used to order the per-society chain
   /// (society-scoped WHERE + ORDER BY sequence gives a stable causal order).
-  sequence Int    @default(autoincrement())
+  sequence Int      @default(autoincrement())
   ts       DateTime @default(now())
 
   societyId   String
@@ -243,24 +243,24 @@ enum JobBlogStatus {
 }
 
 model JobBlogPost {
-  id          String        @id @default(cuid())
-  societyId   String
-  posterId    String
-  kind        JobBlogKind
-  title       String
-  body        String
-  status      JobBlogStatus @default(ACTIVE)
+  id        String        @id @default(cuid())
+  societyId String
+  posterId  String
+  kind      JobBlogKind
+  title     String
+  body      String
+  status    JobBlogStatus @default(ACTIVE)
   /// Set at creation to createdAt + 60 days. A post is only publicly listed
   /// while status = ACTIVE *and* expiresAt is in the future — checked at
   /// query time rather than flipped by a cron (see SUPERVISOR.md decisions).
-  expiresAt   DateTime
+  expiresAt DateTime
 
   /// HIRING posts only — SEEKING posts leave these null and are visible
   /// immediately (no employer to impersonate).
-  companyEmail                String?
-  companyEmailVerifiedAt      DateTime?
-  companyEmailTokenHash       String?
-  companyEmailTokenExpiresAt  DateTime?
+  companyEmail               String?
+  companyEmailVerifiedAt     DateTime?
+  companyEmailTokenHash      String?
+  companyEmailTokenExpiresAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -299,15 +299,15 @@ enum RatingSource {
 }
 
 model Vendor {
-  id        String  @id @default(cuid())
-  societyId String
-  name      String
+  id           String   @id @default(cuid())
+  societyId    String
+  name         String
   contactEmail String?
   contactPhone String?
-  latitude  Float?
-  longitude Float?
+  latitude     Float?
+  longitude    Float?
   /// Service radius in km, used later for proximity search — optional until then.
-  radiusKm  Decimal? @db.Decimal(6, 2)
+  radiusKm     Decimal? @db.Decimal(6, 2)
 
   verificationTier VerificationTier @default(UNVERIFIED)
   gstin            String?
@@ -322,12 +322,14 @@ model Vendor {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  society        Society                @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  society        Society               @relation(fields: [societyId], references: [id], onDelete: Cascade)
   categories     VendorCategory[]
   ratings        VendorRating[]
   accessRequests VendorAccessRequest[]
   offers         Offer[]
   bookings       Booking[]
+  /// Phase 5 — polls where a resident tagged this vendor for a Flow B bulk-buy (see Poll.taggedVendorId).
+  taggedPolls    Poll[]
 
   @@index([societyId])
   @@map("vendors")
@@ -345,7 +347,7 @@ model VendorCategory {
 }
 
 model VendorRating {
-  id         String @id @default(cuid())
+  id         String       @id @default(cuid())
   vendorId   String
   residentId String
   /// Real job cards land in a later phase (job-card lifecycle) — until then
@@ -408,8 +410,13 @@ model KycDocument {
 ///   uniform or ownership-weighted. Only a COMMITTEE member may create one.
 /// EVENT: no binding vote — residents "join" (PollCommitment) and the poll
 ///   auto-fires once minCommitments is reached.
-/// BULK_BUY_RESIDENT: same commitment mechanics as EVENT, reserved for
-///   Phase 5's bulk-buy Flow B.
+/// BULK_BUY_RESIDENT: same commitment mechanics as EVENT (PollCommitment /
+///   minCommitments / auto-fire), but OWNED end-to-end by the bulk-buy
+///   module (Phase 5 Flow B), not by PollsService — see
+///   src/modules/bulk-buy/bulk-buy.service.ts's Flow B section and this
+///   model's taggedVendorId/vendorConfirmed*/vendorDeclinedAt fields.
+///   PollsService.create/join/vote all reject this pollType with 400,
+///   directing callers to the bulk-buy routes instead.
 enum PollType {
   ADVISORY
   BINDING
@@ -429,6 +436,10 @@ enum PollStatus {
   FIRED
   EXPIRED
   CLOSED
+  /// Phase 5 Flow B only: set when the tagged vendor declines via
+  /// POST /bulk-buy/polls/:id/vendor-decline. No other pollType/route ever
+  /// produces this status.
+  CANCELLED
 }
 
 enum VoteChoice {
@@ -449,6 +460,13 @@ model Poll {
 
   title       String
   description String?
+  /// Phase 5 Flow B (BULK_BUY_RESIDENT only): the vendor-service category the
+  /// resident tagged the poll with (mirrors Offer.category). Null for every
+  /// other pollType — deliberately NOT part of the original Phase 5 field
+  /// list handed down for this migration, but POST /bulk-buy/polls's body
+  /// requires it and it needs somewhere durable to live; added here rather
+  /// than silently dropped.
+  category    String?
 
   /// Share of total eligible weight that must be cast for the poll to be
   /// decided at all (ADVISORY/BINDING only).
@@ -470,16 +488,43 @@ model Poll {
   /// Set when an ADVISORY/BINDING poll is resolved to PASSED/FAILED.
   resolvedAt DateTime?
 
+  /// Phase 5 Flow B (BULK_BUY_RESIDENT only): the vendor a resident tagged
+  /// when opening this poll. Null for every other pollType. SetNull rather
+  /// than Cascade — a deleted Vendor shouldn't take a historical poll with it.
+  taggedVendorId         String?
+  /// Set once a COMMITTEE member (acting for the vendor — no vendor login in
+  /// v1, see bulk-buy.service.ts's class doc comment) confirms terms via
+  /// POST /bulk-buy/polls/:id/vendor-confirm. Null until then.
+  vendorConfirmedAt      DateTime?
+  /// Set if the vendor instead declines via POST /bulk-buy/polls/:id/vendor-decline
+  /// (which also flips status to CANCELLED). Mutually exclusive with vendorConfirmedAt.
+  vendorDeclinedAt       DateTime?
+  /// The vendor-confirmed minimum headcount — replaces the resident's
+  /// proposedMinimum (stored in minCommitments) once confirmed. Fire
+  /// triggers when the PollCommitment count reaches this value.
+  vendorConfirmedMinimum Int?
+  /// The vendor-confirmed per-unit price (major units/rupees), snapshotted
+  /// at confirm time — mirrors Offer.unitPrice.
+  vendorUnitPrice        Decimal?  @db.Decimal(14, 2)
+  /// Optional discount ladder the vendor confirmed, same shape/validation as
+  /// Offer.discountLadder (discount-ladder.util.ts). Null means no ladder —
+  /// Flow B fires at appliedDiscountPct 0 in that case.
+  vendorDiscountLadder   Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  society     Society           @relation(fields: [societyId], references: [id], onDelete: Cascade)
-  creator     User              @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-  votes       Vote[]
-  commitments PollCommitment[]
+  society            Society          @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  creator            User             @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  taggedVendor       Vendor?          @relation(fields: [taggedVendorId], references: [id], onDelete: SetNull)
+  votes              Vote[]
+  commitments        PollCommitment[]
+  /// Phase 5 Flow B: Commitment rows sourced from this poll once fired (see Commitment.pollId).
+  bulkBuyCommitments Commitment[]
 
   @@index([societyId, status])
   @@index([closesAt])
+  @@index([taggedVendorId])
   @@map("polls")
 }
 
@@ -502,7 +547,7 @@ model Vote {
   choice    VoteChoice
   /// UNIFORM = 1; OWNERSHIP_WEIGHTED (BINDING only) = the voter's flat's
   /// ownershipShare at the time of voting.
-  weight    Decimal @db.Decimal(6, 4)
+  weight    Decimal    @db.Decimal(6, 4)
 
   createdAt DateTime @default(now())
 
@@ -609,9 +654,9 @@ model LedgerEntry {
   /// LedgerService.post at the application layer (no DB CHECK constraint in
   /// v1, matching how other invariants in this schema are enforced — see
   /// e.g. Vote.voterHash's doc comment).
-  amount Decimal @db.Decimal(14, 2)
+  amount          Decimal @db.Decimal(14, 2)
 
-  reasonCode String
+  reasonCode       String
   /// Free-form pointer to the domain object this entry is for (e.g. a future
   /// Payment/Payout id) — no FK, since the linked entity type varies by
   /// phase and may not exist yet when this entry is written.
@@ -673,7 +718,7 @@ model Payment {
   residentId String?
 
   /// Razorpay order id (order_...). One Payment per order.
-  orderId String @unique
+  orderId   String  @unique
   /// Razorpay payment id (pay_...), set once the webhook reports a capture.
   paymentId String? @unique
 
@@ -744,6 +789,17 @@ enum OfferStatus {
   CANCELLED
 }
 
+/// Phase 5: NONE (default, Phase 4C/4D unchanged) or WEEKLY — a WEEKLY offer
+/// whose deadline has passed can be "rolled" (POST /offers/:id/roll) into a
+/// fresh OPEN offer with deadline +7 days and empty commitments. See
+/// BulkBuyService.rollOffer. A real scheduler would call roll automatically;
+/// v1 exposes it as a committee-triggered endpoint only (same "no scheduler
+/// yet" stance as PollsService.processExpired).
+enum OfferRecurrence {
+  NONE
+  WEEKLY
+}
+
 /// PENDING: committed, escrow order created but not yet captured.
 /// FUNDED: the linked Payment has been captured (see PaymentsService.applyCapture's
 ///   small Commitment-flip hook) — the resident's money is in escrow.
@@ -794,7 +850,7 @@ model Offer {
   description String?
 
   /// Major units (rupees), pre-discount — matches Payment.amount's convention.
-  unitPrice Decimal @db.Decimal(14, 2)
+  unitPrice      Decimal @db.Decimal(14, 2)
   /// Non-empty array of {minN: number, pct: number}, validated by
   /// discount-ladder.util.ts's validateLadder (strictly increasing minN,
   /// non-decreasing pct, no duplicates) before this row is ever written.
@@ -808,13 +864,13 @@ model Offer {
 
   /// Snapshotted at fire time — the ladder tier resolved for the
   /// commitment count that triggered auto-fire. Null until fired.
-  appliedDiscountPct Decimal? @db.Decimal(5, 2)
+  appliedDiscountPct Decimal?  @db.Decimal(5, 2)
   firedAt            DateTime?
 
   /// Phase 4D: SMALL (Phase 4C's single-payout flow, default/unchanged) or
   /// LARGE (milestone + defect-retention flow). Snapshotted onto the Booking
   /// and every JobCard at fire time.
-  tier JobCardTier @default(SMALL)
+  tier              JobCardTier @default(SMALL)
   /// LARGE only: non-empty array of {name: string, pct: number>0} whose pcts
   /// sum to exactly 100 — validated by milestone-template.util.ts's
   /// validateMilestoneTemplate before this row is ever written. Null for
@@ -823,11 +879,14 @@ model Offer {
   /// LARGE only: the defect-liability retention share of the escrowed total,
   /// held back (BULK_BUY -> RETENTION) at the first milestone authorisation.
   /// 0 (and ignored) for SMALL offers.
-  retentionPct Decimal @default(0) @db.Decimal(5, 2)
+  retentionPct      Decimal     @default(0) @db.Decimal(5, 2)
   /// LARGE only: days after firing before the retention share may be
   /// released (RETENTION -> EXTERNAL). Null for SMALL offers, or a LARGE
   /// offer with no defect-liability period.
-  retentionDays Int?
+  retentionDays     Int?
+
+  /// Phase 5: NONE (default) or WEEKLY — see OfferRecurrence's doc comment.
+  recurring OfferRecurrence @default(NONE)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -840,26 +899,35 @@ model Offer {
   @@map("offers")
 }
 
-/// A resident's opt-in to an Offer. Not anonymous (unlike Vote) — this is a
-/// financial commitment, not a ballot.
+/// A resident's financial commitment to either an Offer (Flow A) or a Poll
+/// (Flow B) — exactly one of offerId/pollId is set, never both and never
+/// neither; enforced in application code (BulkBuyService), not a DB
+/// constraint (Prisma has no portable CHECK-constraint support here). Not
+/// anonymous (unlike Vote) — this is a financial commitment, not a ballot.
 model Commitment {
-  id         String            @id @default(cuid())
-  offerId    String
+  id         String           @id @default(cuid())
+  /// Flow A (vendor-initiated Offer). Null for a Flow B (poll-sourced) commitment.
+  offerId    String?
+  /// Flow B (resident-initiated, tagged-vendor Poll). Null for a Flow A (offer-sourced) commitment.
+  pollId     String?
   residentId String
   flatId     String
-  status     CommitmentStatus  @default(PENDING)
+  status     CommitmentStatus @default(PENDING)
   /// The escrow-in Payment (Phase 4B) created for this commitment at fire
   /// time — see BulkBuyService.commit's fire branch. Null until fired.
   paymentId  String?
-  createdAt  DateTime          @default(now())
+  createdAt  DateTime         @default(now())
 
-  offer    Offer    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  offer    Offer?   @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  poll     Poll?    @relation(fields: [pollId], references: [id], onDelete: Cascade)
   resident User     @relation(fields: [residentId], references: [id], onDelete: Cascade)
   flat     Flat     @relation(fields: [flatId], references: [id], onDelete: Cascade)
   jobCard  JobCard?
 
   @@unique([offerId, residentId])
+  @@unique([pollId, residentId])
   @@index([offerId])
+  @@index([pollId])
   @@map("commitments")
 }
 
@@ -880,11 +948,11 @@ model Booking {
 
   /// LARGE only. Snapshotted from Offer.retentionPct * escrowed total at the
   /// FIRST milestone authorisation (0 until then, and unused for SMALL).
-  retentionAmount Decimal @default(0) @db.Decimal(14, 2)
+  retentionAmount     Decimal   @default(0) @db.Decimal(14, 2)
   /// LARGE only. Set at fire time from Offer.retentionDays (null if the
   /// offer set no defect-liability period). Retention cannot be released
   /// before Clock.now() reaches this timestamp.
-  retentionReleaseAt DateTime?
+  retentionReleaseAt  DateTime?
   /// LARGE only. Set once POST /bookings/:id/retention/release succeeds —
   /// its presence is this booking's idempotency guard for that route.
   retentionReleasedAt DateTime?
@@ -892,10 +960,10 @@ model Booking {
   /// booking, marking that the once-only commission + retention set-aside
   /// (BULK_BUY -> COMMISSION_SINK, BULK_BUY -> RETENTION) has already
   /// happened — every later milestone authorisation skips it.
-  commissionTaken Boolean @default(false)
+  commissionTaken     Boolean   @default(false)
 
-  society    Society    @relation(fields: [societyId], references: [id], onDelete: Cascade)
-  vendor     Vendor     @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  society    Society     @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  vendor     Vendor      @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   jobCards   JobCard[]
   payout     Payout?
   milestones Milestone[]
@@ -905,12 +973,12 @@ model Booking {
 }
 
 model JobCard {
-  id           String @id @default(cuid())
-  bookingId    String
-  commitmentId String
-  residentId   String
-  flatId       String
-  scope        String
+  id                 String        @id @default(cuid())
+  bookingId          String
+  commitmentId       String
+  residentId         String
+  flatId             String
+  scope              String
   /// Discounted price snapshot (offer.unitPrice * (1 - appliedDiscountPct/100),
   /// rounded to 2dp) — what this resident actually owes.
   unitPrice          Decimal       @db.Decimal(14, 2)
@@ -945,8 +1013,8 @@ model Payout {
   paidAt            DateTime?
   createdAt         DateTime     @default(now())
 
-  booking         Booking               @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  authorisations  PayoutAuthorisation[]
+  booking        Booking               @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  authorisations PayoutAuthorisation[]
 
   @@map("payouts")
 }
@@ -975,28 +1043,28 @@ model PayoutAuthorisation {
 /// must be authorised strictly in sequence order — see
 /// BulkBuyService.authoriseMilestone.
 model Milestone {
-  id        String       @id @default(cuid())
-  bookingId String
+  id                String       @id @default(cuid())
+  bookingId         String
   /// 1-based release order, snapshotted from the offer's milestoneTemplate
   /// array index at fire time.
-  sequence Int
-  name     String
+  sequence          Int
+  name              String
   /// Share of vendorPayable (escrowed total minus commission minus
   /// retention) this milestone releases. The template's pcts sum to 100,
   /// but the LAST milestone by sequence always releases whatever remains of
   /// vendorPayable rather than exactly amount*pct/100, to avoid rounding
   /// dust — see authoriseMilestone's doc comment.
-  pct    Decimal      @db.Decimal(5, 2)
-  status PayoutStatus @default(PENDING)
+  pct               Decimal      @db.Decimal(5, 2)
+  status            PayoutStatus @default(PENDING)
   /// Snapshotted the moment this milestone is released (null until PAID).
-  amount            Decimal?  @db.Decimal(14, 2)
+  amount            Decimal?     @db.Decimal(14, 2)
   paidAt            DateTime?
   /// The STUBBED RazorpayService.payout() reference — never a real
   /// RazorpayX transfer id in this phase (see Payout.razorpayPayoutRef).
   razorpayPayoutRef String?
-  createdAt         DateTime  @default(now())
+  createdAt         DateTime     @default(now())
 
-  booking        Booking                    @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking        Booking                  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   authorisations MilestoneAuthorisation[]
 
   @@unique([bookingId, sequence])

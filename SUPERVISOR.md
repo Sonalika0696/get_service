@@ -9,14 +9,14 @@ Single source of truth for **what's shipped, what's in flight, what's blocked**.
 - The **Demo bar** at the top says what a demo shows *right now*, if the project stops today.
 - Refresh timestamps at the top of the file on each update.
 
-Last updated: *2026-09-16 (Phase 4 COMPLETE (backend): 4A ledger + 4B Razorpay + 4C Flow A + 4D large-job milestones/retention, all e2e-verified on the Razorpay stub with zero real transactions. Supervisor caught+fixed a capture double-credit (4B) and a concurrent-payout double-pay (4C). Frontend still not started)*
-Current active phase: *Phase 4 🟢 backend done & e2e-green (75 unit + 32 e2e). Next: Phase 5 (Bulk-Buy Flow B) backend, or begin the frontend track. Frontend ⚪ not started.*
+Last updated: *2026-09-16 (Phase 5 COMPLETE (backend): Bulk-Buy Flow B — resident tags a vendor → poll → vendor confirms → fires down the shared Flow A escrow/payout path; weekly-recurring offers. Supervisor caught+fixed a concurrent double-fire race (advisory lock 53). Frontend still not started)*
+Current active phase: *Phases 0–5 🟢 backend done & e2e-green (75 unit + 39 e2e). Next: Phase 6 (Vouchers) backend, or begin the frontend track. Frontend ⚪ not started.*
 
 ---
 
 ## Demo bar *(what the project can show today)*
 
-> `docker compose up -d` + `npm run prisma:migrate` + `npm run prisma:seed` + `npm run dev:backend` brings up the NestJS API. Over HTTP you can now sign up a resident, receive an OTP email (Maildev at :1080), verify it for a session cookie, post a job (SEEKING or HIRING), verify a hiring post's company email, browse the society's visible jobs, and — as a committee member — flag/remove a post (which writes a hash-chained audit row). Auth, rate limiting (1 post/resident/month), and the full Phase 1 flow are e2e-tested against real Postgres. A committee can also onboard vendors (with offline GSTIN verification that auto-promotes an Active GSTIN to `SOCIETY_ATTESTED`), residents can browse the society's vendor directory (category/name filters) and rate vendors (running aggregate). Residents can also run polls — advisory/event polls open to all, binding polls committee-created with ownership-weighted voting and tenant-eligibility rules; event polls auto-fire when their minimum commitments are met and notify joiners. The full **bulk-buy Flow A** works end-to-end on the Razorpay sandbox stub: a committee posts a vendor offer with a discount ladder, residents commit, the offer auto-fires at its minimum (snapshotting the applied tier), each resident pays into a hash-verified escrow ledger, residents sign off their job cards, and a treasurer co-authorises a payout that splits platform commission from the vendor's net and reconciles escrow back to zero — all money tracked in an append-only double-entry ledger with a conservation invariant. Still no frontend — this is all API-level (curl / the e2e suite).
+> `docker compose up -d` + `npm run prisma:migrate` + `npm run prisma:seed` + `npm run dev:backend` brings up the NestJS API. Over HTTP you can now sign up a resident, receive an OTP email (Maildev at :1080), verify it for a session cookie, post a job (SEEKING or HIRING), verify a hiring post's company email, browse the society's visible jobs, and — as a committee member — flag/remove a post (which writes a hash-chained audit row). Auth, rate limiting (1 post/resident/month), and the full Phase 1 flow are e2e-tested against real Postgres. A committee can also onboard vendors (with offline GSTIN verification that auto-promotes an Active GSTIN to `SOCIETY_ATTESTED`), residents can browse the society's vendor directory (category/name filters) and rate vendors (running aggregate). Residents can also run polls — advisory/event polls open to all, binding polls committee-created with ownership-weighted voting and tenant-eligibility rules; event polls auto-fire when their minimum commitments are met and notify joiners. The full **bulk-buy Flow A** works end-to-end on the Razorpay sandbox stub: a committee posts a vendor offer with a discount ladder, residents commit, the offer auto-fires at its minimum (snapshotting the applied tier), each resident pays into a hash-verified escrow ledger, residents sign off their job cards, and a treasurer co-authorises a payout that splits platform commission from the vendor's net and reconciles escrow back to zero — all money tracked in an append-only double-entry ledger with a conservation invariant. Flow B also works: a resident can tag a vendor and open a bulk-buy poll, the committee confirms the vendor's terms, and once enough neighbours join it fires down the very same escrow/booking/payout path as Flow A. Still no frontend — this is all API-level (curl / the e2e suite).
 
 Update this box on the last commit of every phase — it should read like a two-sentence pitch of what a supervisor would see if they opened the app right now.
 
@@ -214,21 +214,23 @@ Update this box on the last commit of every phase — it should read like a two-
 
 ---
 
-## Phase 5 — Bulk-Buy Flow B (resident-initiated) ⚪
+## Phase 5 — Bulk-Buy Flow B (resident-initiated) 🟡
 
 **Deliverable:** a resident tags a vendor and opens a poll; vendor confirms; poll fires like Flow A.
 
 | Track | Task | Status |
 |---|---|---|
-| BE | Poll gains `tagged_vendor_id` + `vendor_confirmed_minimum` | ⚪ |
-| BE | Vendor confirm/decline tag request endpoint | ⚪ |
-| BE | On fire: reuse Flow A booking/escrow path | ⚪ |
-| BE | Weekly-recurring Offer variant for staples | ⚪ |
+| BE | Poll gains `tagged_vendor_id` + `vendor_confirmed_minimum` | 🟢 *(+ `vendorConfirmedAt`/`vendorDeclinedAt`/`vendorUnitPrice`/`vendorDiscountLadder`; also added `Poll.category` and `PollStatus.CANCELLED`)* |
+| BE | Vendor confirm/decline tag request endpoint | 🟢 *(`POST /bulk-buy/polls/:id/vendor-confirm` (committee, sets terms; fires now if min already met) + `/vendor-decline` → CANCELLED)* |
+| BE | On fire: reuse Flow A booking/escrow path | 🟢 *(extracted `createBookingWithEscrow` shared by `fireOffer` + `fireResidentPoll`; Flow B bookings are `sourceType:'POLL'`, SMALL-tier v1, and ride the unchanged pay/sign-off/dual-auth payout path. Per-poll `pg_advisory_xact_lock(53)` on both join+confirm closes a concurrent double-fire window found in review)* |
+| BE | Weekly-recurring Offer variant for staples | 🟢 *(`Offer.recurring NONE|WEEKLY`; `POST /offers/:id/roll` clones a WEEKLY offer to a fresh OPEN one +7d — scheduler stand-in)* |
 | FE | `/polls/new` gains `type=bulk_buy` with vendor picker | ⚪ |
 | FE | Vendor inbox for incoming tags | ⚪ |
 | FE | Weekly-recurring entry point on vendor record | ⚪ |
 
 **DoD:** residents can pull a bulk-buy into existence by tagging a vendor.
+
+**Backend status (2026-09-16):** verified directly — build ok, oxlint clean, **75 unit + 39 e2e green**. Flow B e2e proves the full chain (resident tags vendor → committee confirms terms → residents join → fires → escrow-funded → sign-off → payout → reconcile) plus decline, ownership split (`POST /polls` rejects BULK_BUY_RESIDENT → 400), weekly roll, and concurrent-join single-fire. Ownership: `bulk-buy` owns BULK_BUY_RESIDENT polls end-to-end; the `polls` module stays governance/event only. All on the Razorpay stub — no real transactions. Migrations `20260916112850/113200/113600_phase5_flow_b*` (three additive; `migrate dev`/`reset` are blocked non-interactively, so applied via `migrate diff --script` + `migrate deploy`). Frontend not started.
 
 ---
 
