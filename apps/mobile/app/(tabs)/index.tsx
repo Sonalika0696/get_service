@@ -115,8 +115,13 @@ function BottomBar({ index, onSelect }: { index: number; onSelect: (i: number) =
                   gap: 3,
                   paddingVertical: 7,
                   paddingHorizontal: 2,
-                  borderRadius: theme.radius.xxl,
-                  minHeight: 46,
+                  // A distinct, clearly-rounded pill behind the active tab.
+                  // The horizontal margin pulls it in from the cell edges so
+                  // it reads as a separated rounded pill rather than a
+                  // full-width bar (which looked square edge-to-edge).
+                  borderRadius: theme.radius.xl,
+                  marginHorizontal: 6,
+                  minHeight: 44,
                   alignSelf: 'stretch',
                   backgroundColor: active ? theme.colors.accent.tint : 'transparent',
                 }}
