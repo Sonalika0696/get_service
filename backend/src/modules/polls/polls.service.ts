@@ -73,6 +73,14 @@ export class PollsService {
     if (dto.pollType === ServiceRequestType.BULK_BUY_RESIDENT) {
       throw new BadRequestException('Create resident bulk-buy polls via POST /bulk-buy/polls');
     }
+    // Phase 8.2: same ownership split as BULK_BUY_RESIDENT above — the NEW
+    // ServiceRequest pooling loop is owned end-to-end by
+    // ServiceRequestsService (threshold-freeze at creation, committee
+    // assign/confirm, PricingCard freeze, escrow), never by this generic
+    // EVENT-poll path.
+    if (dto.pollType === ServiceRequestType.SERVICE_REQUEST) {
+      throw new BadRequestException('Create pooling service requests via POST /service-requests instead');
+    }
 
     const closesAt = new Date(dto.closesAt);
     if (Number.isNaN(closesAt.getTime()) || closesAt.getTime() <= this.clock.now().getTime()) {
@@ -120,6 +128,9 @@ export class PollsService {
     const poll = await this.getInternal(societyId, id);
     if (poll.pollType === ServiceRequestType.BULK_BUY_RESIDENT) {
       throw new BadRequestException('BULK_BUY_RESIDENT polls are owned by the bulk-buy module — use POST /bulk-buy/polls/:id/join instead');
+    }
+    if (poll.pollType === ServiceRequestType.SERVICE_REQUEST) {
+      throw new BadRequestException('SERVICE_REQUEST requests are owned by the service-requests module — use POST /service-requests/:id/join instead');
     }
     if (poll.status !== ServiceRequestStatus.OPEN) {
       throw new BadRequestException('Poll is not open for joining');

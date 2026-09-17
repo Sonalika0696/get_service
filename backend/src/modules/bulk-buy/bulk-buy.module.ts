@@ -13,5 +13,9 @@ import { BulkBuyService } from './bulk-buy.service.js';
   imports: [LedgerModule, PaymentsModule, AuditModule],
   controllers: [OffersController, JobCardsController, BookingsController, ResidentPollsController, ApprovalConfigController],
   providers: [BulkBuyService],
+  // Phase 8.2: exported so ServiceRequestsModule can inject BulkBuyService
+  // and reuse its createBookingWithEscrow helper unchanged — see that
+  // method's updated doc comment.
+  exports: [BulkBuyService],
 })
 export class BulkBuyModule {}

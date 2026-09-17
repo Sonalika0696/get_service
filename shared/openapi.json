@@ -34,6 +34,30 @@
         ],
         "type": "object"
       },
+      "AssignVendorDto": {
+        "properties": {
+          "vendorId": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "vendorId"
+        ],
+        "type": "object"
+      },
+      "ConfirmServiceRequestDto": {
+        "properties": {
+          "contribution": {
+            "minimum": 1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "contribution"
+        ],
+        "type": "object"
+      },
       "CreateConsentDto": {
         "properties": {
           "granteeUserId": {
@@ -228,7 +252,8 @@
           "pollType": {
             "enum": [
               "EVENT",
-              "BULK_BUY_RESIDENT"
+              "BULK_BUY_RESIDENT",
+              "SERVICE_REQUEST"
             ],
             "type": "string"
           },
@@ -339,6 +364,67 @@
           "category",
           "title",
           "proposedMinimum",
+          "closesAt"
+        ],
+        "type": "object"
+      },
+      "CreateServiceRequestCommitteeDto": {
+        "properties": {
+          "category": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "closesAt": {
+            "description": "ISO-8601 timestamp; must be in the future (validated in the service, where \"now\" comes from Clock).",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 5000,
+            "type": "string"
+          },
+          "raisedByFlatId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 3,
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "title",
+          "closesAt",
+          "raisedByFlatId"
+        ],
+        "type": "object"
+      },
+      "CreateServiceRequestDto": {
+        "properties": {
+          "category": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "closesAt": {
+            "description": "ISO-8601 timestamp; must be in the future (validated in the service, where \"now\" comes from Clock).",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 5000,
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 3,
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "title",
           "closesAt"
         ],
         "type": "object"
@@ -3295,6 +3381,306 @@
         },
         "tags": [
           "PricingCards"
+        ]
+      }
+    },
+    "/api/v1/service-requests": {
+      "get": {
+        "operationId": "ServiceRequestsController_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "ServiceRequests"
+        ]
+      },
+      "post": {
+        "operationId": "ServiceRequestsController_create",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateServiceRequestDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "A resident raises a request for their own flat.",
+        "tags": [
+          "ServiceRequests"
+        ]
+      }
+    },
+    "/api/v1/service-requests/committee": {
+      "post": {
+        "operationId": "ServiceRequestsController_createCommittee",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateServiceRequestCommitteeDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "A COMMITTEE member raises a request on a named flat's behalf.",
+        "tags": [
+          "ServiceRequests"
+        ]
+      }
+    },
+    "/api/v1/service-requests/{id}": {
+      "get": {
+        "operationId": "ServiceRequestsController_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "ServiceRequests"
+        ]
+      }
+    },
+    "/api/v1/service-requests/{id}/assign": {
+      "post": {
+        "operationId": "ServiceRequestsController_assign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignVendorDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "A COMMITTEE member assigns a vendor (must be linked + hold a published card for the category).",
+        "tags": [
+          "ServiceRequests"
+        ]
+      }
+    },
+    "/api/v1/service-requests/{id}/close": {
+      "post": {
+        "operationId": "ServiceRequestsController_close",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Committee-triggered stand-in for a scheduler: closes an OPEN request past closesAt that never reached threshold.",
+        "tags": [
+          "ServiceRequests"
+        ]
+      }
+    },
+    "/api/v1/service-requests/{id}/confirm": {
+      "post": {
+        "operationId": "ServiceRequestsController_confirm",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmServiceRequestDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "A COMMITTEE member relays the assigned vendor's confirmation — freezes the PricingCard and creates escrow.",
+        "tags": [
+          "ServiceRequests"
+        ]
+      }
+    },
+    "/api/v1/service-requests/{id}/decline": {
+      "post": {
+        "operationId": "ServiceRequestsController_decline",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "A COMMITTEE member relays the assigned vendor's decline — structural, no money exists yet.",
+        "tags": [
+          "ServiceRequests"
+        ]
+      }
+    },
+    "/api/v1/service-requests/{id}/join": {
+      "post": {
+        "operationId": "ServiceRequestsController_join",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "A resident joins; may flip the request to POOLED in the same call once the threshold is met.",
+        "tags": [
+          "ServiceRequests"
         ]
       }
     },

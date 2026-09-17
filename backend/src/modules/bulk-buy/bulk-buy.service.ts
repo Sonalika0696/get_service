@@ -327,8 +327,19 @@ export class BulkBuyService {
    * runs with real money at stake — see RAZORPAY_ENABLED) it's a
    * synchronous, offline, in-memory computation with no network round trip.
    * Returns the created Booking.
+   *
+   * Phase 8.2: made PUBLIC (was private) so ServiceRequestsService's
+   * `confirm` can call it too — the NEW ServiceRequest pooling loop's
+   * committee-relayed vendor-confirm fires down this EXACT SAME booking/
+   * escrow path, tier=SMALL, sourceType='SERVICE_REQUEST', one participant
+   * per ACTIVE Participation. This is the "reuse escrow/ledger machinery
+   * unchanged" requirement for Phase 8.2 — no copy, no relocation, just a
+   * wider caller list. ServiceRequestsService injects BulkBuyService (via
+   * BulkBuyModule, which now exports it) and always calls this from INSIDE
+   * its own already-open `tx` (never opens a second transaction), exactly
+   * like fireOffer/fireResidentPoll already do.
    */
-  private async createBookingWithEscrow(
+  async createBookingWithEscrow(
     tx: Prisma.TransactionClient,
     input: {
       societyId: string;

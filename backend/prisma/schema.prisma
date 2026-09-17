@@ -206,6 +206,8 @@ model Flat {
   bulkBuyCommitments Commitment[]
   jobCards           JobCard[]
   participations     Participation[]
+  /// Phase 8.2 — service requests raised for this flat (see ServiceRequest.raisedByFlatId).
+  raisedServiceRequests ServiceRequest[]
 
   @@unique([societyId, unitNo])
   @@map("flats")
@@ -565,7 +567,9 @@ model Vendor {
   offers                  Offer[]
   bookings                Booking[]
   /// Phase 5 — service requests where a resident tagged this vendor for a Flow B bulk-buy (see ServiceRequest.taggedVendorId).
-  assignedServiceRequests ServiceRequest[]
+  assignedServiceRequests ServiceRequest[] @relation("ServiceRequestTaggedVendor")
+  /// Phase 8.2 — service requests a committee member assigned this vendor to in the new pooling loop (see ServiceRequest.assignedVendorId).
+  poolAssignedServiceRequests ServiceRequest[] @relation("ServiceRequestAssignedVendor")
   /// Phase 6.2 — the VENDOR-principal User that logs in as this vendor (see User.vendorId). Opposite side of a 1:1; the FK lives on User.
   linkedUser              User?
   /// Phase 7.2 — this vendor's published price sheets (see PricingCard).
@@ -691,6 +695,8 @@ model PricingCard {
 
   vendor Vendor        @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   lines  PricingLine[]
+  /// Phase 8.2 — service requests that froze THIS exact version at confirm time (see ServiceRequest.frozenPricingCardId). A later revision/republish never touches these historical pointers.
+  frozenByServiceRequests ServiceRequest[]
 
   @@unique([vendorId, category, version])
   @@index([vendorId, category])
@@ -754,6 +760,16 @@ model KycDocument {
 enum ServiceRequestType {
   EVENT
   BULK_BUY_RESIDENT
+  /// Phase 8.2 (BACKEND_PLAN.md Phase 8 item 2): the NEW ServiceRequest
+  /// pooling loop (create -> join -> threshold -> committee-assign ->
+  /// committee-relayed vendor-confirm -> PricingCard freeze -> escrow),
+  /// built ADDITIVELY alongside EVENT and BULK_BUY_RESIDENT — see
+  /// ServiceRequestsService's class doc comment. Both RESIDENT- and
+  /// COMMITTEE-origin requests (see ServiceRequestOrigin) use this same
+  /// pollType; PollsService.create/join reject it with 400 (same ownership
+  /// split already applied to BULK_BUY_RESIDENT), directing callers to the
+  /// dedicated /service-requests routes instead.
+  SERVICE_REQUEST
 }
 
 enum ServiceRequestStatus {
@@ -765,6 +781,33 @@ enum ServiceRequestStatus {
   /// POST /bulk-buy/polls/:id/vendor-decline. No other pollType/route ever
   /// produces this status.
   CANCELLED
+  /// Phase 8.2 (ServiceRequestType.SERVICE_REQUEST only): the join threshold
+  /// has been met — see ServiceRequestsService.join.
+  POOLED
+  /// Phase 8.2: a committee member has assigned a vendor (that must already
+  /// be linked to the society and hold a current PUBLISHED PricingCard for
+  /// the request's category) — see ServiceRequestsService.assignVendor.
+  ASSIGNED
+  /// Phase 8.2: the committee has relayed the vendor's confirmation — the
+  /// PricingCard is frozen, the escrow Booking/Payments exist, and this
+  /// request will never fire/pool/assign again. Terminal, money-bearing state.
+  CONFIRMED
+  /// Phase 8.2: either the vendor declined (via the committee-relayed
+  /// decline route, from ASSIGNED) or the request closed below threshold
+  /// (from OPEN, past closesAt). STRUCTURAL — no Payment/escrow ever existed
+  /// before CONFIRMED, so there is nothing to reverse; see
+  /// ServiceRequestsService.decline / closeBelowThreshold.
+  LAPSED
+}
+
+/// Phase 8.2: RESIDENT (a resident raised it for their own flat) or
+/// COMMITTEE (a committee member raised it on a named flat's behalf) — see
+/// ServiceRequestsService.createResident / createCommittee. Null for every
+/// pre-8.2 pollType (EVENT, BULK_BUY_RESIDENT); always set for
+/// ServiceRequestType.SERVICE_REQUEST.
+enum ServiceRequestOrigin {
+  RESIDENT
+  COMMITTEE
 }
 
 /// Phase 8.1 rename (was Poll) — same table contents/semantics, see
@@ -822,19 +865,73 @@ model ServiceRequest {
   /// Flow B fires at appliedDiscountPct 0 in that case.
   vendorDiscountLadder   Json?
 
+  // -------------------------------------------------------------------
+  // Phase 8.2 — the NEW ServiceRequest pooling loop
+  // (ServiceRequestType.SERVICE_REQUEST only). All additive/nullable so
+  // every pre-8.2 row (EVENT, BULK_BUY_RESIDENT) is completely untouched —
+  // see ServiceRequestsService's class doc comment for the full lifecycle.
+  // -------------------------------------------------------------------
+
+  /// RESIDENT or COMMITTEE — see ServiceRequestOrigin's doc comment.
+  origin ServiceRequestOrigin?
+  /// The flat this request was raised for: the resident's own flat
+  /// (origin=RESIDENT) or a flat a committee member named explicitly
+  /// (origin=COMMITTEE). SetNull rather than Cascade — a deleted Flat
+  /// shouldn't take a historical request with it.
+  raisedByFlatId String?
+
+  /// The per-category join threshold, resolved from
+  /// Society.config.serviceRequestThresholds (see
+  /// service-request-threshold.util.ts) and FROZEN here at creation time —
+  /// a later config change never moves an in-flight request's own threshold.
+  threshold Int?
+
+  /// Set by a COMMITTEE member via POST /service-requests/:id/assign —
+  /// the vendor must already be linked to this society (VendorSocietyLink)
+  /// and hold a current PUBLISHED PricingCard for this request's category
+  /// (see ServiceRequestsService.assignVendor). SetNull rather than
+  /// Cascade — a deleted Vendor shouldn't take a historical request with it.
+  assignedVendorId String?
+  assignedAt       DateTime?
+  /// The committee member who called assignVendor. Plain string (not an FK)
+  /// — same "loose actor pointer" shape as PayoutAuthorisation.authoriserId
+  /// elsewhere in this schema.
+  assignedByUserId String?
+
+  /// The vendor's EXPLICIT per-flat quote at confirm time (committee-relayed
+  /// — see ServiceRequestsService.confirm's doc comment for why this is
+  /// never auto-summed from the frozen PricingCard's lines). Applied
+  /// identically to every participating flat's escrow Payment/JobCard —
+  /// mirrors Offer.unitPrice's "major units (rupees)" convention.
+  vendorConfirmedContribution Decimal? @db.Decimal(14, 2)
+  /// The vendor's current published PricingCard at the moment of confirm —
+  /// FROZEN here permanently: a later revision/republish of that category
+  /// never changes what this request already confirmed against. SetNull
+  /// rather than Cascade for the same "never take history down with it"
+  /// reason as assignedVendorId.
+  frozenPricingCardId String?
+
+  /// Set the moment the join threshold is met (status flips OPEN -> POOLED).
+  pooledAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   society            Society         @relation(fields: [societyId], references: [id], onDelete: Cascade)
   creator            User            @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-  taggedVendor       Vendor?         @relation(fields: [taggedVendorId], references: [id], onDelete: SetNull)
+  taggedVendor       Vendor?         @relation("ServiceRequestTaggedVendor", fields: [taggedVendorId], references: [id], onDelete: SetNull)
+  raisedByFlat       Flat?           @relation(fields: [raisedByFlatId], references: [id], onDelete: SetNull)
+  assignedVendor     Vendor?         @relation("ServiceRequestAssignedVendor", fields: [assignedVendorId], references: [id], onDelete: SetNull)
+  frozenPricingCard  PricingCard?    @relation(fields: [frozenPricingCardId], references: [id], onDelete: SetNull)
   participations     Participation[]
-  /// Phase 5 Flow B: Commitment rows sourced from this service request once fired (see Commitment.serviceRequestId).
+  /// Phase 5 Flow B / Phase 8.2: Commitment rows sourced from this service request once fired/confirmed (see Commitment.serviceRequestId).
   bulkBuyCommitments Commitment[]
 
   @@index([societyId, status])
   @@index([closesAt])
   @@index([taggedVendorId])
+  @@index([assignedVendorId])
+  @@index([raisedByFlatId])
   @@map("service_requests")
 }
 
@@ -852,6 +949,19 @@ model Participation {
   /// backfill SQL). Additive data only in this phase.
   flatId           String
 
+  /// Phase 8.2: the confirmed per-flat contribution, snapshotted from
+  /// ServiceRequest.vendorConfirmedContribution the moment the request is
+  /// CONFIRMED (see ServiceRequestsService.confirm). Null until then, and
+  /// forever null for a pre-8.2 pollType (EVENT/BULK_BUY_RESIDENT), which
+  /// keep using Commitment as their money record instead.
+  contribution Decimal? @db.Decimal(14, 2)
+  /// Phase 8.2: ACTIVE (default — counts toward the join threshold and is
+  /// carried into confirm) or LAPSED (set on every Participation of a
+  /// request that closed below threshold — see
+  /// ServiceRequestsService.closeBelowThreshold). Additive/default so every
+  /// pre-8.2 row (and every EVENT/BULK_BUY_RESIDENT join) stays ACTIVE.
+  status ParticipationStatus @default(ACTIVE)
+
   createdAt DateTime @default(now())
 
   serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
@@ -860,6 +970,12 @@ model Participation {
 
   @@unique([serviceRequestId, residentId])
   @@map("participations")
+}
+
+/// Phase 8.2 — see Participation.status's doc comment.
+enum ParticipationStatus {
+  ACTIVE
+  LAPSED
 }
 
 // ---------------------------------------------------------------------------
