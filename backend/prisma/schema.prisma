@@ -191,6 +191,12 @@ model Society {
   bookings        Booking[]
   /// Phase 9.1 — see VirtualAccount's doc comment.
   virtualAccounts VirtualAccount[]
+  /// Phase 9.2 — derived maintenance obligations (one per flat per period).
+  maintenanceCharges  MaintenanceCharge[]
+  /// Phase 9.5 — ingested bank-statement credit lines awaiting treasurer allocation.
+  bankStatementLines  BankStatementLine[]
+  /// Phase 9.6 — dual-authorised cross-pocket journal transfers.
+  pocketTransfers     PocketTransfer[]
 
   @@map("societies")
 }
@@ -212,6 +218,10 @@ model Flat {
   raisedServiceRequests ServiceRequest[]
   /// Phase 9.1 — this flat's one attribution key (see VirtualAccount's doc comment). Lazily provisioned; may be null for a flat older than this phase until backfilled.
   virtualAccount        VirtualAccount?
+  /// Phase 9.2 — this flat's derived maintenance obligations (one per period).
+  maintenanceCharges    MaintenanceCharge[]
+  /// Phase 9.5 — bank-statement lines whose narration substring-matched this flat's VirtualAccount.code.
+  bankStatementLines    BankStatementLine[]
 
   @@unique([societyId, unitNo])
   @@map("flats")
@@ -1580,4 +1590,183 @@ model MilestoneAuthorisation {
 
   @@unique([milestoneId, authoriserId])
   @@map("milestone_authorisations")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9.2 — Maintenance billing (BACKEND_HANDOFF.md §6 / 9.2)
+// ---------------------------------------------------------------------------
+
+/// Lifecycle of a derived maintenance obligation. "Overdue" is NOT a stored
+/// status — it is derived from dueDate at read time; status only tracks how
+/// much of (amount + lateFeeAccrued) has been settled.
+enum MaintenanceChargeStatus {
+  PENDING
+  PARTIAL
+  PAID
+  WAIVED
+}
+
+/// Phase 9.2 — the one genuine billing gap the architecture pass found: a
+/// concrete monthly obligation per flat. `amount` is a SNAPSHOT of
+/// Flat.maintenanceAmount at generation time (the rate can change later
+/// without rewriting history). Late fees accrue into `lateFeeAccrued` via
+/// MaintenanceBillingService.accrueLateFees (see late-fee.util.ts, config in
+/// Society.config.lateFee). `paidAmount` is settled against
+/// (amount + lateFeeAccrued); PaymentsService.applyCapture credits the
+/// MAINTENANCE pocket and advances this row when a maintenance-linked payment
+/// is captured. Generation emits `bill.published` via
+/// RealtimeService.emitToUser post-commit.
+model MaintenanceCharge {
+  id             String                  @id @default(cuid())
+  societyId      String
+  flatId         String
+  /// Billing period, 'YYYY-MM'.
+  period         String
+  /// Snapshot of Flat.maintenanceAmount at generation time.
+  amount         Decimal                 @db.Decimal(10, 2)
+  /// Cumulative accrued late fee (grows on each accrueLateFees pass).
+  lateFeeAccrued Decimal                 @default(0) @db.Decimal(10, 2)
+  /// Amount settled so far, against (amount + lateFeeAccrued).
+  paidAmount     Decimal                 @default(0) @db.Decimal(10, 2)
+  dueDate        DateTime
+  status         MaintenanceChargeStatus @default(PENDING)
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+
+  society        Society         @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  flat           Flat            @relation(fields: [flatId], references: [id], onDelete: Cascade)
+  instalmentPlan InstalmentPlan?
+
+  @@unique([flatId, period])
+  @@index([societyId])
+  @@index([status])
+  @@map("maintenance_charges")
+}
+
+enum InstalmentPlanStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+/// Phase 9.2 — an optional plan letting a resident settle one
+/// MaintenanceCharge across several instalments. The plan does not itself
+/// move money (payments still flow through the Razorpay webhook →
+/// applyCapture path); it records the agreed cadence so the bills/home views
+/// can show "instalment k of n" and a per-instalment due amount. The final
+/// instalment absorbs any rounding remainder.
+model InstalmentPlan {
+  id                  String               @id @default(cuid())
+  maintenanceChargeId String               @unique
+  /// Total number of instalments.
+  instalments         Int
+  /// Nominal per-instalment amount (the last one absorbs the remainder).
+  instalmentAmount    Decimal              @db.Decimal(10, 2)
+  status              InstalmentPlanStatus @default(ACTIVE)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  maintenanceCharge MaintenanceCharge @relation(fields: [maintenanceChargeId], references: [id], onDelete: Cascade)
+
+  @@map("instalment_plans")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9.5 — Bank-statement ingestion (BACKEND_HANDOFF.md §6 / 9.5)
+// ---------------------------------------------------------------------------
+
+/// Lifecycle of an ingested statement credit line. Matching is a SUBSTRING
+/// search of `narration` against VirtualAccount.code and only ever NARROWS to
+/// a candidate flat (MATCHED) — it never auto-posts. Every line, matched or
+/// not, requires an explicit treasurer `allocate` action to reach ALLOCATED.
+enum BankStatementLineStatus {
+  UNMATCHED
+  MATCHED
+  ALLOCATED
+  IGNORED
+}
+
+/// Phase 9.5 — one credit line ingested from a bank-statement CSV (body-string
+/// CSV, mirroring flat-csv.util.ts + flats.service.ts; no multipart in this
+/// repo). Bank-narration matching narrows `matchedFlatId` by substring on
+/// VirtualAccount.code; allocation to a pocket is always an explicit treasurer
+/// action, recorded via allocatedById/allocatedAt.
+model BankStatementLine {
+  id            String                  @id @default(cuid())
+  societyId     String
+  /// Value date parsed from the statement row.
+  valueDate     DateTime
+  /// Credit amount (rupees).
+  amount        Decimal                 @db.Decimal(14, 2)
+  /// Raw narration / description text as it appeared on the statement.
+  narration     String
+  /// Bank reference / UTR, when present in the CSV.
+  reference     String?
+  /// Substring-narrowed candidate flat; never auto-posted. Null when unmatched.
+  matchedFlatId String?
+  status        BankStatementLineStatus @default(UNMATCHED)
+  /// The treasurer who explicitly allocated this line (post-allocation only).
+  allocatedById String?
+  allocatedAt   DateTime?
+  createdAt     DateTime                @default(now())
+
+  society     Society @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  matchedFlat Flat?   @relation(fields: [matchedFlatId], references: [id], onDelete: SetNull)
+
+  @@index([societyId])
+  @@index([status])
+  @@map("bank_statement_lines")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9.6 — Dual-authorised pocket transfers (BACKEND_HANDOFF.md §6 / 9.6)
+// ---------------------------------------------------------------------------
+
+/// Lifecycle of a cross-pocket journal transfer.
+enum PocketTransferStatus {
+  PENDING
+  EXECUTED
+  CANCELLED
+}
+
+/// Phase 9.6 — a proposed cross-pocket journal (e.g. MAINTENANCE → SINKING).
+/// Mirrors Payout's shape and reuses approval-ladder.util.ts with a FLOOR of 2
+/// (never single-officer — always dual-authorised). The ledger post
+/// (fromKind → toKind) only fires once the required number of DISTINCT
+/// officers have authorised; advisory-lock namespace 56 guards execution.
+model PocketTransfer {
+  id            String               @id @default(cuid())
+  societyId     String
+  fromKind      AccountKind
+  toKind        AccountKind
+  amount        Decimal              @db.Decimal(14, 2)
+  reasonCode    String
+  note          String?
+  status        PocketTransferStatus @default(PENDING)
+  requestedById String
+  executedAt    DateTime?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  society        Society                       @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  authorisations PocketTransferAuthorisation[]
+
+  @@index([societyId])
+  @@map("pocket_transfers")
+}
+
+/// Phase 9.6 — one row per DISTINCT human officer who has authorised this
+/// transfer, keyed by authoriserId. Mirrors PayoutAuthorisation exactly
+/// (`@@unique([transferId, authoriserId])` so the same identity cannot be
+/// counted twice).
+model PocketTransferAuthorisation {
+  id           String   @id @default(cuid())
+  transferId   String
+  authoriserId String
+  createdAt    DateTime @default(now())
+
+  transfer PocketTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+
+  @@unique([transferId, authoriserId])
+  @@map("pocket_transfer_authorisations")
 }
