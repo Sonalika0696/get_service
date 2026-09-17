@@ -177,36 +177,48 @@ model Society {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  flats              Flat[]
-  roles              Role[]
-  auditLogs          AuditLog[]
-  jobBlogPosts       JobBlogPost[]
+  flats                Flat[]
+  roles                Role[]
+  auditLogs            AuditLog[]
+  jobBlogPosts         JobBlogPost[]
   /// Phase 7.1: goes through VendorSocietyLink now, not a direct Vendor.societyId FK — see VendorSocietyLink's doc comment.
-  vendorLinks        VendorSocietyLink[]
-  serviceRequests    ServiceRequest[]
-  accounts           Account[]
-  ledgerEntries      LedgerEntry[]
-  payments           Payment[]
-  offers             Offer[]
-  bookings           Booking[]
+  vendorLinks          VendorSocietyLink[]
+  serviceRequests      ServiceRequest[]
+  accounts             Account[]
+  ledgerEntries        LedgerEntry[]
+  payments             Payment[]
+  offers               Offer[]
+  bookings             Booking[]
   /// Phase 9.1 — see VirtualAccount's doc comment.
-  virtualAccounts    VirtualAccount[]
+  virtualAccounts      VirtualAccount[]
   /// Phase 9.2 — derived maintenance obligations (one per flat per period).
-  maintenanceCharges MaintenanceCharge[]
+  maintenanceCharges   MaintenanceCharge[]
   /// Phase 9.5 — ingested bank-statement credit lines awaiting treasurer allocation.
-  bankStatementLines BankStatementLine[]
+  bankStatementLines   BankStatementLine[]
   /// Phase 9.6 — dual-authorised cross-pocket journal transfers.
-  pocketTransfers    PocketTransfer[]
+  pocketTransfers      PocketTransfer[]
   /// Phase 10 — utility meters (flat sub-meters, common-area and bulk-supply).
-  meters             Meter[]
+  meters               Meter[]
   /// Phase 10 — versioned tariff schedules (electricity/water), by effective date.
-  tariffSchedules    TariffSchedule[]
+  tariffSchedules      TariffSchedule[]
   /// Phase 10 — utility billing cycles (one per utility per period).
-  billingCycles      BillingCycle[]
+  billingCycles        BillingCycle[]
   /// Phase 10 — published per-flat utility bills.
-  flatBills          FlatBill[]
+  flatBills            FlatBill[]
   /// Phase 10 — per-cycle water source cost pool (municipal/tanker/borewell).
-  waterSources       WaterSource[]
+  waterSources         WaterSource[]
+  /// Phase 11 — committee-created events (M8).
+  events               Event[]
+  /// Phase 11 — vendor charge sheets and their disputes (M4).
+  chargeSheets         ChargeSheet[]
+  disputes             Dispute[]
+  /// Phase 12 — corpus fixed deposits (M12).
+  fixedDeposits        FixedDeposit[]
+  /// Phase 12 — health camps (M9).
+  healthCamps          HealthCamp[]
+  /// Phase 12 — donation campaigns and welfare disbursements (M10).
+  donationCampaigns    DonationCampaign[]
+  welfareDisbursements WelfareDisbursement[]
 
   @@map("societies")
 }
@@ -224,23 +236,30 @@ model Flat {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  society               Society             @relation(fields: [societyId], references: [id], onDelete: Cascade)
-  occupancies           Occupancy[]
-  bulkBuyCommitments    Commitment[]
-  jobCards              JobCard[]
-  participations        Participation[]
+  society                     Society                      @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  occupancies                 Occupancy[]
+  bulkBuyCommitments          Commitment[]
+  jobCards                    JobCard[]
+  participations              Participation[]
   /// Phase 8.2 — service requests raised for this flat (see ServiceRequest.raisedByFlatId).
-  raisedServiceRequests ServiceRequest[]
+  raisedServiceRequests       ServiceRequest[]
   /// Phase 9.1 — this flat's one attribution key (see VirtualAccount's doc comment). Lazily provisioned; may be null for a flat older than this phase until backfilled.
-  virtualAccount        VirtualAccount?
+  virtualAccount              VirtualAccount?
   /// Phase 9.2 — this flat's derived maintenance obligations (one per period).
-  maintenanceCharges    MaintenanceCharge[]
+  maintenanceCharges          MaintenanceCharge[]
   /// Phase 9.5 — bank-statement lines whose narration substring-matched this flat's VirtualAccount.code.
-  bankStatementLines    BankStatementLine[]
+  bankStatementLines          BankStatementLine[]
   /// Phase 10 — this flat's utility meters (sub-meters; one per utility typically).
-  meters                Meter[]
+  meters                      Meter[]
   /// Phase 10 — this flat's published utility bills (one per billing cycle).
-  flatBills             FlatBill[]
+  flatBills                   FlatBill[]
+  /// Phase 11 — event opt-ins, charge-sheet decisions and disputes raised for this flat.
+  eventRegistrations          EventRegistration[]
+  chargeSheetAcknowledgements ChargeSheetAcknowledgement[]
+  disputes                    Dispute[]
+  /// Phase 12 — health camp registrations and donation contributions.
+  campRegistrations           CampRegistration[]
+  donationContributions       DonationContribution[]
 
   @@unique([societyId, unitNo])
   @@map("flats")
@@ -1087,6 +1106,15 @@ enum AccountKind {
   SINKING
   /// Corpus-fund collections.
   CORPUS
+
+  // Phase 12 — corpus treasury (M12). Additive only, same lazy-creation
+  // semantics as the pockets above.
+  /// Principal currently placed in fixed deposits (CORPUS <-> FIXED_DEPOSIT).
+  /// Still the society's own asset; the platform never holds it (I2).
+  FIXED_DEPOSIT
+  /// Society income account for treasury interest. Interest enters
+  /// EXTERNAL -> INTEREST_INCOME and may NEVER be credited to a flat (I4).
+  INTEREST_INCOME
 }
 
 model Account {
@@ -1481,11 +1509,13 @@ model Booking {
   /// authorisation skips it.
   retentionSetAside   Boolean   @default(false)
 
-  society    Society     @relation(fields: [societyId], references: [id], onDelete: Cascade)
-  vendor     Vendor      @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-  jobCards   JobCard[]
-  payout     Payout?
-  milestones Milestone[]
+  society     Society      @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  vendor      Vendor       @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  jobCards    JobCard[]
+  payout      Payout?
+  milestones  Milestone[]
+  /// Phase 11 — the vendor's itemised charge sheet for this engagement (at most one).
+  chargeSheet ChargeSheet?
 
   @@index([societyId])
   @@map("bookings")
@@ -2081,4 +2111,683 @@ model MeterReadingAnomaly {
   @@index([billingCycleId])
   @@index([meterId])
   @@map("meter_reading_anomalies")
+}
+
+// ===========================================================================
+// Phase 11 + 12 schema freeze (BACKEND_PLAN.md Phases 11-12; RoU M4/M8/M9/M10/
+// M12, as amended by DOC_AMENDMENTS_V2.md). ONE additive migration, authored up
+// front by the orchestrator so every Phase 11/12 code lane runs schema-free.
+//
+// Conventions (matching the rest of this file):
+//  - Money is Decimal(14,2) major units (rupees); per-flat charges Decimal(10,2).
+//  - Society/Flat/Booking are real FKs. Resident and officer ids are LOOSE
+//    string pointers (same shape as PayoutAuthorisation.authoriserId and
+//    ServiceRequest.assignedByUserId) so the shared User model does not grow a
+//    back-relation per feature. Services validate them.
+//  - Every money-OUT action is ladder-authorised through a sibling
+//    *Authorisation table with @@unique([parentId, authoriserId]) - the proven
+//    PocketTransfer pattern - so repeat-identity approval is rejected by the DB.
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// M8 - Events (Phase 11). Committee-created ONLY; per-flat opt-in charge; the
+// refund and surplus policies are FIXED at creation and never editable after.
+// ---------------------------------------------------------------------------
+
+enum EventStatus {
+  /// Registration window open (or not yet opened - see registrationOpensAt).
+  OPEN
+  /// Registration closed; the event is going ahead.
+  CLOSED
+  /// Cancelled by the committee, or auto-cancelled for not reaching
+  /// minRegistrations. Refunds follow refundOnCancelPct. Terminal.
+  CANCELLED
+  /// The event has taken place; awaiting post-event settlement.
+  COMPLETED
+  /// Collections reconciled against expenses and the surplus disposed of
+  /// per surplusPolicy. Terminal.
+  SETTLED
+}
+
+enum EventSurplusPolicy {
+  /// Any surplus after expenses moves EVENTS -> WELFARE.
+  WELFARE_FUND
+  /// Any surplus is refunded to paid registrations pro rata.
+  PRO_RATA_REFUND
+}
+
+enum EventRegistrationStatus {
+  CONFIRMED
+  /// Capacity was full at opt-in; promoted automatically (lowest
+  /// waitlistPosition first) when a CONFIRMED registration is withdrawn.
+  WAITLISTED
+  /// The flat withdrew; refund per refundOnWithdrawalPct if on/before
+  /// withdrawalDeadline.
+  WITHDRAWN
+  /// The event itself was cancelled.
+  CANCELLED
+}
+
+enum EventSettlementStatus {
+  PENDING
+  EXECUTED
+  CANCELLED
+}
+
+model Event {
+  id          String @id @default(cuid())
+  societyId   String
+  /// Committee officer who created it (loose pointer).
+  createdById String
+
+  title       String
+  /// One-line summary for list cards.
+  summary     String?
+  description String
+  venue       String?
+
+  startsAt             DateTime
+  endsAt               DateTime?
+  registrationOpensAt  DateTime
+  registrationClosesAt DateTime
+
+  /// Max CONFIRMED flats. Null = unlimited (no waitlist ever).
+  capacity         Int?
+  /// Below this many CONFIRMED flats at registrationClosesAt the event is
+  /// auto-cancelled and refunded. Null = no minimum.
+  minRegistrations Int?
+
+  /// Per-flat opt-in charge. 0 = free event.
+  chargePerFlat Decimal @default(0) @db.Decimal(10, 2)
+  /// Optional concession rules, validated by the events service. Shape:
+  /// [{ "code": "SENIOR", "label": "Senior citizen household", "pct": 50 }].
+  concessions   Json?
+
+  // ---- Policy, FIXED at creation (never updated after) --------------------
+  /// Percentage of the paid amount refunded when the event is cancelled
+  /// (including auto-cancel for under-subscription). 0-100.
+  refundOnCancelPct     Decimal            @default(100) @db.Decimal(5, 2)
+  /// Percentage refunded when a flat withdraws on/before withdrawalDeadline.
+  /// After the deadline nothing is refunded. 0-100.
+  refundOnWithdrawalPct Decimal            @default(0) @db.Decimal(5, 2)
+  withdrawalDeadline    DateTime?
+  surplusPolicy         EventSurplusPolicy @default(WELFARE_FUND)
+
+  status       EventStatus @default(OPEN)
+  cancelledAt  DateTime?
+  cancelReason String?
+  completedAt  DateTime?
+  settledAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  society       Society             @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  registrations EventRegistration[]
+  expenses      EventExpense[]
+  settlement    EventSettlement?
+
+  @@index([societyId, status])
+  @@index([startsAt])
+  @@map("events")
+}
+
+model EventRegistration {
+  id         String @id @default(cuid())
+  eventId    String
+  flatId     String
+  /// Resident who opted the flat in (loose pointer).
+  residentId String
+
+  status           EventRegistrationStatus @default(CONFIRMED)
+  /// 1-based queue position while WAITLISTED; null otherwise.
+  waitlistPosition Int?
+  /// Concession code applied at opt-in (must match Event.concessions), if any.
+  concessionCode   String?
+
+  /// Snapshot at opt-in: chargePerFlat less any concession. Never recomputed.
+  amountDue      Decimal @db.Decimal(10, 2)
+  paidAmount     Decimal @default(0) @db.Decimal(10, 2)
+  refundedAmount Decimal @default(0) @db.Decimal(10, 2)
+  /// Loose pointer to the collecting Payment, once one exists.
+  paymentId      String?
+
+  promotedAt  DateTime?
+  withdrawnAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  flat  Flat  @relation(fields: [flatId], references: [id], onDelete: Cascade)
+
+  /// Per-flat opt-in: one registration per flat per event.
+  @@unique([eventId, flatId])
+  @@index([eventId, status])
+  @@map("event_registrations")
+}
+
+/// A vendor invoice or other cost recorded against an event, reconciled at
+/// settlement. Recording is not paying - money only moves at settlement.
+model EventExpense {
+  id           String   @id @default(cuid())
+  eventId      String
+  /// Optional directory vendor (loose pointer).
+  vendorId     String?
+  payeeName    String
+  description  String
+  amount       Decimal  @db.Decimal(14, 2)
+  invoiceRef   String?
+  recordedById String
+  createdAt    DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@map("event_expenses")
+}
+
+/// Post-event settlement: one per event, executed once the approval ladder
+/// is satisfied. Figures are snapshotted when the settlement is proposed.
+model EventSettlement {
+  id             String                @id @default(cuid())
+  eventId        String                @unique
+  totalCollected Decimal               @db.Decimal(14, 2)
+  totalRefunded  Decimal               @db.Decimal(14, 2)
+  totalExpenses  Decimal               @db.Decimal(14, 2)
+  /// totalCollected - totalRefunded - totalExpenses. May be negative (deficit).
+  surplus        Decimal               @db.Decimal(14, 2)
+  surplusPolicy  EventSurplusPolicy
+  status         EventSettlementStatus @default(PENDING)
+  requestedById  String
+  executedAt     DateTime?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  event          Event                          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  authorisations EventSettlementAuthorisation[]
+
+  @@map("event_settlements")
+}
+
+model EventSettlementAuthorisation {
+  id           String   @id @default(cuid())
+  settlementId String
+  authoriserId String
+  createdAt    DateTime @default(now())
+
+  settlement EventSettlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+
+  @@unique([settlementId, authoriserId])
+  @@map("event_settlement_authorisations")
+}
+
+// ---------------------------------------------------------------------------
+// M4 remainder - charge sheets, variance, disputes (Phase 11). A charge sheet
+// is submitted by the VENDOR against a Booking (the pooled engagement) and
+// matched line by line against the frozen PricingCard. Out-of-card lines are
+// flagged automatically; participating flats acknowledge or dispute.
+// ---------------------------------------------------------------------------
+
+enum ChargeSheetStatus {
+  /// Submitted by the vendor; awaiting per-flat acknowledgement.
+  SUBMITTED
+  /// Every participating flat acknowledged, and no dispute is open.
+  ACKNOWLEDGED
+  /// At least one dispute is open.
+  DISPUTED
+  /// All disputes adjudicated; hold-back amounts are final.
+  RESOLVED
+  /// Vendor settled under the approval ladder, less hold-back. Terminal.
+  SETTLED
+}
+
+enum ChargeLineVariance {
+  /// Matched a frozen card line at or below its rate.
+  IN_CARD
+  /// Matched a frozen card line but charged above its rate.
+  ABOVE_CARD_RATE
+  /// No matching line on the frozen card at all.
+  NOT_ON_CARD
+}
+
+enum ChargeSheetAckDecision {
+  ACKNOWLEDGED
+  DISPUTED
+}
+
+enum DisputeCategory {
+  OUT_OF_CARD_CHARGE
+  RATE_ABOVE_CARD
+  WORK_NOT_DONE
+  QUALITY
+  OTHER
+}
+
+enum DisputeTriagePriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum DisputeStatus {
+  OPEN
+  /// Upheld in full: the full disputedAmount is withheld from the vendor.
+  UPHELD
+  /// Upheld in part: awardedAmount (< disputedAmount) is withheld.
+  PARTIALLY_UPHELD
+  /// Rejected: nothing withheld.
+  REJECTED
+}
+
+model ChargeSheet {
+  id                  String  @id @default(cuid())
+  societyId           String
+  /// One charge sheet per engagement.
+  bookingId           String  @unique
+  vendorId            String
+  /// The vendor-principal user who submitted it (loose pointer).
+  submittedById       String
+  /// The PricingCard version frozen for this engagement at confirmation
+  /// (loose history pointer - never follows later revisions). Null for
+  /// engagements with no frozen card (e.g. legacy Flow A offers); then every
+  /// line is NOT_ON_CARD by definition.
+  frozenPricingCardId String?
+
+  status ChargeSheetStatus @default(SUBMITTED)
+
+  /// Sum of line amounts as submitted.
+  totalAmount    Decimal @db.Decimal(14, 2)
+  /// Sum of each line priced at the frozen card rate (0 for NOT_ON_CARD).
+  cardTotal      Decimal @db.Decimal(14, 2)
+  /// totalAmount - cardTotal (positive = vendor charged above card).
+  varianceAmount Decimal @db.Decimal(14, 2)
+  hasVariance    Boolean @default(false)
+  /// Sum of awardedAmount across adjudicated disputes; withheld at settlement.
+  holdbackAmount Decimal @default(0) @db.Decimal(14, 2)
+
+  vendorNote  String?
+  submittedAt DateTime  @default(now())
+  resolvedAt  DateTime?
+  settledAt   DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  society          Society                      @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  booking          Booking                      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  lines            ChargeSheetLine[]
+  acknowledgements ChargeSheetAcknowledgement[]
+  disputes         Dispute[]
+
+  @@index([societyId, status])
+  @@index([vendorId])
+  @@map("charge_sheets")
+}
+
+model ChargeSheetLine {
+  id             String             @id @default(cuid())
+  chargeSheetId  String
+  /// Matched frozen card line (loose pointer); null when NOT_ON_CARD.
+  pricingLineId  String?
+  label          String
+  basis          PricingBasis
+  quantity       Decimal            @db.Decimal(10, 2)
+  rate           Decimal            @db.Decimal(10, 2)
+  amount         Decimal            @db.Decimal(14, 2)
+  /// Snapshot of the matched card line rate; null when NOT_ON_CARD.
+  cardRate       Decimal?           @db.Decimal(10, 2)
+  variance       ChargeLineVariance
+  /// amount - (quantity * cardRate); the full amount when NOT_ON_CARD.
+  varianceAmount Decimal            @default(0) @db.Decimal(14, 2)
+  note           String?
+
+  chargeSheet ChargeSheet @relation(fields: [chargeSheetId], references: [id], onDelete: Cascade)
+  disputes    Dispute[]
+
+  @@index([chargeSheetId])
+  @@map("charge_sheet_lines")
+}
+
+/// One decision per participating flat per charge sheet.
+model ChargeSheetAcknowledgement {
+  id            String                 @id @default(cuid())
+  chargeSheetId String
+  flatId        String
+  residentId    String
+  decision      ChargeSheetAckDecision
+  createdAt     DateTime               @default(now())
+
+  chargeSheet ChargeSheet @relation(fields: [chargeSheetId], references: [id], onDelete: Cascade)
+  flat        Flat        @relation(fields: [flatId], references: [id], onDelete: Cascade)
+
+  @@unique([chargeSheetId, flatId])
+  @@map("charge_sheet_acknowledgements")
+}
+
+model Dispute {
+  id                String  @id @default(cuid())
+  societyId         String
+  chargeSheetId     String
+  /// The specific line disputed, when the dispute is line-level.
+  chargeSheetLineId String?
+  flatId            String
+  raisedById        String
+
+  category       DisputeCategory
+  reason         String
+  disputedAmount Decimal         @db.Decimal(14, 2)
+
+  /// Automatic triage by category and amount at intake.
+  triagePriority DisputeTriagePriority
+  triageReason   String
+
+  status          DisputeStatus @default(OPEN)
+  /// Amount withheld from the vendor once adjudicated (0 when REJECTED).
+  awardedAmount   Decimal?      @db.Decimal(14, 2)
+  resolution      String?
+  adjudicatedById String?
+  adjudicatedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  society         Society          @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  chargeSheet     ChargeSheet      @relation(fields: [chargeSheetId], references: [id], onDelete: Cascade)
+  chargeSheetLine ChargeSheetLine? @relation(fields: [chargeSheetLineId], references: [id], onDelete: SetNull)
+  flat            Flat             @relation(fields: [flatId], references: [id], onDelete: Cascade)
+
+  @@index([societyId, status])
+  @@index([chargeSheetId])
+  @@map("disputes")
+}
+
+// ---------------------------------------------------------------------------
+// M12 - Corpus treasury: fixed deposits (Phase 12). Placement, renewal and
+// premature withdrawal each need two distinct officer identities. Principal
+// moves CORPUS <-> FIXED_DEPOSIT; interest enters EXTERNAL -> INTEREST_INCOME
+// and may NEVER be credited to a flat (invariant I4). Sweep-rule parameters
+// (operating-float floor, minimum tenor) live in Society.config.
+// ---------------------------------------------------------------------------
+
+enum FixedDepositStatus {
+  /// Proposed (by the sweep rule or an officer); awaiting authorisation.
+  PROPOSED
+  /// Placed with the bank; principal moved CORPUS -> FIXED_DEPOSIT.
+  ACTIVE
+  /// Reached maturity and closed; principal back to CORPUS, interest booked.
+  MATURED
+  /// Closed early under dual authorisation.
+  WITHDRAWN
+  /// A proposal that was never placed.
+  CANCELLED
+}
+
+enum FixedDepositAction {
+  PLACE
+  WITHDRAW
+}
+
+model FixedDeposit {
+  id        String @id @default(cuid())
+  societyId String
+
+  bankName  String
+  principal Decimal @db.Decimal(14, 2)
+  /// Annual rate, percentage (e.g. 7.10).
+  ratePct   Decimal @db.Decimal(5, 2)
+  tenorDays Int
+
+  status          FixedDepositStatus @default(PROPOSED)
+  /// True when generated by the sweep rule rather than an officer.
+  proposedBySweep Boolean            @default(false)
+  initiatedById   String
+
+  placedAt       DateTime?
+  maturesAt      DateTime?
+  /// Projected at placement: principal plus simple interest over tenorDays.
+  maturityAmount Decimal?  @db.Decimal(14, 2)
+  /// Actual interest booked on close.
+  interestEarned Decimal?  @db.Decimal(14, 2)
+  closedAt       DateTime?
+  closeReason    String?
+  /// When this deposit is a renewal, the deposit it rolled over from.
+  renewedFromId  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  society        Society                     @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  authorisations FixedDepositAuthorisation[]
+
+  @@index([societyId, status])
+  @@index([maturesAt])
+  @@map("fixed_deposits")
+}
+
+model FixedDepositAuthorisation {
+  id           String             @id @default(cuid())
+  depositId    String
+  action       FixedDepositAction
+  authoriserId String
+  createdAt    DateTime           @default(now())
+
+  deposit FixedDeposit @relation(fields: [depositId], references: [id], onDelete: Cascade)
+
+  @@unique([depositId, action, authoriserId])
+  @@map("fixed_deposit_authorisations")
+}
+
+// ---------------------------------------------------------------------------
+// M9 - Health camps (Phase 12). INVARIANT I5: no field anywhere in these
+// models can hold clinical information. Registration captures identity and
+// slot ONLY; the provider receives name, flat and slot. Do NOT add a
+// free-text field to CampRegistration - a schema change is the one visible
+// place such a regression would have to appear.
+// ---------------------------------------------------------------------------
+
+enum HealthCampStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+  COMPLETED
+}
+
+enum CampRegistrationStatus {
+  REGISTERED
+  CANCELLED
+}
+
+model HealthCamp {
+  id          String @id @default(cuid())
+  societyId   String
+  createdById String
+
+  providerName          String
+  title                 String
+  /// Camp-level logistics only (what is offered, what to bring). Never
+  /// per-person information.
+  description           String?
+  venue                 String?
+  campDate              DateTime
+  registrationClosesAt  DateTime
+  /// Per-registration charge. 0 = free.
+  chargePerRegistration Decimal  @default(0) @db.Decimal(10, 2)
+
+  status    HealthCampStatus @default(OPEN)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  society       Society            @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  slots         HealthCampSlot[]
+  registrations CampRegistration[]
+
+  @@index([societyId, status])
+  @@map("health_camps")
+}
+
+model HealthCampSlot {
+  id       String   @id @default(cuid())
+  campId   String
+  startsAt DateTime
+  endsAt   DateTime
+  capacity Int
+
+  camp          HealthCamp         @relation(fields: [campId], references: [id], onDelete: Cascade)
+  registrations CampRegistration[]
+
+  @@index([campId])
+  @@map("health_camp_slots")
+}
+
+model CampRegistration {
+  id           String @id @default(cuid())
+  campId       String
+  slotId       String
+  flatId       String
+  /// Resident who registered (loose pointer).
+  residentId   String
+  /// The attendee name - the ONLY personal detail shared with the provider.
+  attendeeName String
+
+  status     CampRegistrationStatus @default(REGISTERED)
+  amountDue  Decimal                @default(0) @db.Decimal(10, 2)
+  paidAmount Decimal                @default(0) @db.Decimal(10, 2)
+  paymentId  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  camp HealthCamp     @relation(fields: [campId], references: [id], onDelete: Cascade)
+  slot HealthCampSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  flat Flat           @relation(fields: [flatId], references: [id], onDelete: Cascade)
+
+  @@unique([campId, flatId, attendeeName])
+  @@index([slotId])
+  @@map("camp_registrations")
+}
+
+// ---------------------------------------------------------------------------
+// M10 - Donations (Phase 12). Two modes with different legal characters:
+// INTERNAL_WELFARE collects into the society WELFARE pocket and disburses
+// under dual authorisation; EXTERNAL_PASS_THROUGH is paid by the resident
+// DIRECTLY to the recipient organisation - the platform records participation
+// only and never receives the money. INR from resident accounts only (FCRA).
+// Anonymity applies toward other residents, never toward the audit chain.
+// ---------------------------------------------------------------------------
+
+enum DonationMode {
+  INTERNAL_WELFARE
+  EXTERNAL_PASS_THROUGH
+}
+
+enum DonationCampaignStatus {
+  OPEN
+  CLOSED
+}
+
+enum DonationContributionStatus {
+  /// INTERNAL: pledged, awaiting payment capture.
+  PENDING
+  /// INTERNAL: captured into the WELFARE pocket.
+  RECEIVED
+  /// EXTERNAL: participation recorded (paid directly to the organisation).
+  RECORDED
+  CANCELLED
+}
+
+enum WelfareDisbursementStatus {
+  PENDING
+  EXECUTED
+  CANCELLED
+}
+
+model DonationCampaign {
+  id          String @id @default(cuid())
+  societyId   String
+  createdById String
+
+  mode         DonationMode
+  title        String
+  /// Bye-law purpose (INTERNAL) or the campaign stated cause (EXTERNAL).
+  purpose      String
+  targetAmount Decimal?     @db.Decimal(14, 2)
+
+  /// EXTERNAL only: the registered recipient organisation.
+  recipientOrgName   String?
+  recipientOrgUrl    String?
+  /// EXTERNAL only: the recipient issues 80G certificates (the platform never does).
+  recipientIssues80G Boolean @default(false)
+
+  opensAt  DateTime
+  closesAt DateTime?
+  status   DonationCampaignStatus @default(OPEN)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  society       Society                @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  contributions DonationContribution[]
+  disbursements WelfareDisbursement[]
+
+  @@index([societyId, status])
+  @@map("donation_campaigns")
+}
+
+model DonationContribution {
+  id         String  @id @default(cuid())
+  campaignId String
+  flatId     String
+  /// Always recorded, even when anonymous (the audit chain sees the contributor).
+  residentId String
+  amount     Decimal @db.Decimal(14, 2)
+  /// Hide the contributor from OTHER residents views only.
+  anonymous  Boolean @default(false)
+
+  status            DonationContributionStatus @default(PENDING)
+  /// INTERNAL: loose pointer to the collecting Payment.
+  paymentId         String?
+  /// EXTERNAL: the receipt/reference the resident got from the organisation.
+  externalReference String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  campaign DonationCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  flat     Flat             @relation(fields: [flatId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, status])
+  @@map("donation_contributions")
+}
+
+/// Money out of the WELFARE pocket, under dual authorisation, against a
+/// bye-law purpose. Optionally tied to the campaign that raised it.
+model WelfareDisbursement {
+  id            String                    @id @default(cuid())
+  societyId     String
+  campaignId    String?
+  payeeName     String
+  purpose       String
+  amount        Decimal                   @db.Decimal(14, 2)
+  status        WelfareDisbursementStatus @default(PENDING)
+  requestedById String
+  executedAt    DateTime?
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+
+  society        Society                            @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  campaign       DonationCampaign?                  @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  authorisations WelfareDisbursementAuthorisation[]
+
+  @@index([societyId, status])
+  @@map("welfare_disbursements")
+}
+
+model WelfareDisbursementAuthorisation {
+  id             String   @id @default(cuid())
+  disbursementId String
+  authoriserId   String
+  createdAt      DateTime @default(now())
+
+  disbursement WelfareDisbursement @relation(fields: [disbursementId], references: [id], onDelete: Cascade)
+
+  @@unique([disbursementId, authoriserId])
+  @@map("welfare_disbursement_authorisations")
 }
