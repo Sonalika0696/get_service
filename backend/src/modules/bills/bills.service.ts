@@ -5,7 +5,9 @@ import { RatificationStatus } from '../../generated/prisma/enums.js';
 import type { ResidentPrincipal } from '../../common/types/current-user.js';
 import { buildPage, decodeCursor, parsePageLimit, type KeysetCursor } from '../../common/pagination/cursor.util.js';
 
-export type BillKind = 'MAINTENANCE' | 'PROCUREMENT' | 'ELECTRICITY' | 'WATER';
+export type BillKind = 'MAINTENANCE' | 'PROCUREMENT' | 'ELECTRICITY' | 'WATER' | 'EVENT' | 'HEALTH_CAMP';
+
+const BILL_KINDS: readonly BillKind[] = ['MAINTENANCE', 'PROCUREMENT', 'ELECTRICITY', 'WATER', 'EVENT', 'HEALTH_CAMP'];
 
 /** Uniform projection every arm of the UNION produces — see BillsService.list's doc comment. */
 export interface BillLine {
@@ -77,7 +79,19 @@ interface RawBillRow {
  *    publishes — see BillingCycleService's compute/apportion stages, which
  *    build the row up progressively ahead of the publish stage).
  *
- * All three arms project the SAME 11 columns (see BillLine) so a future arm
+ * Two more arms (Phase 11/12) cover per-flat collections residents opt into:
+ *  - EVENT arm: `event_registrations` for the resident's flat(s) with a
+ *    non-zero per-flat charge, shown while it is an obligation (CONFIRMED)
+ *    or once money has moved (paidAmount > 0, e.g. later refunded after a
+ *    withdrawal or cancellation), so the hub doubles as statement history.
+ *    A WAITLISTED flat owes nothing until promoted and a free event is not
+ *    a bill, so neither appears. Due date = the event's start.
+ *  - HEALTH_CAMP arm: `camp_registrations` with a non-zero charge, on the
+ *    same "obligation or money moved" rule. Due date = the camp date. Only
+ *    identity/slot/money columns are read (SDD invariant I5: nothing about
+ *    health exists to read).
+ *
+ * All arms project the SAME 11 columns (see BillLine) so a future arm
  * (events, ...) slots in as one more `UNION ALL SELECT ...` block inside the
  * `bills` CTE below — the WHERE/ORDER BY/pagination wrapper around it never
  * needs to change. See the inline comment marking where that block goes.
@@ -211,8 +225,71 @@ export class BillsService {
         WHERE fb."flatId" IN (${Prisma.join(flatIds)})
           AND bc.stage = 'PUBLISHED'
 
+        UNION ALL
+
         -- ---------------------------------------------------------------
-        -- FUTURE ARMS (events, ...) slot in here: one more UNION ALL
+        -- EVENT arm (Phase 11, M8): paid event opt-ins for this resident's
+        -- flat(s). Status is derived from the money actually moved rather
+        -- than echoed from the registration, so the hub shows a
+        -- payment-oriented status consistent with the other arms.
+        -- ---------------------------------------------------------------
+        SELECT
+          er.id                                          AS id,
+          'EVENT'::text                                   AS kind,
+          ('Event – ' || e.title)                         AS title,
+          e.title                                         AS label,
+          er."amountDue"::text                            AS "amountDue",
+          er."paidAmount"::text                           AS "amountPaid",
+          (CASE
+            WHEN er.status IN ('WITHDRAWN', 'CANCELLED') AND er."paidAmount" > 0 AND er."refundedAmount" >= er."paidAmount" THEN 'REFUNDED'
+            WHEN er.status IN ('WITHDRAWN', 'CANCELLED') THEN er.status::text
+            WHEN er."paidAmount" >= er."amountDue" THEN 'PAID'
+            WHEN er."paidAmount" > 0 THEN 'PARTIAL'
+            ELSE 'PENDING'
+          END)                                            AS status,
+          e."startsAt"                                    AS "dueDate",
+          'Event opt-in charge (per flat)'                AS basis,
+          'EventRegistration'                             AS "evidenceType",
+          er.id                                           AS "evidenceId"
+        FROM event_registrations er
+        JOIN events e ON e.id = er."eventId"
+        WHERE er."flatId" IN (${Prisma.join(flatIds)})
+          AND er."amountDue" > 0
+          AND (er.status = 'CONFIRMED' OR er."paidAmount" > 0)
+
+        UNION ALL
+
+        -- ---------------------------------------------------------------
+        -- HEALTH_CAMP arm (Phase 12, M9): paid camp registrations for this
+        -- resident's flat(s). CampRegistration has no refundedAmount, so a
+        -- cancelled paid registration reports CANCELLED (its full refund is
+        -- initiated by the health-camps module on cancellation).
+        -- ---------------------------------------------------------------
+        SELECT
+          cr.id                                          AS id,
+          'HEALTH_CAMP'::text                             AS kind,
+          ('Health camp – ' || hc.title)                  AS title,
+          cr."attendeeName"                               AS label,
+          cr."amountDue"::text                            AS "amountDue",
+          cr."paidAmount"::text                           AS "amountPaid",
+          (CASE
+            WHEN cr.status = 'CANCELLED' THEN 'CANCELLED'
+            WHEN cr."paidAmount" >= cr."amountDue" THEN 'PAID'
+            WHEN cr."paidAmount" > 0 THEN 'PARTIAL'
+            ELSE 'PENDING'
+          END)                                            AS status,
+          hc."campDate"                                   AS "dueDate",
+          'Health camp registration charge'               AS basis,
+          'CampRegistration'                              AS "evidenceType",
+          cr.id                                           AS "evidenceId"
+        FROM camp_registrations cr
+        JOIN health_camps hc ON hc.id = cr."campId"
+        WHERE cr."flatId" IN (${Prisma.join(flatIds)})
+          AND cr."amountDue" > 0
+          AND (cr.status = 'REGISTERED' OR cr."paidAmount" > 0)
+
+        -- ---------------------------------------------------------------
+        -- FUTURE ARMS slot in here: one more UNION ALL
         -- SELECT producing the SAME 11 columns (id, kind, title, label,
         -- "amountDue", "amountPaid", status, "dueDate", basis,
         -- "evidenceType", "evidenceId"). Nothing below this CTE needs to
@@ -246,7 +323,7 @@ export class BillsService {
 
   private parseKind(raw: string | undefined): BillKind | null {
     if (raw === undefined) return null;
-    if (raw === 'MAINTENANCE' || raw === 'PROCUREMENT' || raw === 'ELECTRICITY' || raw === 'WATER') return raw;
-    throw new BadRequestException('kind must be one of MAINTENANCE, PROCUREMENT, ELECTRICITY, WATER');
+    if ((BILL_KINDS as readonly string[]).includes(raw)) return raw as BillKind;
+    throw new BadRequestException(`kind must be one of ${BILL_KINDS.join(', ')}`);
   }
 }
