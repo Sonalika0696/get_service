@@ -4,6 +4,7 @@ import type {
   ResidentPollDetail,
   EventSummary,
   JobBlogPost,
+  VendorDetail,
 } from '@sft/api-client';
 
 /**
@@ -183,5 +184,47 @@ export const demoJobPosts: JobBlogPost[] = [
     companyEmailVerifiedAt: null,
     createdAt: daysFromNow(-2),
     updatedAt: daysFromNow(-2),
+  },
+];
+
+/** Tagged by the sample polls (demo-vendor-1 = plumbing on demo-request-1,
+ * demo-vendor-2 = pest control on demo-request-2), so "Open vendor profile"
+ * from a sampled request resolves instead of 401ing. */
+export const demoVendors: VendorDetail[] = [
+  {
+    id: 'demo-vendor-1',
+    societyId: DEMO_SOCIETY_ID,
+    name: 'AquaFix Plumbing Services',
+    contactEmail: 'hello@aquafix.example.in',
+    contactPhone: '+91 98200 11223',
+    latitude: null,
+    longitude: null,
+    radiusKm: 8,
+    gstin: null,
+    gstinVerifiedAt: null,
+    verificationTier: 'SOCIETY_ATTESTED',
+    ratingAvg: '4.6',
+    ratingCount: 38,
+    createdAt: daysFromNow(-120),
+    updatedAt: daysFromNow(-6),
+    categories: ['Plumbing', 'Water tank cleaning'],
+  },
+  {
+    id: 'demo-vendor-2',
+    societyId: DEMO_SOCIETY_ID,
+    name: 'GreenShield Pest Control',
+    contactEmail: 'care@greenshield.example.in',
+    contactPhone: '+91 90040 55667',
+    latitude: null,
+    longitude: null,
+    radiusKm: 12,
+    gstin: null,
+    gstinVerifiedAt: null,
+    verificationTier: 'SOCIETY_ATTESTED',
+    ratingAvg: '4.4',
+    ratingCount: 21,
+    createdAt: daysFromNow(-90),
+    updatedAt: daysFromNow(-3),
+    categories: ['Pest control'],
   },
 ];

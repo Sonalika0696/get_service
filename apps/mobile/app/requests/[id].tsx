@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -33,6 +33,15 @@ export default function RequestDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const query = useResidentPoll(id);
   const join = useJoinResidentPoll();
+  // Sample polls have no real backend row, so joining one can't hit the
+  // network (it would 401 as "session expired"). Track the join locally and
+  // reflect it optimistically instead.
+  const [joinedLocally, setJoinedLocally] = useState(false);
+
+  const poll =
+    query.data && joinedLocally && !query.data.hasJoined
+      ? { ...query.data, hasJoined: true, commitmentCount: query.data.commitmentCount + 1 }
+      : query.data;
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.colors.bg.primary }}>
@@ -67,12 +76,17 @@ export default function RequestDetail() {
           />
         ) : null}
 
-        {query.data ? (
+        {poll ? (
           <PollBody
-            poll={query.data}
+            poll={poll}
             joining={join.isPending}
             onJoin={() => {
               if (!id) return;
+              // Sample request: optimistic local join, no backend call.
+              if (query.isSample) {
+                setJoinedLocally(true);
+                return;
+              }
               join.mutate(id, {
                 onError: (err) => {
                   const message =
