@@ -7,7 +7,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
-import { useFonts, Inter_400Regular, Inter_600SemiBold } from '@expo-google-fonts/inter';
+import { useFonts, Sora_400Regular, Sora_600SemiBold } from '@expo-google-fonts/sora';
 import { JetBrainsMono_400Regular, JetBrainsMono_600SemiBold } from '@expo-google-fonts/jetbrains-mono';
 import { ThemeProvider, useTheme, useThemeControls } from '../src/theme/ThemeProvider';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
@@ -19,8 +19,8 @@ SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
-    Inter: Inter_400Regular,
-    'Inter-SemiBold': Inter_600SemiBold,
+    Sora: Sora_400Regular,
+    'Sora-SemiBold': Sora_600SemiBold,
     JetBrainsMono: JetBrainsMono_400Regular,
     'JetBrainsMono-SemiBold': JetBrainsMono_600SemiBold,
   });

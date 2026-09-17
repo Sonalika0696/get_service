@@ -81,7 +81,7 @@ export default function EventDetailScreen() {
                   ),
               });
             }}
-            onPay={() => router.push('/(tabs)/bills')}
+            onPay={() => router.push('/(tabs)?tab=bills')}
           />
         ) : null}
       </ScrollView>

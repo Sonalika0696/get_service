@@ -1,12 +1,12 @@
 /**
- * Typography tokens. One family (Inter), a monospace variant (JetBrains Mono)
- * for numeric columns and hashes. Four sizes, two weights — the ceiling
- * described in the mobile-app-ui-design skill.
+ * Typography tokens. One family (Sora, a geometric grotesk), a monospace
+ * variant (JetBrains Mono) for numeric columns and hashes. Four sizes, two
+ * weights — the ceiling described in the mobile-app-ui-design skill.
  */
 
 export const fontFamily = {
-  sans: 'Inter',
-  sansSemibold: 'Inter-SemiBold',
+  sans: 'Sora',
+  sansSemibold: 'Sora-SemiBold',
   mono: 'JetBrainsMono',
   monoSemibold: 'JetBrainsMono-SemiBold',
 } as const;

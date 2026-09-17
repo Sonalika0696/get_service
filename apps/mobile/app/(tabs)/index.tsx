@@ -1,162 +1,98 @@
-import React from 'react';
-import { View } from 'react-native';
-import { useRouter } from 'expo-router';
-import { Handshake, CalendarBlank, Bell, Wrench, Storefront } from 'phosphor-react-native';
-import { Screen } from '../../src/components/Screen';
-import { Text } from '../../src/components/Text';
-import { SectionLabel } from '../../src/components/SectionLabel';
-import { DuesCard } from '../../src/components/DuesCard';
-import { StatTile } from '../../src/components/StatTile';
-import { RequestRow } from '../../src/components/RequestRow';
-import { SwipeableTabs } from '../../src/components/SwipeableTabs';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, Pressable } from 'react-native';
+import { useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { House, Receipt, Handshake, Megaphone, User, type IconProps } from 'phosphor-react-native';
 import { useTheme } from '../../src/theme/ThemeProvider';
-import { useAuth } from '../../src/auth/AuthProvider';
+import { Text } from '../../src/components/Text';
+import { TabsContext, TAB_NAMES, type TabName } from '../../src/sections/TabsContext';
+import { TabsPager } from '../../src/sections/TabsPager';
+import HomeSection from '../../src/sections/HomeSection';
+import BillsSection from '../../src/sections/BillsSection';
+import RequestsSection from '../../src/sections/RequestsSection';
+import NoticesSection from '../../src/sections/NoticesSection';
+import ProfileSection from '../../src/sections/ProfileSection';
+
+const PAGES = [HomeSection, BillsSection, RequestsSection, NoticesSection, ProfileSection];
+const ICONS: React.ComponentType<IconProps>[] = [House, Receipt, Handshake, Megaphone, User];
+const LABELS = ['Home', 'Bills', 'Requests', 'Notices', 'Profile'];
 
 /**
- * Home. Backed by `GET /me/home` (FRONTEND_PLAN §3.2) once the aggregate
- * endpoint ships. Until then, greeting comes from the live /me identity
- * (F1) and the dues + stats + joinable-request cards render preview data
- * shaped like the aggregate will be.
+ * The five sections hosted in a single PagerView, so swipe is drag-follow
+ * (adjacent sections are physically connected) and tab taps animate the
+ * page across — no remount, so no tap lag. SDK 57 decoupled expo-router
+ * from react-navigation, so this replaces the old Tabs navigator entirely.
+ * In-app links to a sibling tab go through TabsContext.goTo (instant);
+ * deep links from outside pass `?tab=<name>`.
  */
-function greeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 12) return 'Good morning';
-  if (hour < 17) return 'Good afternoon';
-  return 'Good evening';
-}
+export default function TabsHost() {
+  const [index, setIndex] = useState(0);
+  const params = useLocalSearchParams<{ tab?: string }>();
 
-const preview = {
-  flat: { label: 'A-1204', society: 'Willow Grove' },
-  amountMinor: 1245000,
-  captions: ['Maintenance', 'Water', 'Group buy'],
-  dueOn: '25 Sep',
-  stats: {
-    openRequests: '3',
-    upcomingEvents: '2',
-    unreadNotices: '5',
-    workInFlat: '1',
-  },
-  joinable: [
-    { id: 'r1', category: 'Plumbing', title: 'Kitchen tap leak, block A', participants: 2, thresholdAt: 4 },
-    { id: 'r2', category: 'Pest control', title: 'Quarterly common-area treatment', participants: 27, thresholdAt: 30 },
-  ],
-};
+  useEffect(() => {
+    if (typeof params.tab === 'string') {
+      const i = TAB_NAMES.indexOf(params.tab as TabName);
+      if (i >= 0) setIndex(i);
+    }
+  }, [params.tab]);
 
-export default function HomeScreen() {
-  const theme = useTheme();
-  const router = useRouter();
-  const { me } = useAuth();
+  const goTo = useCallback((name: TabName) => {
+    const i = TAB_NAMES.indexOf(name);
+    if (i >= 0) setIndex(i);
+  }, []);
 
-  const firstName = me?.name?.trim().split(/\s+/)[0];
+  const renderPage = useCallback((i: number) => {
+    const Page = PAGES[i];
+    return <Page />;
+  }, []);
 
   return (
-    <SwipeableTabs index={0}>
-    <Screen>
-      <View style={{ marginTop: theme.spacing.xs }}>
-        <Text variant="caption" tone="muted" weight="semibold">
-          {preview.flat.society} · {preview.flat.label}
-        </Text>
-        <Text variant="display" weight="semibold" style={{ marginTop: 4 }}>
-          {greeting()}{firstName ? `, ${firstName}` : ''}
-        </Text>
-      </View>
-
-      <DuesCard
-        amountMinor={preview.amountMinor}
-        dueOn={preview.dueOn}
-        captions={preview.captions}
-        onPressPay={() => router.push('/(tabs)/bills')}
-        onPressHistory={() => router.push('/(tabs)/bills')}
-      />
-
-      <View>
-        <SectionLabel>At a glance</SectionLabel>
-        <View style={{ flexDirection: 'row', gap: theme.spacing.sm }}>
-          <StatTile
-            Icon={Handshake}
-            value={preview.stats.openRequests}
-            label="Open requests"
-            tone="accent"
-            onPress={() => router.push('/(tabs)/requests')}
-          />
-          <StatTile
-            Icon={CalendarBlank}
-            value={preview.stats.upcomingEvents}
-            label="Upcoming events"
-            tone="info"
-            onPress={() => router.push('/events')}
-          />
-        </View>
-        <View style={{ flexDirection: 'row', gap: theme.spacing.sm, marginTop: theme.spacing.sm }}>
-          <StatTile
-            Icon={Bell}
-            value={preview.stats.unreadNotices}
-            label="Unread notices"
-            tone="warning"
-            onPress={() => router.push('/(tabs)/notices')}
-          />
-          <StatTile
-            Icon={Wrench}
-            value={preview.stats.workInFlat}
-            label="Work in your flat"
-            tone="success"
-          />
-        </View>
-      </View>
-
-      <View>
-        <SectionLabel
-          trailing={
-            <Text
-              variant="body"
-              weight="semibold"
-              tone="accent"
-              onPress={() => router.push('/vendors')}
-            >
-              Vendor directory
-            </Text>
-          }
-        >
-          Trusted vendors
-        </SectionLabel>
-        <StatTile
-          Icon={Storefront}
-          value="Browse"
-          label="See all vendors your committee onboarded"
-          tone="accent"
-          onPress={() => router.push('/vendors')}
+    <TabsContext.Provider value={{ index, goTo }}>
+      <View style={{ flex: 1 }}>
+        <TabsPager
+          index={index}
+          onIndexChange={setIndex}
+          pageCount={PAGES.length}
+          renderPage={renderPage}
         />
+        <BottomBar index={index} onSelect={setIndex} />
       </View>
+    </TabsContext.Provider>
+  );
+}
 
-      <View>
-        <SectionLabel
-          trailing={
-            <Text
-              variant="body"
-              weight="semibold"
-              tone="accent"
-              onPress={() => router.push('/(tabs)/requests')}
-            >
-              See all
+function BottomBar({ index, onSelect }: { index: number; onSelect: (i: number) => void }) {
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        backgroundColor: theme.colors.bg.elevated,
+        borderTopWidth: 1,
+        borderTopColor: theme.colors.border.subtle,
+        paddingTop: 8,
+        paddingBottom: insets.bottom > 0 ? insets.bottom : 10,
+      }}
+    >
+      {ICONS.map((Icon, i) => {
+        const active = i === index;
+        const color = active ? theme.colors.accent[700] : theme.colors.ink[40];
+        return (
+          <Pressable
+            key={i}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
+            onPress={() => onSelect(i)}
+            style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3, minHeight: 48 }}
+          >
+            <Icon size={24} color={color} weight={active ? 'fill' : 'regular'} />
+            <Text weight="semibold" style={{ fontSize: 11, lineHeight: 14, color }}>
+              {LABELS[i]}
             </Text>
-          }
-        >
-          Neighbours also need
-        </SectionLabel>
-        <View style={{ gap: theme.spacing.sm }}>
-          {preview.joinable.map((r) => (
-            <RequestRow
-              key={r.id}
-              category={r.category}
-              title={r.title}
-              participants={r.participants}
-              thresholdAt={r.thresholdAt}
-              onPress={() => router.push('/(tabs)/requests')}
-            />
-          ))}
-        </View>
-      </View>
-    </Screen>
-    </SwipeableTabs>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }

@@ -4,17 +4,16 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router';
 import { Receipt, ClockCounterClockwise } from 'phosphor-react-native';
 import type { PaymentRail } from '@sft/api-client';
-import { Text } from '../../src/components/Text';
-import { Button } from '../../src/components/Button';
-import { Money } from '../../src/components/Money';
-import { SectionLabel } from '../../src/components/SectionLabel';
-import { Segmented } from '../../src/components/Segmented';
-import { BillLineRow } from '../../src/components/BillLineRow';
-import { ListLoading, ListError, ListEmpty } from '../../src/components/ListState';
-import { OfflineBanner } from '../../src/components/OfflineBanner';
-import { SwipeableTabs } from '../../src/components/SwipeableTabs';
-import { useBillsHub } from '../../src/hooks/useBills';
-import { useTheme } from '../../src/theme/ThemeProvider';
+import { Text } from '../components/Text';
+import { Button } from '../components/Button';
+import { Money } from '../components/Money';
+import { SectionLabel } from '../components/SectionLabel';
+import { Segmented } from '../components/Segmented';
+import { BillLineRow } from '../components/BillLineRow';
+import { ListLoading, ListError, ListEmpty } from '../components/ListState';
+import { OfflineBanner } from '../components/OfflineBanner';
+import { useBillsHub } from '../hooks/useBills';
+import { useTheme } from '../theme/ThemeProvider';
 
 type Segment = 'due' | 'all';
 
@@ -42,7 +41,6 @@ export default function BillsScreen() {
   const totalDue = hub.data?.totalDueMinor ?? 0;
 
   return (
-    <SwipeableTabs index={1}>
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.colors.bg.primary }}>
       <OfflineBanner />
       <ScrollView
@@ -114,7 +112,6 @@ export default function BillsScreen() {
         </View>
       </ScrollView>
     </SafeAreaView>
-    </SwipeableTabs>
   );
 }
 

@@ -18,13 +18,12 @@ import {
   ChatCircle,
   PencilSimple,
 } from 'phosphor-react-native';
-import { Screen } from '../../src/components/Screen';
-import { SwipeableTabs } from '../../src/components/SwipeableTabs';
-import { Text } from '../../src/components/Text';
-import { SectionLabel } from '../../src/components/SectionLabel';
-import { useTheme, useThemeControls } from '../../src/theme/ThemeProvider';
-import { useAuth } from '../../src/auth/AuthProvider';
-import { useApprovals, useIsCommittee } from '../../src/hooks/useApprovals';
+import { Screen } from '../components/Screen';
+import { Text } from '../components/Text';
+import { SectionLabel } from '../components/SectionLabel';
+import { useTheme, useThemeControls } from '../theme/ThemeProvider';
+import { useAuth } from '../auth/AuthProvider';
+import { useApprovals, useIsCommittee } from '../hooks/useApprovals';
 
 const ROLE_LABELS: Record<string, string> = {
   OWNER_OCCUPIER: 'Owner, resident',
@@ -64,7 +63,6 @@ export default function ProfileScreen() {
   const accent = theme.colors.accent[700];
 
   return (
-    <SwipeableTabs index={4}>
     <Screen>
       {/* Identity header */}
       <View style={{ alignItems: 'center', gap: theme.spacing.sm, paddingTop: theme.spacing.sm }}>
@@ -212,7 +210,6 @@ export default function ProfileScreen() {
         </Card>
       </View>
     </Screen>
-    </SwipeableTabs>
   );
 }
 

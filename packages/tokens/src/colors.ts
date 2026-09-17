@@ -103,17 +103,17 @@ export const lightColors: ColorTokens = {
   },
 
   accent: {
-    50: '#EEF1FF',
-    100: '#DCE2FF',
-    200: '#B9C6FF',
-    300: '#93A6FF',
-    400: '#6D86FF',
-    500: '#4F68FF',
-    600: '#4A5FFF',
-    700: '#3B5BFF',
-    800: '#2F49CC',
-    900: '#24379A',
-    tint: 'rgba(59, 91, 255, 0.06)',
+    50: '#F0F2FF',
+    100: '#DBE1FF',
+    200: '#BDC7FF',
+    300: '#99A8FF',
+    400: '#7A8EFF',
+    500: '#6179FF',
+    600: '#4763FF',
+    700: '#3352FF',
+    800: '#1334EC',
+    900: '#1D31A5',
+    tint: 'rgba(51, 82, 255, 0.06)',
   },
 
   accent2: {
@@ -150,7 +150,7 @@ export const lightColors: ColorTokens = {
   border: {
     subtle: 'rgba(20, 22, 28, 0.06)',
     divider: 'rgba(20, 22, 28, 0.10)',
-    focus: '#3B5BFF',
+    focus: '#3352FF',
   },
 
   overlay: {
@@ -177,17 +177,17 @@ export const darkColors: ColorTokens = {
   },
 
   accent: {
-    50: '#151A3D',
-    100: '#1D2456',
-    200: '#2A3480',
-    300: '#3B47AC',
-    400: '#4E5DDA',
-    500: '#5A6CF2',
-    600: '#5F72FA',
-    700: '#6478FF',
-    800: '#33469E',
-    900: '#242F73',
-    tint: 'rgba(100, 120, 255, 0.12)',
+    50: '#141B3D',
+    100: '#1B2555',
+    200: '#253274',
+    300: '#2E419E',
+    400: '#002AFF',
+    500: '#294CFF',
+    600: '#526EFF',
+    700: '#7088FF',
+    800: '#4262FF',
+    900: '#1F44F9',
+    tint: 'rgba(112, 136, 255, 0.12)',
   },
 
   accent2: {
@@ -224,7 +224,7 @@ export const darkColors: ColorTokens = {
   border: {
     subtle: 'rgba(255, 255, 255, 0.08)',
     divider: 'rgba(255, 255, 255, 0.14)',
-    focus: '#6478FF',
+    focus: '#7088FF',
   },
 
   overlay: {

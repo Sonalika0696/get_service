@@ -1,17 +1,17 @@
 import React from 'react';
 import { View, ScrollView } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { PencilSimple, Megaphone } from 'phosphor-react-native';
-import { Text } from '../../src/components/Text';
-import { Button } from '../../src/components/Button';
-import { SectionLabel } from '../../src/components/SectionLabel';
-import { JobPostRow } from '../../src/components/JobPostRow';
-import { ListLoading, ListError, ListEmpty } from '../../src/components/ListState';
-import { OfflineBanner } from '../../src/components/OfflineBanner';
-import { SwipeableTabs } from '../../src/components/SwipeableTabs';
-import { useJobPosts } from '../../src/hooks/useJobPosts';
-import { useTheme } from '../../src/theme/ThemeProvider';
+import { Text } from '../components/Text';
+import { Button } from '../components/Button';
+import { Fab } from '../components/Fab';
+import { SectionLabel } from '../components/SectionLabel';
+import { JobPostRow } from '../components/JobPostRow';
+import { ListLoading, ListError, ListEmpty } from '../components/ListState';
+import { OfflineBanner } from '../components/OfflineBanner';
+import { useJobPosts } from '../hooks/useJobPosts';
+import { useTheme } from '../theme/ThemeProvider';
 
 /**
  * The community feed tab. Wired to GET /jobs (the shipped job-blog module,
@@ -22,43 +22,26 @@ import { useTheme } from '../../src/theme/ThemeProvider';
 export default function NoticesScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const query = useJobPosts();
   const posts = query.data ?? [];
 
   return (
-    <SwipeableTabs index={3}>
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.colors.bg.primary }}>
       <OfflineBanner />
       <ScrollView
         contentContainerStyle={{
           paddingHorizontal: theme.screenPadding,
-          paddingBottom: insets.bottom + theme.spacing.xxl,
+          paddingBottom: theme.spacing.hero + theme.spacing.md,
           paddingTop: theme.spacing.md,
           gap: theme.spacing.lg,
         }}
         showsVerticalScrollIndicator={false}
       >
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'flex-end',
-            justifyContent: 'space-between',
-            gap: theme.spacing.sm,
-          }}
-        >
-          <View style={{ flex: 1 }}>
-            <Text variant="display" weight="semibold">Community</Text>
-            <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
-              What your neighbours are hiring for, and what they're looking to do.
-            </Text>
-          </View>
-          <Button
-            label="Post"
-            variant="primary"
-            leftIcon={<PencilSimple size={16} color="#fff" weight="bold" />}
-            onPress={() => router.push('/notices/new')}
-          />
+        <View>
+          <Text variant="display" weight="semibold">Community</Text>
+          <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
+            What your neighbours are hiring for, and what they're looking to do.
+          </Text>
         </View>
 
         <View>
@@ -99,7 +82,11 @@ export default function NoticesScreen() {
           </View>
         </View>
       </ScrollView>
+      <Fab
+        label="Post"
+        icon={<PencilSimple size={20} color={theme.colors.ink.onAccent} weight="bold" />}
+        onPress={() => router.push('/notices/new')}
+      />
     </SafeAreaView>
-    </SwipeableTabs>
   );
 }

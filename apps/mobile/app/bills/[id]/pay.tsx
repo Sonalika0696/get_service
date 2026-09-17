@@ -146,7 +146,7 @@ export default function PaySheet() {
               <Button
                 label="Back to bills"
                 variant="secondary"
-                onPress={() => router.replace('/(tabs)/bills')}
+                onPress={() => router.replace('/(tabs)?tab=bills')}
                 fullWidth
               />
             ) : (

@@ -1,18 +1,18 @@
 import React, { useMemo, useState } from 'react';
 import { View, ScrollView } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { PlusCircle, Handshake } from 'phosphor-react-native';
-import { Text } from '../../src/components/Text';
-import { Button } from '../../src/components/Button';
-import { SectionLabel } from '../../src/components/SectionLabel';
-import { Segmented } from '../../src/components/Segmented';
-import { PollRow } from '../../src/components/PollRow';
-import { ListLoading, ListError, ListEmpty } from '../../src/components/ListState';
-import { OfflineBanner } from '../../src/components/OfflineBanner';
-import { SwipeableTabs } from '../../src/components/SwipeableTabs';
-import { useResidentPolls } from '../../src/hooks/useResidentPolls';
-import { useTheme } from '../../src/theme/ThemeProvider';
+import { Text } from '../components/Text';
+import { Button } from '../components/Button';
+import { Fab } from '../components/Fab';
+import { SectionLabel } from '../components/SectionLabel';
+import { Segmented } from '../components/Segmented';
+import { PollRow } from '../components/PollRow';
+import { ListLoading, ListError, ListEmpty } from '../components/ListState';
+import { OfflineBanner } from '../components/OfflineBanner';
+import { useResidentPolls } from '../hooks/useResidentPolls';
+import { useTheme } from '../theme/ThemeProvider';
 
 type Segment = 'open' | 'mine';
 
@@ -24,7 +24,6 @@ type Segment = 'open' | 'mine';
 export default function RequestsScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const [segment, setSegment] = useState<Segment>('open');
 
   const query = useResidentPolls();
@@ -41,38 +40,22 @@ export default function RequestsScreen() {
       : 'Nothing open right now. Raise the first request — your neighbours will see it here.';
 
   return (
-    <SwipeableTabs index={2}>
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.colors.bg.primary }}>
       <OfflineBanner />
       <ScrollView
         contentContainerStyle={{
           paddingHorizontal: theme.screenPadding,
-          paddingBottom: insets.bottom + theme.spacing.xxl,
+          paddingBottom: theme.spacing.hero + theme.spacing.md,
           paddingTop: theme.spacing.md,
           gap: theme.spacing.lg,
         }}
         showsVerticalScrollIndicator={false}
       >
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'flex-end',
-            justifyContent: 'space-between',
-            gap: theme.spacing.sm,
-          }}
-        >
-          <View style={{ flex: 1 }}>
-            <Text variant="display" weight="semibold">Requests</Text>
-            <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
-              Pool with your neighbours. Better price, one visit.
-            </Text>
-          </View>
-          <Button
-            label="Raise"
-            variant="primary"
-            leftIcon={<PlusCircle size={16} color="#fff" weight="bold" />}
-            onPress={() => router.push('/requests/new')}
-          />
+        <View>
+          <Text variant="display" weight="semibold">Requests</Text>
+          <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
+            Pool with your neighbours. Better price, one visit.
+          </Text>
         </View>
 
         <Segmented<Segment>
@@ -132,7 +115,11 @@ export default function RequestsScreen() {
           </View>
         </View>
       </ScrollView>
+      <Fab
+        label="Raise"
+        icon={<PlusCircle size={20} color={theme.colors.ink.onAccent} weight="bold" />}
+        onPress={() => router.push('/requests/new')}
+      />
     </SafeAreaView>
-    </SwipeableTabs>
   );
 }
