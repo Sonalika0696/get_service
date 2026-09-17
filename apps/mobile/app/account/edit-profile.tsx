@@ -15,6 +15,16 @@ import { api } from '../../src/lib/api';
  * Edit profile information. The only screen under /account that writes to
  * the backend — PATCH /me accepts { name?, phone? }. Email is read-only:
  * sign-in is phone/email-bound and changing it is out of scope here.
+ *
+ * Phone is ALSO read-only here (security fix, backend commit 33aeaec): the
+ * phone number is the sign-in credential (phone OTP), so PATCH /me now
+ * refuses the whole request — including the name — the moment `phone`
+ * differs from the current one, to close an account-takeover path (a
+ * still-live session could otherwise re-point OTP delivery to an attacker's
+ * number). There's no verified change-of-number flow yet, so the field is
+ * locked and the PATCH body never sends `phone` at all — a name-only save
+ * can never trip the backend's refusal. Remove the lock once the backend
+ * ships the verified flow (OTP to the new number, then confirm).
  */
 export default function EditProfile() {
   const theme = useTheme();
@@ -22,7 +32,6 @@ export default function EditProfile() {
   const { me, refreshMe } = useAuth();
 
   const [name, setName] = useState(me?.name ?? '');
-  const [phone, setPhone] = useState(me?.phone ?? '');
   const [saving, setSaving] = useState(false);
 
   const canSave = name.trim().length >= 2 && !saving;
@@ -31,12 +40,10 @@ export default function EditProfile() {
     if (!canSave) return;
     setSaving(true);
     try {
+      // `phone` is deliberately omitted — see this file's doc comment.
       await api('/me', {
         method: 'PATCH',
-        body: {
-          name: name.trim(),
-          phone: phone.trim() || undefined,
-        },
+        body: { name: name.trim() },
       });
       await refreshMe();
       router.back();
@@ -75,7 +82,7 @@ export default function EditProfile() {
           <View>
             <Text variant="display" weight="semibold">Edit profile</Text>
             <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
-              Keep your name and phone number current so the committee and vendors can reach you.
+              Keep your name current so the committee and vendors can reach you.
             </Text>
           </View>
 
@@ -92,13 +99,26 @@ export default function EditProfile() {
 
           <View>
             <SectionLabel>Phone</SectionLabel>
-            <FieldInput
-              value={phone}
-              onChangeText={setPhone}
-              placeholder="+91XXXXXXXXXX"
-              keyboardType="phone-pad"
-              icon={<Phone size={18} color={theme.colors.ink[40]} weight="regular" />}
-            />
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 10,
+                backgroundColor: theme.colors.bg.secondary,
+                borderRadius: theme.radius.lg,
+                borderWidth: 1,
+                borderColor: theme.colors.border.subtle,
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+              }}
+            >
+              <Phone size={18} color={theme.colors.ink[40]} weight="regular" />
+              <Text variant="body" tone="muted" style={{ flex: 1 }}>{me?.phone ?? '—'}</Text>
+            </View>
+            <Text variant="caption" tone="muted" style={{ marginTop: 6 }}>
+              Your phone number is used to sign in. Changing it isn't available yet — contact your
+              committee if it needs to be updated.
+            </Text>
           </View>
 
           <View>

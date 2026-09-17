@@ -88,10 +88,11 @@ export default function Privacy() {
         </Section>
 
         <Section title="Your choices">
-          You can review and update your name and phone number from Edit profile information, and
-          control local notification preferences from the Notifications screen. To request a copy
-          of your data, a correction, or deletion where the law allows it, contact your committee
-          — see Contact us.
+          You can review and update your name from Edit profile information, and control local
+          notification preferences from the Notifications screen. Your phone number is your
+          sign-in credential and can't be changed from the app yet — contact your committee if it
+          needs updating. To request a copy of your data, a correction, or deletion where the law
+          allows it, contact your committee — see Contact us.
         </Section>
 
         <Section title="Contact">
