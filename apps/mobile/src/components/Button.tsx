@@ -1,11 +1,13 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import {
   Pressable,
   View,
   ActivityIndicator,
+  Animated,
   type PressableProps,
   type ViewStyle,
 } from 'react-native';
+import { Check } from 'phosphor-react-native';
 import { Text } from './Text';
 import { useTheme } from '../theme/ThemeProvider';
 
@@ -17,6 +19,9 @@ export type ButtonProps = Omit<PressableProps, 'children' | 'style'> & {
   variant?: Variant;
   size?: Size;
   loading?: boolean;
+  /** Success state: the button turns green and a checkmark springs in. */
+  success?: boolean;
+  successLabel?: string;
   leftIcon?: React.ReactNode;
   rightIcon?: React.ReactNode;
   fullWidth?: boolean;
@@ -33,6 +38,8 @@ export function Button({
   variant = 'primary',
   size = 'md',
   loading = false,
+  success = false,
+  successLabel = 'Done',
   leftIcon,
   rightIcon,
   fullWidth = false,
@@ -45,6 +52,21 @@ export function Button({
   const heights: Record<Size, number> = { sm: 40, md: 48, lg: 56 };
   const paddings: Record<Size, number> = { sm: 14, md: 18, lg: 22 };
 
+  const checkScale = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (success) {
+      checkScale.setValue(0);
+      Animated.spring(checkScale, {
+        toValue: 1,
+        useNativeDriver: true,
+        friction: 5,
+        tension: 160,
+      }).start();
+    } else {
+      checkScale.setValue(0);
+    }
+  }, [success, checkScale]);
+
   const getStyle = useCallback(
     (pressed: boolean): ViewStyle => {
       const base: ViewStyle = {
@@ -55,9 +77,12 @@ export function Button({
         alignItems: 'center',
         justifyContent: 'center',
         alignSelf: fullWidth ? 'stretch' : 'flex-start',
-        opacity: disabled ? 0.5 : pressed ? 0.9 : 1,
+        opacity: disabled && !success ? 0.5 : pressed ? 0.9 : 1,
         transform: [{ scale: pressed && !disabled ? 0.985 : 1 }],
       };
+      if (success) {
+        return { ...base, backgroundColor: theme.colors.feedback.success, ...theme.shadows.sm.native };
+      }
       switch (variant) {
         case 'primary':
           return {
@@ -82,21 +107,30 @@ export function Button({
           };
       }
     },
-    [variant, size, fullWidth, disabled, theme],
+    [variant, size, fullWidth, disabled, success, theme],
   );
 
-  const textTone = variant === 'primary' || variant === 'danger' ? 'onAccent' : 'accent';
+  const textTone = success || variant === 'primary' || variant === 'danger' ? 'onAccent' : 'accent';
 
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityState={{ disabled: disabled ?? loading, busy: loading }}
       hitSlop={8}
-      disabled={disabled || loading}
+      disabled={disabled || loading || success}
       {...rest}
       style={({ pressed }) => [getStyle(pressed), style]}
     >
-      {loading ? (
+      {success ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Animated.View style={{ transform: [{ scale: checkScale }] }}>
+            <Check size={20} color={theme.colors.ink.onAccent} weight="bold" />
+          </Animated.View>
+          <Text variant="body" weight="semibold" tone="onAccent">
+            {successLabel}
+          </Text>
+        </View>
+      ) : loading ? (
         <ActivityIndicator color={variant === 'primary' || variant === 'danger' ? '#fff' : theme.colors.accent[700]} />
       ) : (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>

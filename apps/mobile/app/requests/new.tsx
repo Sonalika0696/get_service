@@ -43,6 +43,7 @@ export default function ComposeRequest() {
   const [description, setDescription] = useState('');
   const [closeHours, setCloseHours] = useState(168);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [succeeded, setSucceeded] = useState(false);
 
   const vendors = useVendors(category ? { category } : {});
   const vendorList = vendors.data ?? [];
@@ -70,7 +71,8 @@ export default function ComposeRequest() {
       },
       {
         onSuccess: (created) => {
-          router.replace(`/requests/${created.id}`);
+          setSucceeded(true);
+          setTimeout(() => router.replace(`/requests/${created.id}`), 900);
         },
         onError: (err) => {
           const message =
@@ -189,6 +191,8 @@ export default function ComposeRequest() {
             onPress={submit}
             disabled={!canSubmit}
             loading={mutation.isPending}
+            success={succeeded}
+            successLabel="Raised"
             fullWidth
           />
         </ScrollView>

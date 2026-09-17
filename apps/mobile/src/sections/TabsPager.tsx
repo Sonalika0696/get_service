@@ -2,16 +2,18 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, ScrollView, useWindowDimensions, type NativeSyntheticEvent, type NativeScrollEvent } from 'react-native';
 
 /**
- * Drag-follow section swiper built on a horizontal, paging ScrollView — the
- * native-thread paging path (works on iOS, Android AND web via
- * react-native-web, unlike react-native-pager-view which has no web build).
- * Adjacent sections are physically connected: the finger drags the content
- * and it snaps to the nearest page with native momentum.
+ * Drag-follow section swiper on a horizontal, paging ScrollView — native-
+ * thread paging that works on iOS, Android and web (unlike react-native-
+ * pager-view, which has no web build). Adjacent sections are physically
+ * connected: the finger drags the content and it snaps to the nearest page.
  *
- * Controlled by `index`: a tab tap / in-app link animates `scrollTo`; a
- * swipe reports the settled page via `onIndexChange`. Only the active page
- * and its immediate neighbours mount their content (lazy) so five sections'
- * worth of lists/queries don't all spin up at once.
+ * Highlight timing + no feedback loop: the active index is only derived from
+ * the scroll position WHILE the user is dragging (`dragging` ref set by
+ * onScrollBeginDrag). A programmatic scroll from a tab tap does NOT trigger
+ * onScrollBeginDrag, so onScroll ignores it — that's what stops a fast
+ * double-tap from bouncing the pager left/right forever. The `fromScroll`
+ * ref tells the controlled-index effect when an index change came from a
+ * swipe (don't re-scroll) vs a tap (scroll to it).
  */
 export function TabsPager({
   index,
@@ -28,13 +30,15 @@ export function TabsPager({
   const ref = useRef<ScrollView>(null);
   const [mounted, setMounted] = useState<Set<number>>(() => neighbours(0, pageCount));
 
-  // The page the ScrollView is actually showing. Tracked in a ref so the
-  // controlled-index effect can tell a swipe (settled === index already)
-  // from a programmatic change (tab tap) and only scrollTo for the latter —
-  // otherwise the effect would fight the in-progress drag.
   const settled = useRef(index);
+  const dragging = useRef(false);
+  const fromScroll = useRef(false);
 
   useEffect(() => {
+    if (fromScroll.current) {
+      fromScroll.current = false;
+      return;
+    }
     if (index !== settled.current) {
       settled.current = index;
       ref.current?.scrollTo({ x: index * width, animated: true });
@@ -42,19 +46,38 @@ export function TabsPager({
     setMounted((prev) => union(prev, neighbours(index, pageCount)));
   }, [index, width, pageCount]);
 
-  // Update the active tab the instant the swipe crosses a page boundary,
-  // rather than waiting for momentum to fully settle (which lagged the
-  // highlight by ~1s). Rounding flips at the halfway point, so the icon
-  // lights up as the next section takes over the screen.
-  const onScroll = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const page = Math.round(e.nativeEvent.contentOffset.x / width);
+  const reportPage = useCallback(
+    (offsetX: number) => {
+      const page = Math.round(offsetX / width);
       if (page !== settled.current && page >= 0 && page < pageCount) {
         settled.current = page;
+        fromScroll.current = true;
         onIndexChange(page);
       }
     },
     [width, pageCount, onIndexChange],
+  );
+
+  const onScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      // Only follow the scroll for the highlight while the USER is dragging;
+      // ignore programmatic (tab-tap) scrolls so they can't feed back.
+      if (!dragging.current) return;
+      reportPage(e.nativeEvent.contentOffset.x);
+    },
+    [reportPage],
+  );
+
+  const onBeginDrag = useCallback(() => {
+    dragging.current = true;
+  }, []);
+
+  const onSettle = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      dragging.current = false;
+      reportPage(e.nativeEvent.contentOffset.x);
+    },
+    [reportPage],
   );
 
   return (
@@ -64,9 +87,11 @@ export function TabsPager({
       pagingEnabled
       showsHorizontalScrollIndicator={false}
       onScroll={onScroll}
+      onScrollBeginDrag={onBeginDrag}
+      onScrollEndDrag={onSettle}
+      onMomentumScrollEnd={onSettle}
       scrollEventThrottle={16}
       keyboardShouldPersistTaps="handled"
-      // Keep the initial page aligned before the first layout pass.
       contentOffset={{ x: index * width, y: 0 }}
     >
       {Array.from({ length: pageCount }).map((_, i) => (

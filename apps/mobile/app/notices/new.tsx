@@ -21,6 +21,7 @@ export default function ComposeNotice() {
   const [body, setBody] = useState('');
   const [companyEmail, setCompanyEmail] = useState('');
   const [applyLink, setApplyLink] = useState('');
+  const [succeeded, setSucceeded] = useState(false);
 
   const mutation = useCreateJobPost();
 
@@ -42,11 +43,14 @@ export default function ComposeNotice() {
       { kind: 'HIRING', title: title.trim(), body: bodyWithLink, companyEmail: companyEmail.trim() },
       {
         onSuccess: () => {
-          Alert.alert(
-            'Verify company email',
-            'We sent a verification link to your work email. Your post appears once you click it.',
-            [{ text: 'Got it', onPress: () => router.back() }],
-          );
+          setSucceeded(true);
+          setTimeout(() => {
+            Alert.alert(
+              'Verify company email',
+              'We sent a verification link to your work email. Your post appears once you click it.',
+              [{ text: 'Got it', onPress: () => router.back() }],
+            );
+          }, 900);
         },
         onError: (err: unknown) => {
           const message =
@@ -151,6 +155,8 @@ export default function ComposeNotice() {
             onPress={submit}
             disabled={!canSubmit}
             loading={mutation.isPending}
+            success={succeeded}
+            successLabel="Posted"
             fullWidth
           />
         </ScrollView>

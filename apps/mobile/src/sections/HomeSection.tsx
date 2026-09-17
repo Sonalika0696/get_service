@@ -10,7 +10,24 @@ import { StatTile } from '../components/StatTile';
 import { RequestRow } from '../components/RequestRow';
 import { useTheme } from '../theme/ThemeProvider';
 import { useAuth } from '../auth/AuthProvider';
+import { useBillsHub } from '../hooks/useBills';
 import { useTabs } from './TabsContext';
+import type { BillKind } from '@sft/api-client';
+
+function billKindLabel(kind: BillKind): string {
+  switch (kind) {
+    case 'MAINTENANCE': return 'Maintenance';
+    case 'ELECTRICITY': return 'Electricity';
+    case 'WATER': return 'Water';
+    case 'BULK_BUY_SHARE': return 'Group buy';
+    case 'EVENT_CHARGE': return 'Event';
+    case 'ADJUSTMENT': return 'Adjustment';
+  }
+}
+
+function formatDueOn(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
 
 /**
  * Home. Backed by `GET /me/home` (FRONTEND_PLAN §3.2) once the aggregate
@@ -47,8 +64,22 @@ export default function HomeScreen() {
   const router = useRouter();
   const { me } = useAuth();
   const { goTo } = useTabs();
+  const bills = useBillsHub();
 
   const firstName = me?.name?.trim().split(/\s+/)[0];
+
+  // Dues on the home hero come from the real bills hub so the dashboard and
+  // the Bills tab never disagree. Captions are the distinct bill kinds that
+  // are actually due; empty until the aggregate has data.
+  const dueLines = (bills.data?.lines ?? []).filter(
+    (l) => l.status === 'DUE' || l.status === 'OVERDUE' || l.status === 'PARTIAL',
+  );
+  const totalDueMinor = bills.data?.totalDueMinor ?? 0;
+  const captions = Array.from(new Set(dueLines.map((l) => billKindLabel(l.kind)))).slice(0, 3);
+  const nextDueOn = dueLines
+    .map((l) => l.dueOn)
+    .sort()
+    .find(Boolean);
 
   return (
     <Screen>
@@ -62,9 +93,9 @@ export default function HomeScreen() {
       </View>
 
       <DuesCard
-        amountMinor={preview.amountMinor}
-        dueOn={preview.dueOn}
-        captions={preview.captions}
+        amountMinor={totalDueMinor}
+        dueOn={nextDueOn ? formatDueOn(nextDueOn) : null}
+        captions={captions.length > 0 ? captions : ['Nothing due']}
         onPressPay={() => goTo('bills')}
         onPressHistory={() => goTo('bills')}
       />

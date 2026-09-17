@@ -13,7 +13,13 @@ import RequestsSection from '../../src/sections/RequestsSection';
 import NoticesSection from '../../src/sections/NoticesSection';
 import ProfileSection from '../../src/sections/ProfileSection';
 
-const PAGES = [HomeSection, BillsSection, RequestsSection, NoticesSection, ProfileSection];
+// Memoised so a section never re-renders just because the host re-rendered
+// (the active index changes on every scroll frame during a swipe). Each
+// section takes no props, so React.memo keeps them stable — they only
+// re-render on their own hook/state changes. Keeps the swipe cheap.
+const PAGES = [HomeSection, BillsSection, RequestsSection, NoticesSection, ProfileSection].map(
+  (P) => React.memo(P),
+);
 const LABELS = ['Home', 'Bills', 'Requests', 'Community', 'Profile'];
 
 /**
@@ -40,6 +46,7 @@ export default function TabsHost() {
     if (i >= 0) setIndex(i);
   }, []);
 
+  const theme = useTheme();
   const renderPage = useCallback((i: number) => {
     const Page = PAGES[i];
     return <Page />;
@@ -47,7 +54,7 @@ export default function TabsHost() {
 
   return (
     <TabsContext.Provider value={{ index, goTo }}>
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, backgroundColor: theme.colors.bg.primary }}>
         <TabsPager
           index={index}
           onIndexChange={setIndex}
@@ -106,7 +113,7 @@ function BottomBar({ index, onSelect }: { index: number; onSelect: (i: number) =
                   justifyContent: 'center',
                   gap: 3,
                   paddingVertical: 7,
-                  paddingHorizontal: 8,
+                  paddingHorizontal: 2,
                   borderRadius: theme.radius.xl,
                   minHeight: 46,
                   alignSelf: 'stretch',
@@ -114,7 +121,11 @@ function BottomBar({ index, onSelect }: { index: number; onSelect: (i: number) =
                 }}
               >
                 <Icon size={23} color={color} active={active} />
-                <Text weight="semibold" style={{ fontSize: 10.5, lineHeight: 13, color }}>
+                <Text
+                  weight="semibold"
+                  numberOfLines={1}
+                  style={{ fontSize: 10, lineHeight: 13, color }}
+                >
                   {LABELS[i]}
                 </Text>
               </View>
