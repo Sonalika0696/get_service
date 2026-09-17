@@ -2,7 +2,25 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../infra/prisma/prisma.service.js';
 import { canonicalJsonStringify } from '../../common/util/canonical-json.js';
 import { GENESIS_HASH, sha256, toPrismaBytes } from '../../common/util/hash.js';
+import type { Prisma } from '../../generated/prisma/client.js';
 import type { AuditLogModel } from '../../generated/prisma/models.js';
+
+/** Filters accepted by `queryLogs` (lane b1read, `GET /audit/logs`) — every field optional, always additionally scoped to one society by the caller. */
+export interface QueryAuditLogsFilters {
+  action?: string;
+  subjectType?: string;
+  subjectId?: string;
+  actorId?: string;
+  /** Inclusive lower bound on `ts` — validated ISO-8601 by the caller (AuditController). */
+  from?: Date;
+  /** Inclusive upper bound on `ts`. */
+  to?: Date;
+}
+
+export interface AuditLogPage {
+  items: AuditLogModel[];
+  nextCursor: string | null;
+}
 
 export interface AppendAuditLogInput {
   societyId: string;
@@ -149,5 +167,40 @@ export class AuditService {
     }
 
     return { ok: true, verifiedThrough: rows.length, tailHash: expectedPrevious, firstDivergence: null };
+  }
+
+  /**
+   * Lane b1read — `GET /audit/logs` (audit log browsing). Always scoped to
+   * ONE society (the caller's own — see AuditController; societyId is
+   * never accepted as a filter, only ever as the hard scope). Keyset on
+   * `sequence DESC` — sequence is a global auto-increment, so it alone is
+   * a sufficient, always-unique tiebreaker (no second sort column needed,
+   * unlike the createdAt+id pairs elsewhere in this codebase).
+   */
+  async queryLogs(societyId: string, filters: QueryAuditLogsFilters, cursorSequence: number | null, limit: number): Promise<AuditLogPage> {
+    const where: Prisma.AuditLogWhereInput = {
+      societyId,
+      ...(filters.action !== undefined ? { action: filters.action } : {}),
+      ...(filters.subjectType !== undefined ? { subjectType: filters.subjectType } : {}),
+      ...(filters.subjectId !== undefined ? { subjectId: filters.subjectId } : {}),
+      ...(filters.actorId !== undefined ? { actorId: filters.actorId } : {}),
+      ...(filters.from !== undefined || filters.to !== undefined
+        ? { ts: { ...(filters.from !== undefined ? { gte: filters.from } : {}), ...(filters.to !== undefined ? { lte: filters.to } : {}) } }
+        : {}),
+      ...(cursorSequence !== null ? { sequence: { lt: cursorSequence } } : {}),
+    };
+
+    const rows = await this.prisma.auditLog.findMany({ where, orderBy: { sequence: 'desc' }, take: limit + 1 });
+    const hasMore = rows.length > limit;
+    const items = hasMore ? rows.slice(0, limit) : rows;
+    const nextCursor = hasMore && items.length > 0 ? String(items[items.length - 1].sequence) : null;
+
+    return { items, nextCursor };
+  }
+
+  /** Single entry, society-scoped — returns null (not found / another society's) rather than throwing, so the controller can decide the 404 shape. */
+  async getLogBySequence(societyId: string, sequence: number): Promise<AuditLogModel | null> {
+    const row = await this.prisma.auditLog.findFirst({ where: { societyId, sequence } });
+    return row;
   }
 }

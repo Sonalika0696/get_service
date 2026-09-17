@@ -44,6 +44,8 @@ import { MetersModule } from './modules/electricity/meters/meters.module.js';
 import { ReadingsModule } from './modules/electricity/readings/readings.module.js';
 import { HealthCampsModule } from './modules/health-camps/health-camps.module.js';
 import { DonationsModule } from './modules/donations/donations.module.js';
+import { ApprovalsModule } from './modules/approvals/approvals.module.js';
+import { CollectionsModule } from './modules/collections/collections.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor.js';
 
@@ -103,6 +105,8 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     HealthModule,
     HealthCampsModule,
     DonationsModule,
+    ApprovalsModule,
+    CollectionsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
