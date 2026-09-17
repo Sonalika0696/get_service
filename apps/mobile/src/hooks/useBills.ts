@@ -41,13 +41,26 @@ export function useBillsHub() {
 }
 
 /**
- * The backend's `kind` split (MAINTENANCE | PROCUREMENT) is coarser than
- * the client's own BillKind — a pooled PROCUREMENT line reads to the
- * resident as a group buy, so it maps onto the existing BULK_BUY_SHARE
- * icon/tone rather than inventing a new one.
+ * The backend's `kind` split is coarser than the client's own BillKind — a
+ * pooled PROCUREMENT line reads to the resident as a group buy, so it maps
+ * onto the existing BULK_BUY_SHARE icon/tone rather than inventing a new
+ * one, and a paid HEALTH_CAMP registration has no dedicated client bucket
+ * yet, so it renders as a generic ADJUSTMENT (neutral icon/tone) rather
+ * than something actively misleading like a lightning-bolt icon.
+ *
+ * Exhaustive over BillsPageItem['kind'] on purpose: if the backend adds a
+ * 7th kind, this fails to compile instead of silently defaulting every new
+ * kind to MAINTENANCE.
  */
 function mapBillKind(kind: BillsPageItem['kind']): BillKind {
-  return kind === 'PROCUREMENT' ? 'BULK_BUY_SHARE' : 'MAINTENANCE';
+  switch (kind) {
+    case 'MAINTENANCE': return 'MAINTENANCE';
+    case 'PROCUREMENT': return 'BULK_BUY_SHARE';
+    case 'ELECTRICITY': return 'ELECTRICITY';
+    case 'WATER': return 'WATER';
+    case 'EVENT': return 'EVENT_CHARGE';
+    case 'HEALTH_CAMP': return 'ADJUSTMENT';
+  }
 }
 
 /** The backend's `rail` isn't in this DTO yet, so it's inferred from
@@ -62,6 +75,15 @@ function railForKind(kind: BillKind): BillLine['rail'] {
  * union. Known values map directly; anything else falls back to a
  * due-date check so an unrecognised status still renders sensibly instead
  * of crashing the kind/status switch in BillLineRow.
+ *
+ * EVENT/HEALTH_CAMP add REFUNDED/CANCELLED/WITHDRAWN (2026-09-17, backend
+ * commit 75cf88a) — these only ever appear once money has actually moved
+ * (a waitlisted or free registration never becomes a bill line at all), so
+ * the matter is closed and nothing is owed. They read as PAID rather than
+ * falling through to the due-date guess below, which would otherwise
+ * wrongly nudge a refunded or withdrawn line as "due"/"overdue". PENDING
+ * (EVENT/HEALTH_CAMP's "not yet paid" state) needs no explicit branch — it
+ * means the same thing the due-date fallback already computes.
  */
 function mapBillStatus(status: string, dueDate: string | null): BillStatus {
   const s = status.toUpperCase();
@@ -69,6 +91,7 @@ function mapBillStatus(status: string, dueDate: string | null): BillStatus {
   if (s === 'DISPUTED') return 'DISPUTED';
   if (s === 'PARTIAL' || s === 'PARTIALLY_PAID') return 'PARTIAL';
   if (s === 'OVERDUE') return 'OVERDUE';
+  if (s === 'REFUNDED' || s === 'CANCELLED' || s === 'WITHDRAWN') return 'PAID';
   if (dueDate && new Date(dueDate).getTime() < Date.now()) return 'OVERDUE';
   return 'DUE';
 }

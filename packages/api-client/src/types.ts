@@ -202,10 +202,13 @@ export type HomeAggregate = {
 /** One row of `GET /me/bills`. Money fields are DECIMAL rupee STRINGS in
  * MAJOR units, same convention as HomeAggregate.amountDue. `kind` is a
  * coarser split than the client's own BillKind — mapped onto it in
- * useBills.ts. */
+ * useBills.ts (that mapping is an exhaustive switch, so widening this union
+ * again will surface a compile error there rather than silently
+ * mis-rendering the new kind). EVENT/HEALTH_CAMP added 2026-09-17
+ * (backend commit 75cf88a). */
 export type BillsPageItem = {
   id: string;
-  kind: 'MAINTENANCE' | 'PROCUREMENT';
+  kind: 'MAINTENANCE' | 'PROCUREMENT' | 'ELECTRICITY' | 'WATER' | 'EVENT' | 'HEALTH_CAMP';
   title: string;
   label: string;
   amountDue: string;

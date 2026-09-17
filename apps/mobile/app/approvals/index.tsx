@@ -66,6 +66,9 @@ export default function ApprovalsInbox() {
           <Text variant="body" tone="secondary">
             Payouts, milestones, flat claims, corpus movements. Every sign-off leaves an audit trail.
           </Text>
+          {query.isSample ? (
+            <Text variant="caption" tone="muted">Sample data</Text>
+          ) : null}
         </View>
 
         {!isCommittee ? (

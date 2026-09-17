@@ -29,11 +29,17 @@ export function useJobPosts() {
 }
 
 export function useJobPost(id: string | undefined) {
-  return useQuery({
+  const query = useQuery({
     queryKey: ['job-post', id],
     queryFn: () => api<JobBlogPost>(`/jobs/${id}`),
     enabled: Boolean(id),
   });
+
+  // Opening a sampled post (from useJobPosts' own fallback list) must not
+  // 401/404 against the real backend — resolve to the matching sample, or
+  // the first one as a defensive fallback.
+  const sample = demoJobPosts.find((p) => p.id === id) ?? demoJobPosts[0];
+  return withSampleFallback(query, () => false, sample);
 }
 
 export function useCreateJobPost() {

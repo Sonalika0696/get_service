@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { EventSummary, EventDetail } from '@sft/api-client';
 import { api } from '../lib/api';
 import { queryClient as globalQueryClient } from '../lib/query';
-import { demoEvents } from '../lib/demoData';
+import { demoEvents, demoEventDetails } from '../lib/demoData';
 import { withSampleFallback } from '../lib/sampleFallback';
 
 /**
@@ -45,19 +45,24 @@ export function useEvents() {
 }
 
 export function useEvent(id: string | undefined) {
-  return useQuery({
+  const query = useQuery({
     queryKey: ['event', id],
-    queryFn: async (): Promise<EventDetail | null> => {
-      try {
-        return await api<EventDetail>(`/events/${id}`);
-      } catch (err) {
-        if ((err as { status?: number } | null)?.status === 404) return null;
-        throw err;
-      }
-    },
+    // Lets a 404 propagate as a query error (rather than a successful
+    // `null`) so withSampleFallback's error branch catches it uniformly —
+    // same pattern as useVendor/useResidentPoll. Since /events isn't
+    // shipped, EVERY id 404s today; once it lands, a genuinely-deleted
+    // event would also fall back to sample content rather than "not
+    // found" — an accepted trade-off matching the rest of the app.
+    queryFn: () => api<EventDetail>(`/events/${id}`),
     enabled: Boolean(id),
     staleTime: 30_000,
   });
+
+  // Opening a sampled event (from useEvents' own fallback list) must not
+  // show "event not found" — resolve to its matching detail, or the first
+  // sample as a defensive fallback if the id doesn't match any.
+  const sample = (id && demoEventDetails[id]) ?? Object.values(demoEventDetails)[0];
+  return withSampleFallback(query, () => false, sample);
 }
 
 /**

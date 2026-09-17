@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -29,6 +29,26 @@ export default function EventDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const query = useEvent(id);
   const optIn = useOptInEvent();
+  // Sample events have no real backend row, so opting in can't hit the
+  // network (it would 401/404 against the wiped-or-unshipped backend).
+  // Track it locally and reflect it optimistically instead — same pattern
+  // as the sample-request join on requests/[id].tsx.
+  const [optedInLocally, setOptedInLocally] = useState(false);
+
+  const event =
+    query.data && optedInLocally && query.data.myOptIn.state === 'NONE'
+      ? (() => {
+          const atCapacity = query.data.capacity !== null && query.data.optedInCount >= query.data.capacity;
+          return {
+            ...query.data,
+            myOptIn: atCapacity
+              ? { state: 'WAITLISTED' as const, position: query.data.waitlistCount + 1 }
+              : { state: 'OPTED_IN' as const, paid: false },
+            optedInCount: atCapacity ? query.data.optedInCount : query.data.optedInCount + 1,
+            waitlistCount: atCapacity ? query.data.waitlistCount + 1 : query.data.waitlistCount,
+          };
+        })()
+      : query.data;
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.colors.bg.primary }}>

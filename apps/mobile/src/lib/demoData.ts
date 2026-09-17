@@ -268,8 +268,12 @@ export const demoResidentPolls: ResidentPollDetail[] = [
  * in sample mode. The two Diwali lines (materials + installation) are both
  * evidenced against demo-request-3, the pool that actually fired above —
  * a fired pool showing up as a real charge, not just a status change. Two
- * paid history lines keep the "All" segment and statement view from looking
- * like a brand-new account with no track record.
+ * paid maintenance lines keep the "All" segment and statement view from
+ * looking like a brand-new account with no track record. The EVENT and
+ * HEALTH_CAMP lines (both already paid, so neither touches the due total)
+ * round out every kind the backend now returns — the paid event line even
+ * ties back to demo-event-1, so a resident's own opt-in shows up as a real
+ * charge in their statement, not just a status on the event card.
  */
 export const demoBillsPage: BillsPage = {
   items: [
@@ -337,6 +341,32 @@ export const demoBillsPage: BillsPage = {
       basis: 'Flat area 1050 sq ft x society maintenance rate',
       evidenceType: 'JOURNAL',
       evidenceId: 'demo-journal--1',
+    },
+    {
+      id: 'demo-bill-6',
+      kind: 'EVENT',
+      title: 'Event – Diwali get-together, clubhouse lawn',
+      label: 'Diwali get-together, clubhouse lawn',
+      amountDue: '500.00',
+      amountPaid: '500.00',
+      status: 'PAID',
+      dueDate: daysFromNow(18),
+      basis: 'Per-flat opt-in charge for the clubhouse Diwali event',
+      evidenceType: 'EventRegistration',
+      evidenceId: 'demo-event-reg-1',
+    },
+    {
+      id: 'demo-bill-7',
+      kind: 'HEALTH_CAMP',
+      title: 'Health camp – Free eye check-up camp',
+      label: 'Self',
+      amountDue: '200.00',
+      amountPaid: '200.00',
+      status: 'PAID',
+      dueDate: daysFromNow(-12),
+      basis: 'Consultation fee for the society-organised eye check-up camp',
+      evidenceType: 'CampRegistration',
+      evidenceId: 'demo-camp-reg-1',
     },
   ],
   nextCursor: null,

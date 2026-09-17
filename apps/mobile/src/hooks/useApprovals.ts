@@ -6,45 +6,33 @@ import type {
 } from '@sft/api-client';
 import { api } from '../lib/api';
 import { useAuth } from '../auth/AuthProvider';
+import { demoApprovals } from '../lib/demoData';
+import { withSampleFallback, type SampleFallbackResult } from '../lib/sampleFallback';
 
 /**
  * Committee approvals inbox — the mobile side of the M14 governance ladder.
  *
- * Backend timing: `GET /me/approvals` is called out in FRONTEND_PLAN §3.2 as
- * the aggregate for this screen but has NOT shipped yet. The individual
- * shipped POST routes (payout, milestone, retention authorise) are wired up
- * below so a treasurer with a bookingId in hand can still act.
- *
- * When the aggregate ships, delete the empty-state branch and the data
- * flows through untouched.
+ * `GET /me/approvals` exists in backend source now (backend/src/modules/
+ * approvals), but as of writing the running dev server 404s on it with
+ * Nest's generic "Cannot GET" (a route-not-registered error, not an
+ * application 404) — it hasn't picked up a rebuild/restart yet. Rather than
+ * special-case that, this just calls the real route and lets any failure
+ * (including today's stale-server 404) fall back to curated sample
+ * approvals via withSampleFallback — the same pattern as every other
+ * resident-facing hook. No mobile change is needed once their server
+ * catches up; real data (including a genuinely empty inbox) takes over
+ * automatically the moment the call succeeds.
  */
-export function useApprovals(): {
-  data: ApprovalsResponse | undefined;
-  isLoading: boolean;
-  isError: boolean;
-  isSuccess: boolean;
-  error: unknown;
-  refetch: () => Promise<unknown>;
-} {
+export function useApprovals(): SampleFallbackResult<ApprovalsResponse> {
   const { isSignedIn } = useAuth();
-  return useQuery({
+  const query = useQuery({
     queryKey: ['me', 'approvals'],
-    // Casting the endpoint as unshipped: it 404s today and TanStack Query
-    // gets a friendly result. When it lands the same query key repopulates.
-    queryFn: async (): Promise<ApprovalsResponse> => {
-      try {
-        return await api<ApprovalsResponse>('/me/approvals');
-      } catch (err) {
-        const status = (err as { status?: number } | null)?.status;
-        if (status === 404) {
-          return { asOf: new Date().toISOString(), items: [] };
-        }
-        throw err;
-      }
-    },
+    queryFn: () => api<ApprovalsResponse>('/me/approvals'),
     staleTime: 30_000,
     enabled: isSignedIn,
   });
+
+  return withSampleFallback(query, (data) => data.items.length === 0, demoApprovals);
 }
 
 export function useAuthorisePayout() {
