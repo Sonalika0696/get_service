@@ -1,9 +1,9 @@
 import { IsEnum, IsISO8601, IsInt, IsOptional, IsPositive, IsString, MaxLength, MinLength } from 'class-validator';
-import { PollType } from '../../../generated/prisma/enums.js';
+import { ServiceRequestType } from '../../../generated/prisma/enums.js';
 
 export class CreatePollDto {
-  @IsEnum(PollType)
-  pollType!: PollType;
+  @IsEnum(ServiceRequestType)
+  pollType!: ServiceRequestType;
 
   @IsString()
   @MinLength(3)

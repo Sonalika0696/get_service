@@ -27,7 +27,7 @@ import { AccountKind, OccupancyRole, RoleKind } from '../src/generated/prisma/en
  *  - a committee member confirms terms on the vendor's behalf
  *    (unitPrice, confirmedMinimum, optional discount ladder). If enough
  *    residents already joined, confirming fires the poll immediately, in
- *    the same call: Poll status FIRED, a Booking(sourceType='POLL') +
+ *    the same call: Poll status FIRED, a Booking(sourceType='SERVICE_REQUEST') +
  *    one JobCard/escrow Payment per participant, exactly like Flow A's
  *    fireOffer produces for an Offer;
  *  - the mirror ordering also fires: vendor confirms first, and the join
@@ -264,9 +264,9 @@ describe('Bulk-buy Flow B — resident polls (e2e)', () => {
     await prisma.payout.deleteMany({ where: { booking: { societyId } } });
     await prisma.jobCard.deleteMany({ where: { booking: { societyId } } });
     await prisma.booking.deleteMany({ where: { societyId } });
-    await prisma.commitment.deleteMany({ where: { OR: [{ offer: { societyId } }, { poll: { societyId } }] } });
-    await prisma.pollCommitment.deleteMany({ where: { poll: { societyId } } });
-    await prisma.poll.deleteMany({ where: { societyId } });
+    await prisma.commitment.deleteMany({ where: { OR: [{ offer: { societyId } }, { serviceRequest: { societyId } }] } });
+    await prisma.participation.deleteMany({ where: { serviceRequest: { societyId } } });
+    await prisma.serviceRequest.deleteMany({ where: { societyId } });
     await prisma.offer.deleteMany({ where: { societyId } });
     await prisma.payment.deleteMany({ where: { societyId } });
     await prisma.ledgerEntry.deleteMany({ where: { societyId } });
@@ -366,7 +366,7 @@ describe('Bulk-buy Flow B — resident polls (e2e)', () => {
     await committee.agent.post(`/api/v1/bulk-buy/polls/${poll.id}/vendor-decline`).expect(400);
 
     const booking = await prisma.booking.findUniqueOrThrow({ where: { id: firedPoll.bookingId! } });
-    expect(booking.sourceType).toBe('POLL');
+    expect(booking.sourceType).toBe('SERVICE_REQUEST');
     expect(booking.sourceId).toBe(poll.id);
     expect(booking.vendorId).toBe(vendorId);
     expect(booking.status).toBe('ACTIVE');
@@ -380,7 +380,7 @@ describe('Bulk-buy Flow B — resident polls (e2e)', () => {
       expect(jc.tier).toBe('SMALL');
     }
 
-    const commitments = await prisma.commitment.findMany({ where: { pollId: poll.id } });
+    const commitments = await prisma.commitment.findMany({ where: { serviceRequestId: poll.id } });
     expect(commitments).toHaveLength(2);
     for (const c of commitments) {
       expect(c.offerId).toBeNull();
@@ -593,10 +593,10 @@ describe('Bulk-buy Flow B — resident polls (e2e)', () => {
 
     const finalPoll = (await committee.agent.get(`/api/v1/bulk-buy/polls/${poll.id}`).expect(200)).body as ResidentPollBody;
     expect(finalPoll.status).toBe('FIRED');
-    expect(finalPoll.commitmentCount).toBe(3); // resident1 + both racers all recorded a PollCommitment, win or lose the race
+    expect(finalPoll.commitmentCount).toBe(3); // resident1 + both racers all recorded a Participation, win or lose the race
     expect(finalPoll.bookingId).toBeTruthy();
 
-    const bookings = await prisma.booking.findMany({ where: { sourceType: 'POLL', sourceId: poll.id } });
+    const bookings = await prisma.booking.findMany({ where: { sourceType: 'SERVICE_REQUEST', sourceId: poll.id } });
     expect(bookings).toHaveLength(1); // fired exactly once — no duplicate Booking despite the race
 
     // Only the 2 participants captured at the instant the poll actually
@@ -610,7 +610,7 @@ describe('Bulk-buy Flow B — resident polls (e2e)', () => {
     const jobCards = await prisma.jobCard.findMany({ where: { bookingId: bookings[0].id } });
     expect(jobCards).toHaveLength(2);
 
-    const commitments = await prisma.commitment.findMany({ where: { pollId: poll.id, paymentId: { not: null } } });
+    const commitments = await prisma.commitment.findMany({ where: { serviceRequestId: poll.id, paymentId: { not: null } } });
     expect(commitments).toHaveLength(2); // exactly one funded-escrow Commitment per JobCard — no duplicates
 
     const payments = await prisma.payment.findMany({ where: { linkedEntityType: 'Commitment', linkedEntityId: { in: commitments.map((c) => c.id) } } });

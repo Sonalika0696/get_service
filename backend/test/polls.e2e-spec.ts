@@ -10,7 +10,7 @@ import { PrismaService } from '../src/infra/prisma/prisma.service.js';
 import { AppConfigService } from '../src/config/config.service.js';
 import { MailerService, type SendMailInput } from '../src/infra/mailer/mailer.service.js';
 import { createGlobalValidationPipe } from '../src/common/pipes/validation.pipe.js';
-import { OccupancyRole, PollStatus, PollType, RoleKind } from '../src/generated/prisma/enums.js';
+import { OccupancyRole, ServiceRequestStatus, ServiceRequestType, RoleKind } from '../src/generated/prisma/enums.js';
 
 /**
  * Phase 3 (poll engine) Definition of Done, end-to-end against real
@@ -52,8 +52,8 @@ function extractOtpCode(mail: SendMailInput): string {
 
 interface PollDetailBody {
   id: string;
-  status: PollStatus;
-  pollType: PollType;
+  status: ServiceRequestStatus;
+  pollType: ServiceRequestType;
   creatorId: string;
   commitmentCount: number;
   hasJoined: boolean;
@@ -146,8 +146,8 @@ describe('Polls (e2e)', () => {
 
   afterAll(async () => {
     // FK-respecting cleanup, children before parents.
-    await prisma.pollCommitment.deleteMany({ where: { poll: { societyId: { in: societyIds } } } });
-    await prisma.poll.deleteMany({ where: { societyId: { in: societyIds } } });
+    await prisma.participation.deleteMany({ where: { serviceRequest: { societyId: { in: societyIds } } } });
+    await prisma.serviceRequest.deleteMany({ where: { societyId: { in: societyIds } } });
     await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.otp.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.role.deleteMany({ where: { userId: { in: userIds } } });
@@ -173,7 +173,7 @@ describe('Polls (e2e)', () => {
 
     const createRes = await committee.agent
       .post('/api/v1/polls')
-      .send({ pollType: PollType.EVENT, title: 'Diwali dinner', minCommitments: 2, closesAt: futureIso(60 * 60 * 1000) })
+      .send({ pollType: ServiceRequestType.EVENT, title: 'Diwali dinner', minCommitments: 2, closesAt: futureIso(60 * 60 * 1000) })
       .expect(201);
     const pollId = (createRes.body as PollDetailBody).id;
 
@@ -199,19 +199,19 @@ describe('Polls (e2e)', () => {
 
     const createRes = await creator.agent
       .post('/api/v1/polls')
-      .send({ pollType: PollType.EVENT, title: 'Society picnic', minCommitments: 2, closesAt: futureIso(60 * 60 * 1000) })
+      .send({ pollType: ServiceRequestType.EVENT, title: 'Society picnic', minCommitments: 2, closesAt: futureIso(60 * 60 * 1000) })
       .expect(201);
     const poll = createRes.body as PollDetailBody;
-    expect(poll.status).toBe(PollStatus.OPEN);
+    expect(poll.status).toBe(ServiceRequestStatus.OPEN);
 
     const afterFirstJoin = await joinerOne.agent.post(`/api/v1/polls/${poll.id}/join`).expect(201);
-    expect((afterFirstJoin.body as PollDetailBody).status).toBe(PollStatus.OPEN);
+    expect((afterFirstJoin.body as PollDetailBody).status).toBe(ServiceRequestStatus.OPEN);
     expect((afterFirstJoin.body as PollDetailBody).commitmentCount).toBe(1);
     expect((afterFirstJoin.body as PollDetailBody).hasJoined).toBe(true);
 
     const afterSecondJoin = await joinerTwo.agent.post(`/api/v1/polls/${poll.id}/join`).expect(201);
     const firedBody = afterSecondJoin.body as PollDetailBody;
-    expect(firedBody.status).toBe(PollStatus.FIRED);
+    expect(firedBody.status).toBe(ServiceRequestStatus.FIRED);
     expect(firedBody.commitmentCount).toBe(2);
 
     const firedMailOne = await latestMailTo(joinerOne.email, 'Poll fired — enough residents joined');
@@ -229,7 +229,7 @@ describe('Polls (e2e)', () => {
 
     const createRes = await creator.agent
       .post('/api/v1/polls')
-      .send({ pollType: PollType.EVENT, title: 'Double join test', minCommitments: 5, closesAt: futureIso(60 * 60 * 1000) })
+      .send({ pollType: ServiceRequestType.EVENT, title: 'Double join test', minCommitments: 5, closesAt: futureIso(60 * 60 * 1000) })
       .expect(201);
     const pollId = (createRes.body as PollDetailBody).id;
 
@@ -246,14 +246,14 @@ describe('Polls (e2e)', () => {
 
     const createRes = await creator.agent
       .post('/api/v1/polls')
-      .send({ pollType: PollType.EVENT, title: 'Close early test', minCommitments: 5, closesAt: futureIso(60 * 60 * 1000) })
+      .send({ pollType: ServiceRequestType.EVENT, title: 'Close early test', minCommitments: 5, closesAt: futureIso(60 * 60 * 1000) })
       .expect(201);
     const pollId = (createRes.body as PollDetailBody).id;
 
     await other.agent.post(`/api/v1/polls/${pollId}/close`).expect(403);
 
     const closed = await creator.agent.post(`/api/v1/polls/${pollId}/close`).expect(201);
-    expect((closed.body as PollDetailBody).status).toBe(PollStatus.CLOSED);
+    expect((closed.body as PollDetailBody).status).toBe(ServiceRequestStatus.CLOSED);
 
     await other.agent.post(`/api/v1/polls/${pollId}/join`).expect(400);
     await creator.agent.post(`/api/v1/polls/${pollId}/close`).expect(400);
@@ -272,7 +272,7 @@ describe('Polls (e2e)', () => {
 
     const createRes = await creator.agent
       .post('/api/v1/polls')
-      .send({ pollType: PollType.EVENT, title: 'Rooftop garden', minCommitments: 3, closesAt: futureIso(5 * 60 * 1000) })
+      .send({ pollType: ServiceRequestType.EVENT, title: 'Rooftop garden', minCommitments: 3, closesAt: futureIso(5 * 60 * 1000) })
       .expect(201);
     const pollId = (createRes.body as PollDetailBody).id;
 
@@ -281,7 +281,7 @@ describe('Polls (e2e)', () => {
     // Push closesAt into the past directly via Prisma — the API itself
     // never allows creating (or editing into) a past closesAt. This models
     // "time passing" deterministically without wall-clock sleeps.
-    await prisma.poll.update({ where: { id: pollId }, data: { closesAt: new Date(Date.now() - 60 * 1000) } });
+    await prisma.serviceRequest.update({ where: { id: pollId }, data: { closesAt: new Date(Date.now() - 60 * 1000) } });
 
     // A non-committee caller can't trigger expiry processing.
     await creator.agent.post('/api/v1/polls/process-expired').expect(403);
@@ -290,7 +290,7 @@ describe('Polls (e2e)', () => {
     expect((processRes.body as { resolved: number }).resolved).toBeGreaterThanOrEqual(1);
 
     const getRes = await creator.agent.get(`/api/v1/polls/${pollId}`).expect(200);
-    expect((getRes.body as PollDetailBody).status).toBe(PollStatus.EXPIRED);
+    expect((getRes.body as PollDetailBody).status).toBe(ServiceRequestStatus.EXPIRED);
 
     const expiredMail = await latestMailTo(joiner.email, 'Poll expired — not enough commitments');
     expect(expiredMail.text).toContain('Rooftop garden');

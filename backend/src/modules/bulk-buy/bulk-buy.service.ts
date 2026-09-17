@@ -6,8 +6,8 @@ import { LedgerService } from '../ledger/ledger.service.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import { AuditService, type AppendAuditLogInput } from '../audit/audit.service.js';
 import { Prisma } from '../../generated/prisma/client.js';
-import { AccountKind, BookingStatus, CommitmentStatus, JobCardStatus, JobCardTier, OfferRecurrence, OfferStatus, PayoutStatus, PollStatus, PollType, RoleKind } from '../../generated/prisma/enums.js';
-import type { BookingModel, JobCardModel, MilestoneModel, OfferModel, PayoutModel, PollModel } from '../../generated/prisma/models.js';
+import { AccountKind, BookingStatus, CommitmentStatus, JobCardStatus, JobCardTier, OfferRecurrence, OfferStatus, PayoutStatus, ServiceRequestStatus, ServiceRequestType, RoleKind } from '../../generated/prisma/enums.js';
+import type { BookingModel, JobCardModel, MilestoneModel, OfferModel, PayoutModel, ServiceRequestModel } from '../../generated/prisma/models.js';
 import { appliedTier, minCommitmentsOf, nextTierThreshold, validateLadder, type LadderRung } from './discount-ladder.util.js';
 import { validateMilestoneTemplate, type MilestoneTemplateRung } from './milestone-template.util.js';
 import { parseApprovalConfig, requiredApprovers, validateApprovalConfig, type ApprovalConfig } from './approval-ladder.util.js';
@@ -50,7 +50,7 @@ export type BookingDetail = BookingModel & {
 };
 
 /** API-facing shape: a Flow B (BULK_BUY_RESIDENT) poll plus a live commitment count, the caller's own join state, and (once fired) the Booking it fired into. */
-export type ResidentPollDetail = PollModel & {
+export type ResidentPollDetail = ServiceRequestModel & {
   commitmentCount: number;
   hasJoined?: boolean;
   bookingId: string | null;
@@ -103,8 +103,8 @@ export type ResidentPollDetail = PollModel & {
  *
  * Phase 5 adds Flow B (resident-initiated, tagged-vendor bulk-buy) in the
  * "Resident polls (Flow B)" section below: a resident opens a
- * PollType.BULK_BUY_RESIDENT poll (reusing the Phase 3 Poll/PollCommitment
- * tables, but owned end-to-end by this module — see PollsService's own doc
+ * ServiceRequestType.BULK_BUY_RESIDENT poll (reusing the Phase 3
+ * ServiceRequest/Participation tables, but owned end-to-end by this module — see PollsService's own doc
  * comment for the ownership split), a COMMITTEE member confirms terms on the
  * vendor's behalf, and once enough residents join, Flow B fires down the
  * EXACT SAME booking/escrow path as Flow A: fireOffer and Flow B's
@@ -113,7 +113,7 @@ export type ResidentPollDetail = PollModel & {
  * job-card/escrow-creation logic. Everything downstream of firing (pay via
  * webhook, sign off, authorisePayout) is untouched Flow A code — Flow B
  * booking rows are indistinguishable from Flow A ones except for
- * sourceType='POLL' instead of 'OFFER'. Flow B is SMALL-tier only in v1
+ * sourceType='SERVICE_REQUEST' instead of 'OFFER'. Flow B is SMALL-tier only in v1
  * (documented at fireResidentPoll — no LARGE-via-poll milestone/retention
  * support yet). Phase 5 also adds weekly-recurring Offers (rollOffer).
  */
@@ -954,11 +954,11 @@ export class BulkBuyService {
   // -------------------------------------------------------------------
 
   /**
-   * Resident opens a Flow B poll: a PollType.BULK_BUY_RESIDENT row (the
-   * shared Phase 3 Poll table, owned end-to-end by this module — see
+   * Resident opens a Flow B poll: a ServiceRequestType.BULK_BUY_RESIDENT row (the
+   * shared Phase 3 ServiceRequest table, owned end-to-end by this module — see
    * PollsService's own doc comment for the ownership split) tagging an
    * existing Vendor in the caller's own society. `proposedMinimum` becomes
-   * Poll.minCommitments until (and unless) the vendor confirms a different
+   * ServiceRequest.minCommitments until (and unless) the vendor confirms a different
    * figure via vendorConfirm. Nothing fires here — the poll starts OPEN
    * with no vendor response yet.
    */
@@ -977,17 +977,17 @@ export class BulkBuyService {
       throw new BadRequestException('closesAt must be a valid date in the future');
     }
 
-    const poll = await this.prisma.poll.create({
+    const poll = await this.prisma.serviceRequest.create({
       data: {
         societyId,
         creatorId,
-        pollType: PollType.BULK_BUY_RESIDENT,
+        pollType: ServiceRequestType.BULK_BUY_RESIDENT,
         title: dto.title,
         description: dto.description,
         category: dto.category,
         minCommitments: dto.proposedMinimum,
         closesAt,
-        status: PollStatus.OPEN,
+        status: ServiceRequestStatus.OPEN,
         taggedVendorId: dto.taggedVendorId,
       },
     });
@@ -996,8 +996,8 @@ export class BulkBuyService {
   }
 
   async listResidentPolls(societyId: string, callerId: string): Promise<ResidentPollDetail[]> {
-    const polls = await this.prisma.poll.findMany({
-      where: { societyId, pollType: PollType.BULK_BUY_RESIDENT },
+    const polls = await this.prisma.serviceRequest.findMany({
+      where: { societyId, pollType: ServiceRequestType.BULK_BUY_RESIDENT },
       orderBy: { createdAt: 'desc' },
     });
     return Promise.all(polls.map((poll) => this.toResidentPollDetail(poll, callerId)));
@@ -1036,21 +1036,21 @@ export class BulkBuyService {
       // comment. Must be the first statement, before any read.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${RESIDENT_POLL_FIRE_LOCK_NAMESPACE}, hashtext(${pollId}))`;
 
-      const poll = await tx.poll.findUnique({ where: { id: pollId } });
+      const poll = await tx.serviceRequest.findUnique({ where: { id: pollId } });
       if (!poll || poll.societyId !== societyId) {
         throw new NotFoundException('Poll not found');
       }
-      if (poll.pollType !== PollType.BULK_BUY_RESIDENT) {
+      if (poll.pollType !== ServiceRequestType.BULK_BUY_RESIDENT) {
         throw new BadRequestException('Not a resident bulk-buy poll');
       }
-      if (poll.status !== PollStatus.OPEN) {
+      if (poll.status !== ServiceRequestStatus.OPEN) {
         throw new BadRequestException(`Poll is not open (status=${poll.status})`);
       }
       if (poll.vendorConfirmedAt || poll.vendorDeclinedAt) {
         throw new BadRequestException('The vendor has already responded to this poll');
       }
 
-      const updated = await tx.poll.update({
+      const updated = await tx.serviceRequest.update({
         where: { id: pollId },
         data: {
           vendorConfirmedAt: this.clock.now(),
@@ -1061,17 +1061,17 @@ export class BulkBuyService {
         },
       });
 
-      const commitmentCount = await tx.pollCommitment.count({ where: { pollId } });
+      const commitmentCount = await tx.participation.count({ where: { serviceRequestId: pollId } });
       if (commitmentCount >= dto.confirmedMinimum) {
         // Re-check status inside the tx (mirrors fireOffer's caller,
         // BulkBuyService.commit): guards against firing twice.
-        const stillOpen = await tx.poll.findUnique({ where: { id: pollId }, select: { status: true } });
-        if (stillOpen?.status === PollStatus.OPEN) {
+        const stillOpen = await tx.serviceRequest.findUnique({ where: { id: pollId }, select: { status: true } });
+        if (stillOpen?.status === ServiceRequestStatus.OPEN) {
           await this.fireResidentPoll(tx, updated, commitmentCount);
         }
       }
 
-      const finalPoll = await tx.poll.findUniqueOrThrow({ where: { id: pollId } });
+      const finalPoll = await tx.serviceRequest.findUniqueOrThrow({ where: { id: pollId } });
       return this.loadResidentPollDetail(tx, finalPoll, null);
     });
   }
@@ -1079,14 +1079,14 @@ export class BulkBuyService {
   /** Vendor declines (via a COMMITTEE member) — poll is CANCELLED outright; no fire, ever, for this poll. */
   async vendorDecline(societyId: string, pollId: string): Promise<ResidentPollDetail> {
     return this.prisma.$transaction(async (tx) => {
-      const poll = await tx.poll.findUnique({ where: { id: pollId } });
+      const poll = await tx.serviceRequest.findUnique({ where: { id: pollId } });
       if (!poll || poll.societyId !== societyId) {
         throw new NotFoundException('Poll not found');
       }
-      if (poll.pollType !== PollType.BULK_BUY_RESIDENT) {
+      if (poll.pollType !== ServiceRequestType.BULK_BUY_RESIDENT) {
         throw new BadRequestException('Not a resident bulk-buy poll');
       }
-      if (poll.status !== PollStatus.OPEN) {
+      if (poll.status !== ServiceRequestStatus.OPEN) {
         throw new BadRequestException(`Poll is not open (status=${poll.status})`);
       }
       if (poll.vendorConfirmedAt || poll.vendorDeclinedAt) {
@@ -1094,9 +1094,9 @@ export class BulkBuyService {
       }
 
       const now = this.clock.now();
-      const updated = await tx.poll.update({
+      const updated = await tx.serviceRequest.update({
         where: { id: pollId },
-        data: { vendorDeclinedAt: now, status: PollStatus.CANCELLED, closedAt: now },
+        data: { vendorDeclinedAt: now, status: ServiceRequestStatus.CANCELLED, closedAt: now },
       });
 
       return this.loadResidentPollDetail(tx, updated, null);
@@ -1105,10 +1105,10 @@ export class BulkBuyService {
 
   /**
    * Resident registers interest (mirrors PollsService.join's shape exactly,
-   * but against PollType.BULK_BUY_RESIDENT specifically, and with a
+   * but against ServiceRequestType.BULK_BUY_RESIDENT specifically, and with a
    * vendor-confirmation-aware fire condition instead of EVENT's plain
    * commitmentCount >= minCommitments). 409 on double-join (the shared
-   * PollCommitment [pollId, residentId] unique constraint); 400 if the poll
+   * Participation [serviceRequestId, residentId] unique constraint); 400 if the poll
    * isn't OPEN (covers "declined" — vendorDecline sets status CANCELLED —
    * and "already fired") or its closesAt has passed.
    *
@@ -1120,7 +1120,7 @@ export class BulkBuyService {
    */
   async joinResidentPoll(societyId: string, pollId: string, residentId: string): Promise<ResidentPollDetail> {
     const poll = await this.getResidentPollInternal(societyId, pollId);
-    if (poll.status !== PollStatus.OPEN) {
+    if (poll.status !== ServiceRequestStatus.OPEN) {
       throw new BadRequestException(`Poll is not open for joining (status=${poll.status})`);
     }
     if (poll.closesAt.getTime() <= this.clock.now().getTime()) {
@@ -1141,13 +1141,15 @@ export class BulkBuyService {
       // RESIDENT_POLL_FIRE_LOCK_NAMESPACE's doc comment. Must be the first
       // statement, before any read, so two different residents racing
       // across the fire threshold can't both observe status=OPEN and both
-      // fire (the [pollId, residentId] unique constraint below only stops
+      // fire (the [serviceRequestId, residentId] unique constraint below only stops
       // the SAME resident joining twice, not two different residents
       // racing past minCommitments together).
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${RESIDENT_POLL_FIRE_LOCK_NAMESPACE}, hashtext(${pollId}))`;
 
       try {
-        await tx.pollCommitment.create({ data: { pollId, residentId } });
+        // Phase 8.1: Participation is now keyed by flatId too — stamp it
+        // from the same active-occupancy lookup already done above (residency check).
+        await tx.participation.create({ data: { serviceRequestId: pollId, residentId, flatId: occupancy.flatId } });
       } catch (error) {
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
           throw new ConflictException('Already joined');
@@ -1155,12 +1157,12 @@ export class BulkBuyService {
         throw error;
       }
 
-      const commitmentCount = await tx.pollCommitment.count({ where: { pollId } });
-      const current = await tx.poll.findUnique({ where: { id: pollId } });
+      const commitmentCount = await tx.participation.count({ where: { serviceRequestId: pollId } });
+      const current = await tx.serviceRequest.findUnique({ where: { id: pollId } });
       const now = this.clock.now().getTime();
       if (
         current &&
-        current.status === PollStatus.OPEN &&
+        current.status === ServiceRequestStatus.OPEN &&
         current.vendorConfirmedAt &&
         current.vendorConfirmedMinimum !== null &&
         commitmentCount >= current.vendorConfirmedMinimum &&
@@ -1175,29 +1177,29 @@ export class BulkBuyService {
 
   /**
    * Fires a Flow B poll: sets status FIRED (+firedAt); resolves each
-   * PollCommitment's resident to their active Occupancy in this society
+   * Participation's resident to their active Occupancy in this society
    * (skipped — shouldn't happen — if a resident who joined has since lost
    * their occupancy here); creates one Commitment per resolved participant
-   * with pollId set (offerId null, per Commitment's "exactly one of
-   * offerId/pollId" invariant) and status PENDING; computes
+   * with serviceRequestId set (offerId null, per Commitment's "exactly one
+   * of offerId/serviceRequestId" invariant) and status PENDING; computes
    * appliedDiscountPct from the vendor's confirmed discountLadder via
    * appliedTier (0 if the vendor set no ladder); computes
    * discountedUnitPrice from vendorUnitPrice; then delegates to
    * createBookingWithEscrow — the SAME helper fireOffer uses — with
    * tier=SMALL (Flow B is SMALL-only in v1; a LARGE-via-poll
    * milestone/retention variant is out of scope for this phase),
-   * sourceType='POLL', sourceId=this poll's id, vendorId=taggedVendorId.
+   * sourceType='SERVICE_REQUEST', sourceId=this poll's id, vendorId=taggedVendorId.
    * Downstream (pay via webhook, sign off, authorisePayout) is the
-   * unmodified Flow A booking/payout code — it can't tell a POLL-sourced
-   * booking from an OFFER-sourced one.
+   * unmodified Flow A booking/payout code — it can't tell a
+   * SERVICE_REQUEST-sourced booking from an OFFER-sourced one.
    */
-  private async fireResidentPoll(tx: Prisma.TransactionClient, poll: PollModel, commitmentCount: number): Promise<void> {
+  private async fireResidentPoll(tx: Prisma.TransactionClient, poll: ServiceRequestModel, commitmentCount: number): Promise<void> {
     const ladder = poll.vendorDiscountLadder as unknown as LadderRung[] | null;
     const pct = ladder ? (appliedTier(ladder, commitmentCount) ?? 0) : 0;
 
-    await tx.poll.update({ where: { id: poll.id }, data: { status: PollStatus.FIRED, firedAt: this.clock.now() } });
+    await tx.serviceRequest.update({ where: { id: poll.id }, data: { status: ServiceRequestStatus.FIRED, firedAt: this.clock.now() } });
 
-    const pollCommitments = await tx.pollCommitment.findMany({ where: { pollId: poll.id }, orderBy: { createdAt: 'asc' } });
+    const pollCommitments = await tx.participation.findMany({ where: { serviceRequestId: poll.id }, orderBy: { createdAt: 'asc' } });
     const discountedUnitPrice = new Decimal(poll.vendorUnitPrice ?? 0)
       .mul(new Decimal(100).minus(pct))
       .div(100)
@@ -1216,7 +1218,7 @@ export class BulkBuyService {
       }
 
       const commitment = await tx.commitment.create({
-        data: { pollId: poll.id, residentId: pollCommitment.residentId, flatId: occupancy.flatId, status: CommitmentStatus.PENDING },
+        data: { serviceRequestId: poll.id, residentId: pollCommitment.residentId, flatId: occupancy.flatId, status: CommitmentStatus.PENDING },
       });
       participants.push({ commitmentId: commitment.id, residentId: pollCommitment.residentId, flatId: occupancy.flatId });
     }
@@ -1224,7 +1226,7 @@ export class BulkBuyService {
     await this.createBookingWithEscrow(tx, {
       societyId: poll.societyId,
       vendorId: poll.taggedVendorId!,
-      sourceType: 'POLL',
+      sourceType: 'SERVICE_REQUEST',
       sourceId: poll.id,
       tier: JobCardTier.SMALL,
       milestoneTemplate: null,
@@ -1350,24 +1352,24 @@ export class BulkBuyService {
     return { ...rest, jobCards, payout, milestones: [...milestones].sort((a, b) => a.sequence - b.sequence) };
   }
 
-  private async getResidentPollInternal(societyId: string, id: string): Promise<PollModel> {
-    const poll = await this.prisma.poll.findUnique({ where: { id } });
-    if (!poll || poll.societyId !== societyId || poll.pollType !== PollType.BULK_BUY_RESIDENT) {
+  private async getResidentPollInternal(societyId: string, id: string): Promise<ServiceRequestModel> {
+    const poll = await this.prisma.serviceRequest.findUnique({ where: { id } });
+    if (!poll || poll.societyId !== societyId || poll.pollType !== ServiceRequestType.BULK_BUY_RESIDENT) {
       throw new NotFoundException('Poll not found');
     }
     return poll;
   }
 
-  private async toResidentPollDetail(poll: PollModel, callerId: string | null): Promise<ResidentPollDetail> {
+  private async toResidentPollDetail(poll: ServiceRequestModel, callerId: string | null): Promise<ResidentPollDetail> {
     return this.loadResidentPollDetail(this.prisma, poll, callerId);
   }
 
   /** Shared by every Flow B read path (create/list/get/vendorConfirm/vendorDecline/join), including from inside a transaction client. */
-  private async loadResidentPollDetail(client: PrismaService | Prisma.TransactionClient, poll: PollModel, callerId: string | null): Promise<ResidentPollDetail> {
+  private async loadResidentPollDetail(client: PrismaService | Prisma.TransactionClient, poll: ServiceRequestModel, callerId: string | null): Promise<ResidentPollDetail> {
     const [commitmentCount, hasJoined, booking] = await Promise.all([
-      client.pollCommitment.count({ where: { pollId: poll.id } }),
-      callerId ? client.pollCommitment.findUnique({ where: { pollId_residentId: { pollId: poll.id, residentId: callerId } } }).then(Boolean) : Promise.resolve(undefined),
-      poll.status === PollStatus.FIRED ? client.booking.findFirst({ where: { sourceType: 'POLL', sourceId: poll.id } }) : Promise.resolve(null),
+      client.participation.count({ where: { serviceRequestId: poll.id } }),
+      callerId ? client.participation.findUnique({ where: { serviceRequestId_residentId: { serviceRequestId: poll.id, residentId: callerId } } }).then(Boolean) : Promise.resolve(undefined),
+      poll.status === ServiceRequestStatus.FIRED ? client.booking.findFirst({ where: { sourceType: 'SERVICE_REQUEST', sourceId: poll.id } }) : Promise.resolve(null),
     ]);
 
     return {

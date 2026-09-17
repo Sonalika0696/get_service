@@ -7,8 +7,8 @@ import { Roles } from '../../common/decorators/roles.decorator.js';
 import { CurrentResident } from '../../common/decorators/current-user.decorator.js';
 import { AuditLog } from '../../common/decorators/audit-log.decorator.js';
 import type { ResidentPrincipal } from '../../common/types/current-user.js';
-import { PollStatus, RoleKind } from '../../generated/prisma/enums.js';
-import type { PollModel } from '../../generated/prisma/models.js';
+import { ServiceRequestStatus, RoleKind } from '../../generated/prisma/enums.js';
+import type { ServiceRequestModel } from '../../generated/prisma/models.js';
 import { CreatePollDto } from './dto/create-poll.dto.js';
 import { PollsService, type PollDetail } from './polls.service.js';
 
@@ -19,7 +19,7 @@ export class PollsController {
   @Get()
   @UseGuards(AuthGuard, PrincipalGuard)
   @ResidentOnly()
-  async list(@CurrentResident() currentUser: ResidentPrincipal, @Query('status') status?: PollStatus): Promise<PollModel[]> {
+  async list(@CurrentResident() currentUser: ResidentPrincipal, @Query('status') status?: ServiceRequestStatus): Promise<ServiceRequestModel[]> {
     return this.pollsService.listForSociety(currentUser.societyId, status);
   }
 

@@ -75,34 +75,34 @@ model User {
   totpSecret    String?
   totpEnabledAt DateTime?
 
-  occupancies          Occupancy[]           @relation("OccupancyResident")
-  delegatedOccupancies Occupancy[]           @relation("OccupancyDelegate")
+  occupancies           Occupancy[]           @relation("OccupancyResident")
+  delegatedOccupancies  Occupancy[]           @relation("OccupancyDelegate")
   /// Phase 6.3: occupancies this user (a committee/treasurer officer)
   /// ratified or rejected — see RatificationStatus.
-  ratifiedOccupancies  Occupancy[]           @relation("OccupancyRatifiedBy")
+  ratifiedOccupancies   Occupancy[]           @relation("OccupancyRatifiedBy")
   /// Phase 6.3: Delegation grants where this user is the DELEGATE (the
   /// person receiving delegated rights, e.g. a tenant). The other side —
   /// whose occupancy is delegating — is reached via Delegation.occupancy.
-  delegationsReceived  Delegation[]          @relation("DelegationDelegate")
+  delegationsReceived   Delegation[]          @relation("DelegationDelegate")
   /// Phase 6.3: ConsentGrant rows this user has GIVEN (they are the data
   /// subject / grantor).
-  consentsGranted      ConsentGrant[]        @relation("ConsentGrantor")
+  consentsGranted       ConsentGrant[]        @relation("ConsentGrantor")
   /// Phase 6.3: ConsentGrant rows naming this user as the GRANTEE (they are
   /// the one who may see the consented data — e.g. a vendor's linked User).
-  consentsReceived     ConsentGrant[]        @relation("ConsentGrantee")
-  roles                Role[]
-  sessions             Session[]
-  otps                 Otp[]
-  jobBlogPosts         JobBlogPost[]
-  vendorRatings        VendorRating[]
-  vendorAccessRequests VendorAccessRequest[]
-  kycDocuments         KycDocument[]
-  createdPolls         Poll[]
-  pollCommitments      PollCommitment[]
-  payments             Payment[]
-  bulkBuyCommitments   Commitment[]
-  jobCards             JobCard[]
-  vendor               Vendor?               @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  consentsReceived      ConsentGrant[]        @relation("ConsentGrantee")
+  roles                 Role[]
+  sessions              Session[]
+  otps                  Otp[]
+  jobBlogPosts          JobBlogPost[]
+  vendorRatings         VendorRating[]
+  vendorAccessRequests  VendorAccessRequest[]
+  kycDocuments          KycDocument[]
+  raisedServiceRequests ServiceRequest[]
+  participations        Participation[]
+  payments              Payment[]
+  bulkBuyCommitments    Commitment[]
+  jobCards              JobCard[]
+  vendor                Vendor?               @relation(fields: [vendorId], references: [id], onDelete: SetNull)
 
   @@map("users")
 }
@@ -177,18 +177,18 @@ model Society {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  flats         Flat[]
-  roles         Role[]
-  auditLogs     AuditLog[]
-  jobBlogPosts  JobBlogPost[]
+  flats           Flat[]
+  roles           Role[]
+  auditLogs       AuditLog[]
+  jobBlogPosts    JobBlogPost[]
   /// Phase 7.1: goes through VendorSocietyLink now, not a direct Vendor.societyId FK — see VendorSocietyLink's doc comment.
-  vendorLinks   VendorSocietyLink[]
-  polls         Poll[]
-  accounts      Account[]
-  ledgerEntries LedgerEntry[]
-  payments      Payment[]
-  offers        Offer[]
-  bookings      Booking[]
+  vendorLinks     VendorSocietyLink[]
+  serviceRequests ServiceRequest[]
+  accounts        Account[]
+  ledgerEntries   LedgerEntry[]
+  payments        Payment[]
+  offers          Offer[]
+  bookings        Booking[]
 
   @@map("societies")
 }
@@ -201,10 +201,11 @@ model Flat {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  society            Society      @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  society            Society         @relation(fields: [societyId], references: [id], onDelete: Cascade)
   occupancies        Occupancy[]
   bulkBuyCommitments Commitment[]
   jobCards           JobCard[]
+  participations     Participation[]
 
   @@unique([societyId, unitNo])
   @@map("flats")
@@ -557,18 +558,18 @@ model Vendor {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  societyLinks   VendorSocietyLink[]
-  categories     VendorCategory[]
-  ratings        VendorRating[]
-  accessRequests VendorAccessRequest[]
-  offers         Offer[]
-  bookings       Booking[]
-  /// Phase 5 — polls where a resident tagged this vendor for a Flow B bulk-buy (see Poll.taggedVendorId).
-  taggedPolls    Poll[]
+  societyLinks            VendorSocietyLink[]
+  categories              VendorCategory[]
+  ratings                 VendorRating[]
+  accessRequests          VendorAccessRequest[]
+  offers                  Offer[]
+  bookings                Booking[]
+  /// Phase 5 — service requests where a resident tagged this vendor for a Flow B bulk-buy (see ServiceRequest.taggedVendorId).
+  assignedServiceRequests ServiceRequest[]
   /// Phase 6.2 — the VENDOR-principal User that logs in as this vendor (see User.vendorId). Opposite side of a 1:1; the FK lives on User.
-  linkedUser     User?
+  linkedUser              User?
   /// Phase 7.2 — this vendor's published price sheets (see PricingCard).
-  pricingCards   PricingCard[]
+  pricingCards            PricingCard[]
 
   @@map("vendors")
 }
@@ -741,21 +742,21 @@ model KycDocument {
 // minimum. Phase 8 renames this to ServiceRequest/Participation.
 // ---------------------------------------------------------------------------
 
-/// EVENT: residents "join" (PollCommitment) and the poll auto-fires once
+/// EVENT: residents "join" (Participation) and the poll auto-fires once
 ///   minCommitments is reached. Not a vote — no choice, no weight.
-/// BULK_BUY_RESIDENT: same commitment mechanics as EVENT (PollCommitment /
+/// BULK_BUY_RESIDENT: same commitment mechanics as EVENT (Participation /
 ///   minCommitments / auto-fire), but OWNED end-to-end by the bulk-buy
 ///   module (Phase 5 Flow B), not by PollsService — see
 ///   src/modules/bulk-buy/bulk-buy.service.ts's Flow B section and this
 ///   model's taggedVendorId/vendorConfirmed*/vendorDeclinedAt fields.
 ///   PollsService.create/join both reject this pollType with 400,
 ///   directing callers to the bulk-buy routes instead.
-enum PollType {
+enum ServiceRequestType {
   EVENT
   BULK_BUY_RESIDENT
 }
 
-enum PollStatus {
+enum ServiceRequestStatus {
   OPEN
   FIRED
   EXPIRED
@@ -766,12 +767,16 @@ enum PollStatus {
   CANCELLED
 }
 
-model Poll {
+/// Phase 8.1 rename (was Poll) — same table contents/semantics, see
+/// @@map("service_requests"); the pollType/taggedVendorId etc. field names
+/// are unchanged in this phase (Phase 8.2's concern), only the model, table
+/// and enum TYPE names moved.
+model ServiceRequest {
   id        String @id @default(cuid())
   societyId String
   creatorId String
 
-  pollType PollType
+  pollType ServiceRequestType
 
   title       String
   description String?
@@ -783,11 +788,11 @@ model Poll {
   /// than silently dropped.
   category    String?
 
-  /// Number of PollCommitment rows that auto-fires the poll.
+  /// Number of Participation rows that auto-fires the poll.
   minCommitments Int?
 
   closesAt DateTime
-  status   PollStatus @default(OPEN)
+  status   ServiceRequestStatus @default(OPEN)
 
   /// Auto-fire timestamp.
   firedAt  DateTime?
@@ -807,7 +812,7 @@ model Poll {
   vendorDeclinedAt       DateTime?
   /// The vendor-confirmed minimum headcount — replaces the resident's
   /// proposedMinimum (stored in minCommitments) once confirmed. Fire
-  /// triggers when the PollCommitment count reaches this value.
+  /// triggers when the Participation count reaches this value.
   vendorConfirmedMinimum Int?
   /// The vendor-confirmed per-unit price (major units/rupees), snapshotted
   /// at confirm time — mirrors Offer.unitPrice.
@@ -820,33 +825,41 @@ model Poll {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  society            Society          @relation(fields: [societyId], references: [id], onDelete: Cascade)
-  creator            User             @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-  taggedVendor       Vendor?          @relation(fields: [taggedVendorId], references: [id], onDelete: SetNull)
-  commitments        PollCommitment[]
-  /// Phase 5 Flow B: Commitment rows sourced from this poll once fired (see Commitment.pollId).
+  society            Society         @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  creator            User            @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  taggedVendor       Vendor?         @relation(fields: [taggedVendorId], references: [id], onDelete: SetNull)
+  participations     Participation[]
+  /// Phase 5 Flow B: Commitment rows sourced from this service request once fired (see Commitment.serviceRequestId).
   bulkBuyCommitments Commitment[]
 
   @@index([societyId, status])
   @@index([closesAt])
   @@index([taggedVendorId])
-  @@map("polls")
+  @@map("service_requests")
 }
 
 /// An EVENT "join" or a BULK_BUY_RESIDENT commitment to buy. Has its own
-/// user FK — commitments are not anonymous.
-model PollCommitment {
-  id         String @id @default(cuid())
-  pollId     String
-  residentId String
+/// user FK — participations are not anonymous. Phase 8.1 rename (was
+/// PollCommitment); flatId is new in Phase 8.1 (additive, backfilled) — the
+/// resident-scoped unique below is intentionally NOT flat-keyed yet, that's
+/// Phase 8.2's concern.
+model Participation {
+  id               String @id @default(cuid())
+  serviceRequestId String
+  residentId       String
+  /// Phase 8.1: the flat this participation is keyed to (backfilled from the
+  /// resident's occupancy at the time of joining — see the migration's
+  /// backfill SQL). Additive data only in this phase.
+  flatId           String
 
   createdAt DateTime @default(now())
 
-  poll     Poll @relation(fields: [pollId], references: [id], onDelete: Cascade)
-  resident User @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  serviceRequest ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+  resident       User           @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  flat           Flat           @relation(fields: [flatId], references: [id], onDelete: Cascade)
 
-  @@unique([pollId, residentId])
-  @@map("poll_commitments")
+  @@unique([serviceRequestId, residentId])
+  @@map("participations")
 }
 
 // ---------------------------------------------------------------------------
@@ -1172,35 +1185,36 @@ model Offer {
   @@map("offers")
 }
 
-/// A resident's financial commitment to either an Offer (Flow A) or a Poll
-/// (Flow B) — exactly one of offerId/pollId is set, never both and never
-/// neither; enforced in application code (BulkBuyService), not a DB
-/// constraint (Prisma has no portable CHECK-constraint support here). Not
-/// anonymous — this is a financial commitment.
+/// A resident's financial commitment to either an Offer (Flow A) or a
+/// ServiceRequest (Flow B) — exactly one of offerId/serviceRequestId is set,
+/// never both and never neither; enforced in application code
+/// (BulkBuyService), not a DB constraint (Prisma has no portable
+/// CHECK-constraint support here). Not anonymous — this is a financial
+/// commitment.
 model Commitment {
-  id         String           @id @default(cuid())
-  /// Flow A (vendor-initiated Offer). Null for a Flow B (poll-sourced) commitment.
-  offerId    String?
-  /// Flow B (resident-initiated, tagged-vendor Poll). Null for a Flow A (offer-sourced) commitment.
-  pollId     String?
-  residentId String
-  flatId     String
-  status     CommitmentStatus @default(PENDING)
+  id               String           @id @default(cuid())
+  /// Flow A (vendor-initiated Offer). Null for a Flow B (service-request-sourced) commitment.
+  offerId          String?
+  /// Flow B (resident-initiated, tagged-vendor ServiceRequest). Null for a Flow A (offer-sourced) commitment.
+  serviceRequestId String?
+  residentId       String
+  flatId           String
+  status           CommitmentStatus @default(PENDING)
   /// The escrow-in Payment (Phase 4B) created for this commitment at fire
   /// time — see BulkBuyService.commit's fire branch. Null until fired.
-  paymentId  String?
-  createdAt  DateTime         @default(now())
+  paymentId        String?
+  createdAt        DateTime         @default(now())
 
-  offer    Offer?   @relation(fields: [offerId], references: [id], onDelete: Cascade)
-  poll     Poll?    @relation(fields: [pollId], references: [id], onDelete: Cascade)
-  resident User     @relation(fields: [residentId], references: [id], onDelete: Cascade)
-  flat     Flat     @relation(fields: [flatId], references: [id], onDelete: Cascade)
-  jobCard  JobCard?
+  offer          Offer?          @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  serviceRequest ServiceRequest? @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+  resident       User            @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  flat           Flat            @relation(fields: [flatId], references: [id], onDelete: Cascade)
+  jobCard        JobCard?
 
   @@unique([offerId, residentId])
-  @@unique([pollId, residentId])
+  @@unique([serviceRequestId, residentId])
   @@index([offerId])
-  @@index([pollId])
+  @@index([serviceRequestId])
   @@map("commitments")
 }
 

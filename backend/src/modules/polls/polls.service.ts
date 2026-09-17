@@ -3,12 +3,12 @@ import { PrismaService } from '../../infra/prisma/prisma.service.js';
 import { Clock } from '../../infra/clock/clock.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { Prisma } from '../../generated/prisma/client.js';
-import { PollStatus, PollType } from '../../generated/prisma/enums.js';
-import type { PollModel } from '../../generated/prisma/models.js';
+import { ServiceRequestStatus, ServiceRequestType } from '../../generated/prisma/enums.js';
+import type { ServiceRequestModel } from '../../generated/prisma/models.js';
 import type { CreatePollDto } from './dto/create-poll.dto.js';
 
 /** API-facing shape: the poll row plus its commitment count and the caller's own participation flag. */
-export type PollDetail = PollModel & {
+export type PollDetail = ServiceRequestModel & {
   commitmentCount: number;
   hasJoined: boolean;
 };
@@ -37,8 +37,8 @@ interface PendingNotification {
  * minCommitments is reached. Phase 8 renames this to
  * ServiceRequest/Participation.
  *
- * Phase 5 reuses the shared Poll/PollCommitment tables for bulk-buy Flow B
- * (PollType.BULK_BUY_RESIDENT), but OWNS that pollType's entire lifecycle
+ * Phase 5 reuses the shared ServiceRequest/Participation tables for bulk-buy
+ * Flow B (ServiceRequestType.BULK_BUY_RESIDENT), but OWNS that pollType's entire lifecycle
  * from the bulk-buy module — see src/modules/bulk-buy/bulk-buy.service.ts's
  * Flow B section. create/join here reject BULK_BUY_RESIDENT with 400,
  * pointing callers at the bulk-buy routes. GET (list/get) work for any
@@ -70,7 +70,7 @@ export class PollsService {
   ) {}
 
   async create(societyId: string, creatorId: string, dto: CreatePollDto): Promise<PollDetail> {
-    if (dto.pollType === PollType.BULK_BUY_RESIDENT) {
+    if (dto.pollType === ServiceRequestType.BULK_BUY_RESIDENT) {
       throw new BadRequestException('Create resident bulk-buy polls via POST /bulk-buy/polls');
     }
 
@@ -83,7 +83,7 @@ export class PollsService {
       throw new BadRequestException('minCommitments (>= 1) is required for EVENT polls');
     }
 
-    const poll = await this.prisma.poll.create({
+    const poll = await this.prisma.serviceRequest.create({
       data: {
         societyId,
         creatorId,
@@ -98,8 +98,8 @@ export class PollsService {
     return this.toDetail(poll, null);
   }
 
-  async listForSociety(societyId: string, status?: PollStatus): Promise<PollModel[]> {
-    return this.prisma.poll.findMany({
+  async listForSociety(societyId: string, status?: ServiceRequestStatus): Promise<ServiceRequestModel[]> {
+    return this.prisma.serviceRequest.findMany({
       where: { societyId, ...(status ? { status } : {}) },
       orderBy: { createdAt: 'desc' },
     });
@@ -118,15 +118,18 @@ export class PollsService {
    */
   async join(societyId: string, id: string, callerId: string): Promise<PollDetail> {
     const poll = await this.getInternal(societyId, id);
-    if (poll.pollType === PollType.BULK_BUY_RESIDENT) {
+    if (poll.pollType === ServiceRequestType.BULK_BUY_RESIDENT) {
       throw new BadRequestException('BULK_BUY_RESIDENT polls are owned by the bulk-buy module — use POST /bulk-buy/polls/:id/join instead');
     }
-    if (poll.status !== PollStatus.OPEN) {
+    if (poll.status !== ServiceRequestStatus.OPEN) {
       throw new BadRequestException('Poll is not open for joining');
     }
 
-    const isResident = await this.isActiveResident(societyId, callerId);
-    if (!isResident) {
+    // Phase 8.1: Participation is now keyed by flatId too — resolve the
+    // caller's active occupancy in this society once, up front, both to
+    // enforce residency (as before) and to stamp the joining flat.
+    const flatId = await this.activeFlatId(societyId, callerId);
+    if (!flatId) {
       throw new ForbiddenException('Not a resident of this society');
     }
 
@@ -138,7 +141,7 @@ export class PollsService {
     // best-effort, never able to reverse committed state).
     const pending = await this.prisma.$transaction(async (tx) => {
       try {
-        await tx.pollCommitment.create({ data: { pollId: id, residentId: callerId } });
+        await tx.participation.create({ data: { serviceRequestId: id, residentId: callerId, flatId } });
       } catch (error) {
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
           throw new ConflictException('Already joined');
@@ -146,11 +149,11 @@ export class PollsService {
         throw error;
       }
 
-      const commitmentCount = await tx.pollCommitment.count({ where: { pollId: id } });
+      const commitmentCount = await tx.participation.count({ where: { serviceRequestId: id } });
       if (poll.minCommitments !== null && commitmentCount >= poll.minCommitments) {
-        const stillOpen = await tx.poll.findUnique({ where: { id }, select: { status: true } });
-        if (stillOpen?.status === PollStatus.OPEN) {
-          await tx.poll.update({ where: { id }, data: { status: PollStatus.FIRED, firedAt: this.clock.now() } });
+        const stillOpen = await tx.serviceRequest.findUnique({ where: { id }, select: { status: true } });
+        if (stillOpen?.status === ServiceRequestStatus.OPEN) {
+          await tx.serviceRequest.update({ where: { id }, data: { status: ServiceRequestStatus.FIRED, firedAt: this.clock.now() } });
           return this.collectRecipients(tx, id, poll.title, 'fired');
         }
       }
@@ -170,11 +173,11 @@ export class PollsService {
     if (poll.creatorId !== callerId) {
       throw new ForbiddenException('Only the poll creator can close it early');
     }
-    if (poll.status !== PollStatus.OPEN) {
+    if (poll.status !== ServiceRequestStatus.OPEN) {
       throw new BadRequestException(`Poll is already ${poll.status}`);
     }
 
-    await this.prisma.poll.update({ where: { id }, data: { status: PollStatus.CLOSED, closedAt: this.clock.now() } });
+    await this.prisma.serviceRequest.update({ where: { id }, data: { status: ServiceRequestStatus.CLOSED, closedAt: this.clock.now() } });
 
     return this.get(societyId, id, callerId);
   }
@@ -188,8 +191,8 @@ export class PollsService {
    */
   async processExpired(societyId: string): Promise<{ resolved: number }> {
     const now = this.clock.now();
-    const expired = await this.prisma.poll.findMany({
-      where: { societyId, status: PollStatus.OPEN, closesAt: { lte: now } },
+    const expired = await this.prisma.serviceRequest.findMany({
+      where: { societyId, status: ServiceRequestStatus.OPEN, closesAt: { lte: now } },
     });
 
     for (const poll of expired) {
@@ -197,7 +200,7 @@ export class PollsService {
       // poll's status and reads back who to notify; dispatch happens after
       // it has committed, so a mail failure can't un-expire a poll.
       const pending = await this.prisma.$transaction(async (tx) => {
-        await tx.poll.update({ where: { id: poll.id }, data: { status: PollStatus.EXPIRED, closedAt: this.clock.now() } });
+        await tx.serviceRequest.update({ where: { id: poll.id }, data: { status: ServiceRequestStatus.EXPIRED, closedAt: this.clock.now() } });
         return this.collectRecipients(tx, poll.id, poll.title, 'expired');
       });
       await this.dispatchNotifications(pending);
@@ -212,7 +215,7 @@ export class PollsService {
 
   /** Read-only, runs INSIDE the transaction: just gathers who to notify — never calls the mailer. */
   private async collectRecipients(tx: Prisma.TransactionClient, pollId: string, title: string, kind: NotificationKind): Promise<PendingNotification> {
-    const commitments = await tx.pollCommitment.findMany({ where: { pollId }, include: { resident: true } });
+    const commitments = await tx.participation.findMany({ where: { serviceRequestId: pollId }, include: { resident: true } });
     return { pollId, title, kind, recipientEmails: commitments.map((commitment) => commitment.resident.email) };
   }
 
@@ -239,26 +242,26 @@ export class PollsService {
     }
   }
 
-  /** One active occupancy per user in v1 (see UserContextService). */
-  private async isActiveResident(societyId: string, userId: string): Promise<boolean> {
+  /** One active occupancy per user in v1 (see UserContextService). Returns its flatId, or null if the caller isn't a resident of this society. */
+  private async activeFlatId(societyId: string, userId: string): Promise<string | null> {
     const occupancy = await this.prisma.occupancy.findFirst({
       where: { userId, tenureEndedAt: null, flat: { societyId } },
-      select: { id: true },
+      select: { flatId: true },
     });
-    return occupancy !== null;
+    return occupancy?.flatId ?? null;
   }
 
-  private async toDetail(poll: PollModel, callerId: string | null): Promise<PollDetail> {
+  private async toDetail(poll: ServiceRequestModel, callerId: string | null): Promise<PollDetail> {
     const [commitmentCount, hasJoined] = await Promise.all([
-      this.prisma.pollCommitment.count({ where: { pollId: poll.id } }),
-      callerId ? this.prisma.pollCommitment.findUnique({ where: { pollId_residentId: { pollId: poll.id, residentId: callerId } } }).then(Boolean) : Promise.resolve(false),
+      this.prisma.participation.count({ where: { serviceRequestId: poll.id } }),
+      callerId ? this.prisma.participation.findUnique({ where: { serviceRequestId_residentId: { serviceRequestId: poll.id, residentId: callerId } } }).then(Boolean) : Promise.resolve(false),
     ]);
 
     return { ...poll, commitmentCount, hasJoined };
   }
 
-  private async getInternal(societyId: string, id: string): Promise<PollModel> {
-    const poll = await this.prisma.poll.findUnique({ where: { id } });
+  private async getInternal(societyId: string, id: string): Promise<ServiceRequestModel> {
+    const poll = await this.prisma.serviceRequest.findUnique({ where: { id } });
     if (!poll || poll.societyId !== societyId) {
       throw new NotFoundException('Poll not found');
     }

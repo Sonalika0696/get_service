@@ -9,7 +9,7 @@ import { AppModule } from '../src/app.module.js';
 import { PrismaService } from '../src/infra/prisma/prisma.service.js';
 import { MailerService, type SendMailInput } from '../src/infra/mailer/mailer.service.js';
 import { createGlobalValidationPipe } from '../src/common/pipes/validation.pipe.js';
-import { OccupancyRole, PollStatus, PollType, RoleKind } from '../src/generated/prisma/enums.js';
+import { OccupancyRole, ServiceRequestStatus, ServiceRequestType, RoleKind } from '../src/generated/prisma/enums.js';
 
 /**
  * BACKEND_PLAN.md Phase 6.5 (rework — supervisor suggestion): notification
@@ -50,8 +50,8 @@ function extractOtpCode(mail: SendMailInput): string {
 
 interface PollDetailBody {
   id: string;
-  status: PollStatus;
-  pollType: PollType;
+  status: ServiceRequestStatus;
+  pollType: ServiceRequestType;
   creatorId: string;
   commitmentCount: number;
   hasJoined: boolean;
@@ -137,8 +137,8 @@ describe('Notification dispatch is post-commit and best-effort (e2e)', () => {
   });
 
   afterAll(async () => {
-    await prisma.pollCommitment.deleteMany({ where: { poll: { societyId: { in: societyIds } } } });
-    await prisma.poll.deleteMany({ where: { societyId: { in: societyIds } } });
+    await prisma.participation.deleteMany({ where: { serviceRequest: { societyId: { in: societyIds } } } });
+    await prisma.serviceRequest.deleteMany({ where: { societyId: { in: societyIds } } });
     await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.otp.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.role.deleteMany({ where: { userId: { in: userIds } } });
@@ -163,10 +163,10 @@ describe('Notification dispatch is post-commit and best-effort (e2e)', () => {
 
     const createRes = await creator.agent
       .post('/api/v1/polls')
-      .send({ pollType: PollType.EVENT, title: 'Mail-outage picnic', minCommitments: 2, closesAt: futureIso(60 * 60 * 1000) })
+      .send({ pollType: ServiceRequestType.EVENT, title: 'Mail-outage picnic', minCommitments: 2, closesAt: futureIso(60 * 60 * 1000) })
       .expect(201);
     const poll = createRes.body as PollDetailBody;
-    expect(poll.status).toBe(PollStatus.OPEN);
+    expect(poll.status).toBe(ServiceRequestStatus.OPEN);
 
     await joinerOne.agent.post(`/api/v1/polls/${poll.id}/join`).expect(201);
 
@@ -178,7 +178,7 @@ describe('Notification dispatch is post-commit and best-effort (e2e)', () => {
     // a request failure or an unfired poll.
     const afterSecondJoin = await joinerTwo.agent.post(`/api/v1/polls/${poll.id}/join`).expect(201);
     const firedBody = afterSecondJoin.body as PollDetailBody;
-    expect(firedBody.status).toBe(PollStatus.FIRED);
+    expect(firedBody.status).toBe(ServiceRequestStatus.FIRED);
     expect(firedBody.commitmentCount).toBe(2);
 
     // Prove durability: re-read the poll and its commitments straight from
@@ -186,11 +186,11 @@ describe('Notification dispatch is post-commit and best-effort (e2e)', () => {
     // the request has already returned. If the mail failure had rolled back
     // (or otherwise reversed) the transaction, this would show OPEN and/or
     // be missing a commitment row.
-    const persisted = await prisma.poll.findUniqueOrThrow({ where: { id: poll.id } });
-    expect(persisted.status).toBe(PollStatus.FIRED);
+    const persisted = await prisma.serviceRequest.findUniqueOrThrow({ where: { id: poll.id } });
+    expect(persisted.status).toBe(ServiceRequestStatus.FIRED);
     expect(persisted.firedAt).not.toBeNull();
 
-    const persistedCommitments = await prisma.pollCommitment.count({ where: { pollId: poll.id } });
+    const persistedCommitments = await prisma.participation.count({ where: { serviceRequestId: poll.id } });
     expect(persistedCommitments).toBe(2);
 
     // The mailer really was invoked (and really did throw) for both
@@ -215,13 +215,13 @@ describe('Notification dispatch is post-commit and best-effort (e2e)', () => {
 
     const createRes = await creator.agent
       .post('/api/v1/polls')
-      .send({ pollType: PollType.EVENT, title: 'Mail-outage rooftop garden', minCommitments: 3, closesAt: futureIso(5 * 60 * 1000) })
+      .send({ pollType: ServiceRequestType.EVENT, title: 'Mail-outage rooftop garden', minCommitments: 3, closesAt: futureIso(5 * 60 * 1000) })
       .expect(201);
     const pollId = (createRes.body as PollDetailBody).id;
 
     await joiner.agent.post(`/api/v1/polls/${pollId}/join`).expect(201);
 
-    await prisma.poll.update({ where: { id: pollId }, data: { closesAt: new Date(Date.now() - 60 * 1000) } });
+    await prisma.serviceRequest.update({ where: { id: pollId }, data: { closesAt: new Date(Date.now() - 60 * 1000) } });
 
     // process-expired must still report the poll resolved (201, resolved
     // >= 1) even though the "poll expired" mail throws for the committed
@@ -229,8 +229,8 @@ describe('Notification dispatch is post-commit and best-effort (e2e)', () => {
     const processRes = await committee.agent.post('/api/v1/polls/process-expired').expect(201);
     expect((processRes.body as { resolved: number }).resolved).toBeGreaterThanOrEqual(1);
 
-    const persisted = await prisma.poll.findUniqueOrThrow({ where: { id: pollId } });
-    expect(persisted.status).toBe(PollStatus.EXPIRED);
+    const persisted = await prisma.serviceRequest.findUniqueOrThrow({ where: { id: pollId } });
+    expect(persisted.status).toBe(ServiceRequestStatus.EXPIRED);
     expect(persisted.closedAt).not.toBeNull();
 
     const attemptedExpiredMails = mailer.attempts.filter((m) => m.subject === 'Poll expired — not enough commitments' && m.to === joiner.email);
