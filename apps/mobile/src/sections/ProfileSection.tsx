@@ -67,7 +67,7 @@ export default function ProfileScreen() {
   return (
     <Screen>
       {/* Identity header */}
-      <View style={{ alignItems: 'center', gap: theme.spacing.sm, paddingTop: theme.spacing.sm }}>
+      <View style={{ alignItems: 'center', gap: theme.spacing.sm, paddingTop: theme.spacing.lg }}>
         <View>
           <View
             style={{

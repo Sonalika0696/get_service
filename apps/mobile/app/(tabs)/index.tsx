@@ -141,10 +141,12 @@ function BottomBar({
                   paddingVertical: 7,
                   paddingHorizontal: 2,
                   // A distinct, clearly-rounded pill behind the active tab.
-                  // The horizontal margin pulls it in from the cell edges so
-                  // it reads as a separated rounded pill rather than a
-                  // full-width bar (which looked square edge-to-edge).
-                  borderRadius: theme.radius.xl,
+                  // The cell is nearly square (~60x55), so a modest radius
+                  // still reads as a boxy rounded-rect once the tint is
+                  // visible (which it is on the dark theme, where accent.tint
+                  // sits at higher opacity). `pill` clamps to half the shorter
+                  // side, giving a fully-rounded squircle in both themes.
+                  borderRadius: theme.radius.pill,
                   marginHorizontal: 6,
                   minHeight: 44,
                   alignSelf: 'stretch',

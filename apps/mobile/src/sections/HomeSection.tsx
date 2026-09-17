@@ -91,7 +91,7 @@ export default function HomeScreen() {
 
   return (
     <Screen>
-      <View style={{ marginTop: theme.spacing.xs }}>
+      <View style={{ marginTop: theme.spacing.lg }}>
         <Text variant="caption" tone="muted" weight="semibold">
           {FLAT_LABEL.society} · {FLAT_LABEL.flat}
         </Text>

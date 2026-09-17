@@ -49,12 +49,19 @@ export function useResidentPolls() {
 }
 
 export function useResidentPoll(id: string | undefined) {
-  return useQuery({
+  const query = useQuery({
     queryKey: ['resident-poll', id],
     queryFn: () => api<ResidentPollDetail>(`/bulk-buy/polls/${id}`),
     enabled: Boolean(id),
     staleTime: 15_000,
   });
+  // Opening a request from the sample list must not 401 ("session expired")
+  // just because the detail fetch hits the wiped backend. On a settled
+  // failure, fall back to the sample poll with the matching id (or the first
+  // sample), so a sampled Open request opens instead of erroring.
+  const sample =
+    demoResidentPolls.find((p) => p.id === id) ?? demoResidentPolls[0];
+  return withSampleFallback(query, () => false, sample);
 }
 
 export function useCreateResidentPoll() {

@@ -122,7 +122,7 @@ export default function RequestsScreen() {
         contentContainerStyle={{
           paddingHorizontal: theme.screenPadding,
           paddingBottom: theme.spacing.hero + theme.spacing.md,
-          paddingTop: theme.spacing.md,
+          paddingTop: theme.spacing.xl,
         }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"

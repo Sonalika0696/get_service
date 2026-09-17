@@ -115,7 +115,7 @@ export default function BillsScreen() {
         contentContainerStyle={{
           paddingHorizontal: theme.screenPadding,
           paddingBottom: insets.bottom + theme.spacing.xxl,
-          paddingTop: theme.spacing.md,
+          paddingTop: theme.spacing.xl,
         }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
