@@ -686,7 +686,14 @@
               "BULK_BUY",
               "DISPUTE",
               "EXTERNAL",
-              "RETENTION"
+              "RETENTION",
+              "MAINTENANCE",
+              "ELECTRICITY",
+              "WATER",
+              "EVENTS",
+              "WELFARE",
+              "SINKING",
+              "CORPUS"
             ],
             "type": "string"
           },
@@ -697,7 +704,14 @@
               "BULK_BUY",
               "DISPUTE",
               "EXTERNAL",
-              "RETENTION"
+              "RETENTION",
+              "MAINTENANCE",
+              "ELECTRICITY",
+              "WATER",
+              "EVENTS",
+              "WELFARE",
+              "SINKING",
+              "CORPUS"
             ],
             "type": "string"
           },
@@ -1750,6 +1764,36 @@
         ]
       }
     },
+    "/api/v1/flats/{id}/virtual-account": {
+      "get": {
+        "operationId": "VirtualAccountsController_getForFlat",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "VirtualAccounts"
+        ]
+      }
+    },
     "/api/v1/job-cards/{id}/sign-off": {
       "post": {
         "operationId": "JobCardsController_signOff",
@@ -2731,6 +2775,76 @@
         },
         "tags": [
           "Societies"
+        ]
+      }
+    },
+    "/api/v1/operator/societies/{sid}/virtual-accounts/backfill": {
+      "post": {
+        "operationId": "VirtualAccountsOperatorController_backfill",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Idempotent: creates a VirtualAccount for every pre-existing flat in the\nsociety that doesn't already have one. Re-running after every flat is\ncovered creates zero rows. No `@AuditLog(...)` — the service writes its\nown compact summary, same pattern as FlatsService.importCsv.",
+        "tags": [
+          "VirtualAccountsOperator"
+        ]
+      }
+    },
+    "/api/v1/operator/societies/{sid}/virtual-accounts/{flatId}": {
+      "get": {
+        "operationId": "VirtualAccountsOperatorController_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "flatId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Operator read of one flat's VirtualAccount — mirrors the committee-scoped GET /flats/:id/virtual-account, for operator-side support/debugging.",
+        "tags": [
+          "VirtualAccountsOperator"
         ]
       }
     },

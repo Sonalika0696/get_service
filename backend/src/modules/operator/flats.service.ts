@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../infra/prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
+import { VirtualAccountsService } from '../virtual-accounts/virtual-accounts.service.js';
 import { parseFlatCsv } from './flat-csv.util.js';
 import type { ImportFlatsDto } from './dto/import-flats.dto.js';
 
@@ -36,12 +37,20 @@ export interface FlatImportResult {
  * Atomic: every row is fully validated before any row is written, and the
  * writes themselves run inside one $transaction — a file with row 47 wrong
  * writes nothing, not rows 1-46.
+ *
+ * Phase 9.1: every upserted flat also gets a VirtualAccount provisioned in
+ * the SAME transaction (VirtualAccountsService.provisionForFlat is
+ * idempotent per flatId — see its doc comment), so a flat imported via CSV
+ * always has exactly one VirtualAccount, and re-importing (including
+ * updating an existing flat's maintenanceAmount) never creates a second one
+ * or touches the existing code.
  */
 @Injectable()
 export class FlatsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly virtualAccounts: VirtualAccountsService,
   ) {}
 
   async importCsv(societyId: string, actorId: string, dto: ImportFlatsDto): Promise<FlatImportResult> {
@@ -61,11 +70,12 @@ export class FlatsService {
 
     await this.prisma.$transaction(async (tx) => {
       for (const row of rows) {
-        await tx.flat.upsert({
+        const flat = await tx.flat.upsert({
           where: { societyId_unitNo: { societyId, unitNo: row.unitNo } },
           create: { societyId, unitNo: row.unitNo, maintenanceAmount: row.maintenanceAmount },
           update: { maintenanceAmount: row.maintenanceAmount },
         });
+        await this.virtualAccounts.provisionForFlat(flat, tx);
       }
     });
 

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module.js';
+import { VirtualAccountsModule } from '../virtual-accounts/virtual-accounts.module.js';
 import { OperatorController } from './operator.controller.js';
 import { SocietiesController } from './societies.controller.js';
 import { SocietiesService } from './societies.service.js';
@@ -20,10 +21,13 @@ import { VendorPromotionService } from './vendor-promotion.service.js';
  * OperatorVendorsController/VendorPromotionService (vendor
  * PLATFORM_AUDITED promotion) — kept self-contained here (own Prisma
  * access, not a dependency on VendorsModule) matching how this module
- * already manages Society/Flat/Account directly.
+ * already manages Society/Flat/Account directly. Phase 9.1 imports
+ * VirtualAccountsModule (not just its service — Nest requires the exporting
+ * module to be imported) so FlatsService.importCsv can provision each
+ * imported flat's VirtualAccount inside the same transaction.
  */
 @Module({
-  imports: [AuditModule],
+  imports: [AuditModule, VirtualAccountsModule],
   controllers: [OperatorController, SocietiesController, FlatsController, AccountsController, OperatorVendorsController],
   providers: [SocietiesService, FlatsService, AccountsService, VendorPromotionService],
 })

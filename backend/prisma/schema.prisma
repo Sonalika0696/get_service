@@ -189,6 +189,8 @@ model Society {
   payments        Payment[]
   offers          Offer[]
   bookings        Booking[]
+  /// Phase 9.1 — see VirtualAccount's doc comment.
+  virtualAccounts VirtualAccount[]
 
   @@map("societies")
 }
@@ -201,13 +203,15 @@ model Flat {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  society            Society         @relation(fields: [societyId], references: [id], onDelete: Cascade)
-  occupancies        Occupancy[]
-  bulkBuyCommitments Commitment[]
-  jobCards           JobCard[]
-  participations     Participation[]
+  society               Society          @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  occupancies           Occupancy[]
+  bulkBuyCommitments    Commitment[]
+  jobCards              JobCard[]
+  participations        Participation[]
   /// Phase 8.2 — service requests raised for this flat (see ServiceRequest.raisedByFlatId).
   raisedServiceRequests ServiceRequest[]
+  /// Phase 9.1 — this flat's one attribution key (see VirtualAccount's doc comment). Lazily provisioned; may be null for a flat older than this phase until backfilled.
+  virtualAccount        VirtualAccount?
 
   @@unique([societyId, unitNo])
   @@map("flats")
@@ -560,20 +564,20 @@ model Vendor {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  societyLinks            VendorSocietyLink[]
-  categories              VendorCategory[]
-  ratings                 VendorRating[]
-  accessRequests          VendorAccessRequest[]
-  offers                  Offer[]
-  bookings                Booking[]
+  societyLinks                VendorSocietyLink[]
+  categories                  VendorCategory[]
+  ratings                     VendorRating[]
+  accessRequests              VendorAccessRequest[]
+  offers                      Offer[]
+  bookings                    Booking[]
   /// Phase 5 — service requests where a resident tagged this vendor for a Flow B bulk-buy (see ServiceRequest.taggedVendorId).
-  assignedServiceRequests ServiceRequest[] @relation("ServiceRequestTaggedVendor")
+  assignedServiceRequests     ServiceRequest[]      @relation("ServiceRequestTaggedVendor")
   /// Phase 8.2 — service requests a committee member assigned this vendor to in the new pooling loop (see ServiceRequest.assignedVendorId).
-  poolAssignedServiceRequests ServiceRequest[] @relation("ServiceRequestAssignedVendor")
+  poolAssignedServiceRequests ServiceRequest[]      @relation("ServiceRequestAssignedVendor")
   /// Phase 6.2 — the VENDOR-principal User that logs in as this vendor (see User.vendorId). Opposite side of a 1:1; the FK lives on User.
-  linkedUser              User?
+  linkedUser                  User?
   /// Phase 7.2 — this vendor's published price sheets (see PricingCard).
-  pricingCards            PricingCard[]
+  pricingCards                PricingCard[]
 
   @@map("vendors")
 }
@@ -693,8 +697,8 @@ model PricingCard {
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 
-  vendor Vendor        @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-  lines  PricingLine[]
+  vendor                  Vendor           @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  lines                   PricingLine[]
   /// Phase 8.2 — service requests that froze THIS exact version at confirm time (see ServiceRequest.frozenPricingCardId). A later revision/republish never touches these historical pointers.
   frozenByServiceRequests ServiceRequest[]
 
@@ -873,7 +877,7 @@ model ServiceRequest {
   // -------------------------------------------------------------------
 
   /// RESIDENT or COMMITTEE — see ServiceRequestOrigin's doc comment.
-  origin ServiceRequestOrigin?
+  origin         ServiceRequestOrigin?
   /// The flat this request was raised for: the resident's own flat
   /// (origin=RESIDENT) or a flat a committee member named explicitly
   /// (origin=COMMITTEE). SetNull rather than Cascade — a deleted Flat
@@ -909,7 +913,7 @@ model ServiceRequest {
   /// never changes what this request already confirmed against. SetNull
   /// rather than Cascade for the same "never take history down with it"
   /// reason as assignedVendorId.
-  frozenPricingCardId String?
+  frozenPricingCardId         String?
 
   /// Set the moment the join threshold is met (status flips OPEN -> POOLED).
   pooledAt DateTime?
@@ -954,13 +958,13 @@ model Participation {
   /// CONFIRMED (see ServiceRequestsService.confirm). Null until then, and
   /// forever null for a pre-8.2 pollType (EVENT/BULK_BUY_RESIDENT), which
   /// keep using Commitment as their money record instead.
-  contribution Decimal? @db.Decimal(14, 2)
+  contribution Decimal?            @db.Decimal(14, 2)
   /// Phase 8.2: ACTIVE (default — counts toward the join threshold and is
   /// carried into confirm) or LAPSED (set on every Participation of a
   /// request that closed below threshold — see
   /// ServiceRequestsService.closeBelowThreshold). Additive/default so every
   /// pre-8.2 row (and every EVENT/BULK_BUY_RESIDENT join) stays ACTIVE.
-  status ParticipationStatus @default(ACTIVE)
+  status       ParticipationStatus @default(ACTIVE)
 
   createdAt DateTime @default(now())
 
@@ -1023,6 +1027,37 @@ enum AccountKind {
   /// elapses, at which point it moves on (RETENTION -> EXTERNAL) — see
   /// BulkBuyService.authoriseMilestone / releaseRetention.
   RETENTION
+
+  // -------------------------------------------------------------------
+  // Phase 9.1 sub-ledger pockets (BACKEND_PLAN.md Phase 9.1;
+  // DECISIONS_V2_SCOPE.md §6.1/§6.6 area) — additive only, exactly like
+  // VENDOR/RETENTION above: adding an enum value creates no Account row
+  // until something actually posts to it (LedgerService.getOrCreateAccount
+  // is called lazily), and every existing posting path
+  // (bulk-buy/payments/service-requests) is completely untouched by this
+  // phase — no code here ever posts to a pocket kind yet. One Account row
+  // per (societyId, kind) exactly as today; there is no per-flat Account —
+  // per-flat attribution is VirtualAccount's job (see that model's doc
+  // comment), not a proliferation of Account rows, which would blow up
+  // verifyBalances()/assertAllBalances() (invariant I6) across every
+  // society. The bills hub (a later phase) is expected to route a
+  // resident's maintenance/utility/event contribution to the matching
+  // pocket instead of the single BULK_BUY escrow account.
+  /// Recurring monthly maintenance collections.
+  MAINTENANCE
+  /// Electricity charge collections (common-area / sub-metered billing).
+  ELECTRICITY
+  /// Water charge collections.
+  WATER
+  /// Society-run event fee collections (distinct from BULK_BUY, which stays
+  /// the procurement-escrow pocket).
+  EVENTS
+  /// Welfare-fund collections/disbursements.
+  WELFARE
+  /// Sinking-fund (long-horizon capital reserve) collections.
+  SINKING
+  /// Corpus-fund collections.
+  CORPUS
 }
 
 model Account {
@@ -1077,6 +1112,58 @@ model LedgerEntry {
   @@index([societyId, ts])
   @@index([linkedEntityType, linkedEntityId])
   @@map("ledger_entries")
+}
+
+// ---------------------------------------------------------------------------
+// VirtualAccount — Phase 9.1 (BACKEND_PLAN.md Phase 9.1;
+// DECISIONS_V2_SCOPE.md §6.1/§6.6). A per-flat ATTRIBUTION KEY: a stable,
+// human-referenceable identifier for one flat, used to attribute an incoming
+// payment (e.g. a bank transfer whose narration a resident types by hand) to
+// the right flat before that money is routed into the right AccountKind
+// pocket (see AccountKind's Phase 9.1 section). `code` is designed to be
+// substring-matched against raw bank-statement narration text in a later
+// phase (9.5) — this phase only allocates it, it never reads bank statements
+// or moves money.
+//
+// NOT AN AUTH CONCEPT. Per DECISIONS_V2_SCOPE.md §6.1/§6.6, a VirtualAccount
+// plays NO role whatsoever in authentication or authorization: no guard
+// reads it, UserContextService never branches on it, and no route's access
+// decision depends on whether a flat has one, is missing one, or is
+// RETIRED. It exists purely so a downstream reconciliation process has a
+// stable string to match against — nothing more. Deleting/retiring a
+// VirtualAccount must never be able to lock a resident out of anything.
+// ---------------------------------------------------------------------------
+
+/// ACTIVE: in normal use, may still receive attributed payments.
+/// RETIRED: no longer live (e.g. the flat's code was regenerated after a
+///   collision, or the flat itself is being decommissioned) — kept, not
+///   deleted, so a historical bank-narration match against an old code
+///   remains explainable rather than orphaned.
+enum VirtualAccountStatus {
+  ACTIVE
+  RETIRED
+}
+
+/// One row per Flat (`flatId @unique` — see FlatsService/VirtualAccountsService
+/// for the lazy, idempotent provisioning path: CSV import and the operator
+/// backfill route both upsert-by-flatId, so re-running either can never
+/// produce a second row for the same flat). `code` is globally unique (not
+/// just per-society) because it is matched against free-text bank narration
+/// with no society context available at match time — see
+/// virtual-account-code.util.ts for the generation scheme.
+model VirtualAccount {
+  id        String               @id @default(cuid())
+  societyId String
+  flatId    String               @unique
+  code      String               @unique
+  status    VirtualAccountStatus @default(ACTIVE)
+  createdAt DateTime             @default(now())
+
+  society Society @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  flat    Flat    @relation(fields: [flatId], references: [id], onDelete: Cascade)
+
+  @@index([societyId])
+  @@map("virtual_accounts")
 }
 
 /// Backs IdempotencyService.runOnce(scope, key, ...): a replayed request
