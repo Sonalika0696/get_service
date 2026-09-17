@@ -13,6 +13,7 @@ import { ThemeProvider, useTheme, useThemeControls } from '../src/theme/ThemePro
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { queryClient, queryPersister } from '../src/lib/query';
 import { AuthProvider, useAuth } from '../src/auth/AuthProvider';
+import { RealtimeProvider } from '../src/realtime/RealtimeProvider';
 import { BrandLoader } from '../src/components/brand/BrandLoader';
 import { lightTheme } from '../src/theme/theme';
 
@@ -48,10 +49,12 @@ export default function RootLayout() {
           <ThemeProvider>
             <ErrorBoundary>
               <AuthProvider>
-                <ThemedStatusBar />
-                <AuthGate>
-                  <ThemedStack />
-                </AuthGate>
+                <RealtimeProvider>
+                  <ThemedStatusBar />
+                  <AuthGate>
+                    <ThemedStack />
+                  </AuthGate>
+                </RealtimeProvider>
               </AuthProvider>
             </ErrorBoundary>
           </ThemeProvider>

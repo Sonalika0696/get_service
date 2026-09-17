@@ -44,6 +44,17 @@ function resolveBaseUrl(): string {
 const baseUrl = resolveBaseUrl();
 
 /**
+ * Origin the realtime (Socket.IO) gateway listens on — same host/port
+ * `resolveBaseUrl()` computed for the REST API, minus the `/api/v1` prefix.
+ * The gateway is mounted on the bare Nest HTTP server, not under the API
+ * path, so callers (RealtimeProvider) connect `io(apiOrigin, ...)` instead
+ * of `baseUrl`.
+ */
+export const apiOrigin = baseUrl.endsWith(API_PREFIX)
+  ? baseUrl.slice(0, -API_PREFIX.length)
+  : baseUrl;
+
+/**
  * F1 shipped: tokens come from SecureStore (platform keychain), minted by
  * POST /auth/verify. `devBearerToken` remains an emergency dev override —
  * used only when no real session token is present.
@@ -58,16 +69,24 @@ const devToken = extra.devBearerToken ?? null;
  */
 export const DEV_BYPASS_TOKEN = 'gatex-dev-bypass';
 
+/**
+ * Resolves the bearer token the same way for every caller — the REST
+ * client below and RealtimeProvider's socket handshake alike — so a swap
+ * of the dev-bypass sentinel for the real dev token never drifts between
+ * the two.
+ */
+export async function getAuthToken(): Promise<string | null> {
+  const stored = await secureStorage.getToken();
+  if (!stored) return devToken;
+  // A stored dev-bypass sentinel is not a valid bearer — swap in the real
+  // dev token so the backend doesn't reject it as "session expired".
+  if (stored === DEV_BYPASS_TOKEN) return devToken;
+  return stored;
+}
+
 export const api = createApiClient({
   baseUrl,
-  getToken: async () => {
-    const stored = await secureStorage.getToken();
-    if (!stored) return devToken;
-    // A stored dev-bypass sentinel is not a valid bearer — swap in the real
-    // dev token so the backend doesn't reject it as "session expired".
-    if (stored === DEV_BYPASS_TOKEN) return devToken;
-    return stored;
-  },
+  getToken: getAuthToken,
   onUnauthorized: () => {
     // AuthProvider.refreshMe handles the local state transition on 401.
   },
