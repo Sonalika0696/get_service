@@ -50,6 +50,42 @@ export interface RefundInitiatedResult {
   note: string;
 }
 
+/**
+ * Work to run AFTER the webhook transaction has committed — a realtime push,
+ * a notification. Always best-effort: PaymentsService catches and logs any
+ * error, so a failure can never make an already-committed capture look failed.
+ */
+export type PaymentPostCommitAction = () => Promise<void>;
+
+/**
+ * How a domain module takes part in payment capture/refund without editing
+ * PaymentsService. A Payment whose `linkedEntityType` matches a registered
+ * handler credits (on capture) or debits (on refund) `pocketKind` instead of
+ * the default BULK_BUY escrow, and the matching hook runs INSIDE the webhook
+ * transaction, after the ledger posting, so the domain row advances
+ * atomically with the money. A hook may return a post-commit action.
+ *
+ * Register from the owning module's `onModuleInit`, e.g.
+ *   payments.registerLinkHandler('EventRegistration', {
+ *     pocketKind: AccountKind.EVENTS,
+ *     onCaptured: (tx, id, rupees) => this.markPaid(tx, id, rupees),
+ *   });
+ *
+ * Hooks MUST be idempotent-safe: guard every update with a status/where
+ * clause (see advanceMaintenanceCharge). The payment-level CAPTURED/REFUNDED
+ * guard already stops a duplicate event from reaching the hook in practice.
+ */
+export interface PaymentLinkHandler {
+  /**
+   * The pocket this entity type's money lands in. Either a constant, or a
+   * resolver evaluated inside the webhook tx for entity-dependent routing
+   * (e.g. a utility FlatBill → ELECTRICITY or WATER by its cycle's utility).
+   */
+  pocketKind: AccountKind | ((tx: Prisma.TransactionClient, linkedEntityId: string, payment: PaymentModel) => Promise<AccountKind>);
+  onCaptured?: (tx: Prisma.TransactionClient, linkedEntityId: string, amountRupees: number, payment: PaymentModel) => Promise<PaymentPostCommitAction | void>;
+  onRefunded?: (tx: Prisma.TransactionClient, linkedEntityId: string, amountRupees: number, payment: PaymentModel) => Promise<PaymentPostCommitAction | void>;
+}
+
 /** Amount conversion helper — our schema stores rupees; Razorpay speaks paise. Kept in one place so the x100/÷100 boundary is never duplicated/inconsistent. */
 function rupeesToPaise(rupees: number | Prisma.Decimal): number {
   const value = typeof rupees === 'number' ? rupees : Number(rupees.toString());
@@ -72,6 +108,7 @@ function rupeesToPaise(rupees: number | Prisma.Decimal): number {
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
+  private readonly linkHandlers = new Map<string, PaymentLinkHandler>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -79,7 +116,43 @@ export class PaymentsService {
     private readonly ledger: LedgerService,
     private readonly idempotency: IdempotencyService,
     private readonly realtime: RealtimeService,
-  ) {}
+  ) {
+    // Phase 9.2's maintenance routing, now expressed through the same
+    // registry every later module uses. Behaviour is unchanged: credits
+    // MAINTENANCE, advances/reverts the charge in-tx, pushes bill.paid post-commit.
+    this.registerLinkHandler('MaintenanceCharge', {
+      pocketKind: AccountKind.MAINTENANCE,
+      onCaptured: async (tx, chargeId, amountRupees) => {
+        const pending = await this.advanceMaintenanceCharge(tx, chargeId, amountRupees);
+        return pending ? () => this.pushBillPaid(pending) : undefined;
+      },
+      onRefunded: (tx, chargeId, amountRupees) => this.revertMaintenanceCharge(tx, chargeId, amountRupees),
+    });
+  }
+
+  /**
+   * Registers how Payments linked to `linkedEntityType` are routed — see
+   * PaymentLinkHandler. Throws on a duplicate registration: two modules
+   * silently fighting over one entity type would misroute money.
+   */
+  registerLinkHandler(linkedEntityType: string, handler: PaymentLinkHandler): void {
+    if (this.linkHandlers.has(linkedEntityType)) {
+      throw new Error(`A payment link handler for "${linkedEntityType}" is already registered`);
+    }
+    this.linkHandlers.set(linkedEntityType, handler);
+  }
+
+  /** The registered handler for this payment, if its linkedEntityType has one and the link is complete. */
+  private handlerFor(payment: PaymentModel): PaymentLinkHandler | null {
+    if (!payment.linkedEntityType || !payment.linkedEntityId) return null;
+    return this.linkHandlers.get(payment.linkedEntityType) ?? null;
+  }
+
+  /** The pocket a payment posts against: its handler's (constant or resolved in-tx), else the default BULK_BUY escrow. */
+  private async pocketFor(tx: Prisma.TransactionClient, handler: PaymentLinkHandler | null, payment: PaymentModel): Promise<AccountKind> {
+    if (!handler) return AccountKind.BULK_BUY;
+    return typeof handler.pocketKind === 'function' ? handler.pocketKind(tx, payment.linkedEntityId as string, payment) : handler.pocketKind;
+  }
 
   async createOrder(societyId: string, residentId: string, idempotencyKey: string, dto: CreateOrderDto): Promise<CreateOrderResult> {
     const { body } = await this.idempotency.runOnce<CreateOrderResult>('payments:create-order', idempotencyKey, societyId, async (tx) => {
@@ -200,11 +273,11 @@ export class PaymentsService {
       throw new BadRequestException('Webhook payload missing event id');
     }
 
-    // Set inside the tx below only when applyCapture's MaintenanceCharge
-    // branch actually advances a charge — see PendingBillPaidPush's doc
-    // comment. Stays null on a replayed event (idempotency.runOnce skips
-    // running `fn` entirely) or a BULK_BUY capture, so no accidental push.
-    let pendingBillPush: PendingBillPaidPush | null = null;
+    // Filled inside the tx below by a link handler's hook — see
+    // PaymentPostCommitAction. Stays empty on a replayed event
+    // (idempotency.runOnce skips running `fn` entirely) or a plain BULK_BUY
+    // capture, so nothing is pushed by accident.
+    let postCommit: PaymentPostCommitAction | null = null;
 
     const { body } = await this.idempotency.runOnce<{ received: boolean }>('razorpay:webhook', eventId, null, async (tx) => {
       await tx.webhookEvent.create({
@@ -214,10 +287,10 @@ export class PaymentsService {
       switch (rawEvent.event) {
         case 'payment.captured':
         case 'order.paid':
-          pendingBillPush = await this.applyCapture(tx, rawEvent);
+          postCommit = await this.applyCapture(tx, rawEvent);
           break;
         case 'refund.processed':
-          await this.applyRefund(tx, rawEvent);
+          postCommit = await this.applyRefund(tx, rawEvent);
           break;
         default:
           this.logger.log(`Ignoring unhandled Razorpay webhook event type: ${rawEvent.event ?? 'unknown'}`);
@@ -226,28 +299,28 @@ export class PaymentsService {
       return { status: 200, body: { received: true } };
     });
 
-    // Post-commit, best-effort — the capture (and, if applicable, the
-    // MaintenanceCharge advance) is already durably committed by this
-    // point; this push is a pure convenience on top of it, never a
-    // precondition — mirrors ServiceRequestsService.pushRealtime's
-    // placement exactly.
-    if (pendingBillPush) {
-      await this.pushBillPaid(pendingBillPush);
+    // Post-commit, best-effort — the capture (and any domain advance its
+    // handler made) is already durably committed by this point; this is a
+    // pure convenience on top of it, never a precondition.
+    if (postCommit) {
+      try {
+        await (postCommit as PaymentPostCommitAction)();
+      } catch (error) {
+        this.logger.error(`Post-commit payment action failed for webhook event ${eventId} (state change already committed)`, error instanceof Error ? error.stack : String(error));
+      }
     }
 
     return body;
   }
 
   /**
-   * Phase 9.2 (decision #3): branches on `payment.linkedEntityType`. A
-   * `'MaintenanceCharge'`-linked payment credits AccountKind.MAINTENANCE
-   * (not BULK_BUY) and, in this SAME tx, advances the linked
-   * MaintenanceCharge (see advanceMaintenanceCharge). Every other
-   * linkedEntityType (in particular `'Commitment'`, bulk-buy's own) is
-   * UNTOUCHED — still posts to BULK_BUY exactly as before, byte-identical
-   * to the pre-Phase-9.2 behaviour.
+   * Routes on `payment.linkedEntityType` through the link-handler registry
+   * (see PaymentLinkHandler). A payment with a registered handler credits
+   * that handler's pocket and runs its onCaptured hook in this SAME tx. Every
+   * other payment (unlinked, or `'Commitment'` — bulk-buy's own) is
+   * UNTOUCHED: still credits BULK_BUY exactly as before.
    */
-  private async applyCapture(tx: Prisma.TransactionClient, rawEvent: RazorpayWebhookEvent): Promise<PendingBillPaidPush | null> {
+  private async applyCapture(tx: Prisma.TransactionClient, rawEvent: RazorpayWebhookEvent): Promise<PaymentPostCommitAction | null> {
     const paymentEntity = rawEvent.payload?.payment?.entity;
     const orderId = paymentEntity?.order_id;
     const razorpayPaymentId = paymentEntity?.id;
@@ -275,7 +348,7 @@ export class PaymentsService {
     }
 
     const amountRupees = amountPaise / 100;
-    const isMaintenance = payment.linkedEntityType === 'MaintenanceCharge' && Boolean(payment.linkedEntityId);
+    const handler = this.handlerFor(payment);
 
     await tx.payment.update({
       where: { id: payment.id },
@@ -286,7 +359,7 @@ export class PaymentsService {
       {
         societyId: payment.societyId,
         debitKind: AccountKind.EXTERNAL,
-        creditKind: isMaintenance ? AccountKind.MAINTENANCE : AccountKind.BULK_BUY,
+        creditKind: await this.pocketFor(tx, handler, payment),
         amount: amountRupees,
         reasonCode: 'PAYMENT_CAPTURED',
         linkedEntityType: 'Payment',
@@ -302,7 +375,7 @@ export class PaymentsService {
     // silent no-op for every non-bulk-buy Payment (no Commitment row to
     // match) and can't clobber a Commitment that's already FUNDED or was
     // CANCELLED out from under it. UNCHANGED from pre-Phase-9.2 — a
-    // MaintenanceCharge-linked payment never matches this where clause.
+    // handler-routed payment never matches this where clause.
     if (payment.linkedEntityType === 'Commitment' && payment.linkedEntityId) {
       await tx.commitment.updateMany({
         where: { id: payment.linkedEntityId, status: CommitmentStatus.PENDING },
@@ -310,8 +383,8 @@ export class PaymentsService {
       });
     }
 
-    if (isMaintenance) {
-      return this.advanceMaintenanceCharge(tx, payment.linkedEntityId as string, amountRupees);
+    if (handler?.onCaptured) {
+      return (await handler.onCaptured(tx, payment.linkedEntityId as string, amountRupees, payment)) ?? null;
     }
     return null;
   }
@@ -376,13 +449,11 @@ export class PaymentsService {
   }
 
   /**
-   * Phase 9.2 (decision #3): same branch as applyCapture — a
-   * `'MaintenanceCharge'`-linked payment reverses AccountKind.MAINTENANCE
-   * (not BULK_BUY) and, in this SAME tx, reverts the linked charge's
-   * paidAmount/status. Every other linkedEntityType is UNTOUCHED — still
-   * reverses BULK_BUY exactly as before.
+   * Symmetric to applyCapture: a payment with a registered handler reverses
+   * that handler's pocket and runs its onRefunded hook in this SAME tx.
+   * Every other payment is UNTOUCHED — still reverses BULK_BUY as before.
    */
-  private async applyRefund(tx: Prisma.TransactionClient, rawEvent: RazorpayWebhookEvent): Promise<void> {
+  private async applyRefund(tx: Prisma.TransactionClient, rawEvent: RazorpayWebhookEvent): Promise<PaymentPostCommitAction | null> {
     const refundEntity = rawEvent.payload?.refund?.entity;
     const razorpayPaymentId = refundEntity?.payment_id;
     const amountPaise = refundEntity?.amount;
@@ -403,11 +474,11 @@ export class PaymentsService {
     // refunds against a single Payment are future (post-4B) work.
     if (payment.status === PaymentStatus.REFUNDED) {
       this.logger.log(`Ignoring duplicate refund event for already-refunded Payment ${payment.id} (razorpay payment ${razorpayPaymentId}) — no second ledger entry posted.`);
-      return;
+      return null;
     }
 
     const amountRupees = amountPaise / 100;
-    const isMaintenance = payment.linkedEntityType === 'MaintenanceCharge' && Boolean(payment.linkedEntityId);
+    const handler = this.handlerFor(payment);
 
     await tx.payment.update({
       where: { id: payment.id },
@@ -417,7 +488,7 @@ export class PaymentsService {
     await this.ledger.post(
       {
         societyId: payment.societyId,
-        debitKind: isMaintenance ? AccountKind.MAINTENANCE : AccountKind.BULK_BUY,
+        debitKind: await this.pocketFor(tx, handler, payment),
         creditKind: AccountKind.EXTERNAL,
         amount: amountRupees,
         reasonCode: 'PAYMENT_REFUNDED',
@@ -427,9 +498,10 @@ export class PaymentsService {
       tx,
     );
 
-    if (isMaintenance) {
-      await this.revertMaintenanceCharge(tx, payment.linkedEntityId as string, amountRupees);
+    if (handler?.onRefunded) {
+      return (await handler.onRefunded(tx, payment.linkedEntityId as string, amountRupees, payment)) ?? null;
     }
+    return null;
   }
 
   /** Symmetric reversal of advanceMaintenanceCharge — decrements paidAmount (floored at 0) and steps status back down; never re-marks PAID. */
