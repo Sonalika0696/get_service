@@ -2,69 +2,96 @@ import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   BillsHubResponse,
+  BillsPage,
+  BillsPageItem,
   BillLine,
+  BillKind,
+  BillStatus,
   CreateOrderBody,
   CreateOrderResult,
   Payment,
-  ResidentPollDetail,
 } from '@sft/api-client';
 import { api } from '../lib/api';
-import { useResidentPolls } from './useResidentPolls';
+import { majorStringToMinor } from '../lib/money';
+import { demoBillsPage } from '../lib/demoData';
+import { withSampleFallback } from '../lib/sampleFallback';
 
 /**
- * The bills hub. Ideal shape: one round-trip to `GET /me/bills` returning
- * every obligation pre-composed (FRONTEND_PLAN §3.2). That endpoint has
- * NOT shipped yet — Phase 9 backend delivers only /payments/orders and
- * /payments/:id today. Until it lands, this hook composes the hub client-
- * side from the shipped surfaces so the screen carries real data:
+ * The bills hub — `GET /me/bills` (shipped). Falls back to curated sample
+ * data (demoData.ts) once the query settles with no items, so Bills always
+ * has something to render instead of an empty list or a session-expired
+ * error card. See sampleFallback.ts.
  *
- *   BULK_BUY_SHARE lines come from Flow B polls the resident joined that
- *   are FIRED. The share amount isn't yet exposed by the backend, so it's
- *   a placeholder pending Phase 9's bills aggregate — the *presence* of the
- *   obligation is real, the *amount* renders as pending.
- *
- * When Phase 9 ships GET /me/bills, this whole body collapses to a single
- * api() call. The DTO shape is already what that endpoint should return.
+ * A single first page (`limit=50`) is fine for now — the screen doesn't
+ * paginate yet. `nextCursor` on the raw response is there for later.
  */
 export function useBillsHub() {
-  const polls = useResidentPolls();
+  const query = useQuery({
+    queryKey: ['bills'],
+    queryFn: () => api<BillsPage>('/me/bills?limit=50'),
+    staleTime: 30_000,
+  });
 
-  // TODO(phase 9 backend): swap for `api<BillsHubResponse>('/me/bills')`.
+  const fallback = withSampleFallback(query, (page) => page.items.length === 0, demoBillsPage);
+
   return {
-    ...polls,
-    data: polls.data ? composeHubFromPolls(polls.data) : undefined,
-  } as {
-    data: BillsHubResponse | undefined;
-    isLoading: boolean;
-    isError: boolean;
-    isSuccess: boolean;
-    error: unknown;
-    refetch: () => Promise<unknown>;
+    ...fallback,
+    data: fallback.data ? toBillsHubResponse(fallback.data) : undefined,
   };
 }
 
-function composeHubFromPolls(polls: ResidentPollDetail[]): BillsHubResponse {
-  const lines: BillLine[] = polls
-    .filter((p) => p.hasJoined && (p.status === 'FIRED' || p.bookingId))
-    .map<BillLine>((p) => {
-      const unit = p.vendorUnitPrice != null ? Number(p.vendorUnitPrice) : 0;
-      const shareMinor = Math.max(0, Math.round(unit * 100));
-      return {
-        id: `poll:${p.id}`,
-        kind: 'BULK_BUY_SHARE',
-        title: p.title,
-        basis: p.category
-          ? `Your share of a ${p.category} pool with ${p.commitmentCount} neighbours`
-          : `Your share of a pooled request`,
-        amountMinor: shareMinor,
-        currency: 'INR',
-        dueOn: p.closesAt,
-        status: unit > 0 ? 'DUE' : 'DUE',
-        rail: 'BULK_BUY_ESCROW',
-        evidence: { kind: 'POLL', pollId: p.id },
-      };
-    });
+/**
+ * The backend's `kind` split (MAINTENANCE | PROCUREMENT) is coarser than
+ * the client's own BillKind — a pooled PROCUREMENT line reads to the
+ * resident as a group buy, so it maps onto the existing BULK_BUY_SHARE
+ * icon/tone rather than inventing a new one.
+ */
+function mapBillKind(kind: BillsPageItem['kind']): BillKind {
+  return kind === 'PROCUREMENT' ? 'BULK_BUY_SHARE' : 'MAINTENANCE';
+}
 
+/** The backend's `rail` isn't in this DTO yet, so it's inferred from
+ * `kind`: the society collects maintenance directly, a pooled procurement
+ * line sits in escrow until the vendor is paid out. */
+function railForKind(kind: BillKind): BillLine['rail'] {
+  return kind === 'BULK_BUY_SHARE' ? 'BULK_BUY_ESCROW' : 'SOCIETY_UPI';
+}
+
+/**
+ * The backend's `status` is a plain string, not the client's BillStatus
+ * union. Known values map directly; anything else falls back to a
+ * due-date check so an unrecognised status still renders sensibly instead
+ * of crashing the kind/status switch in BillLineRow.
+ */
+function mapBillStatus(status: string, dueDate: string | null): BillStatus {
+  const s = status.toUpperCase();
+  if (s === 'PAID' || s === 'SETTLED') return 'PAID';
+  if (s === 'DISPUTED') return 'DISPUTED';
+  if (s === 'PARTIAL' || s === 'PARTIALLY_PAID') return 'PARTIAL';
+  if (s === 'OVERDUE') return 'OVERDUE';
+  if (dueDate && new Date(dueDate).getTime() < Date.now()) return 'OVERDUE';
+  return 'DUE';
+}
+
+function toBillLine(item: BillsPageItem): BillLine {
+  const kind = mapBillKind(item.kind);
+  return {
+    id: item.id,
+    kind,
+    title: item.title,
+    basis: item.basis,
+    amountMinor: majorStringToMinor(item.amountDue),
+    currency: 'INR',
+    // No due date on file (e.g. an already-settled line) — today's date
+    // reads as "not overdue" rather than showing an invalid one.
+    dueOn: item.dueDate ?? new Date().toISOString(),
+    status: mapBillStatus(item.status, item.dueDate),
+    rail: railForKind(kind),
+  };
+}
+
+function toBillsHubResponse(page: BillsPage): BillsHubResponse {
+  const lines = page.items.map(toBillLine);
   const totalDueMinor = lines
     .filter((l) => l.status === 'DUE' || l.status === 'OVERDUE' || l.status === 'PARTIAL')
     .reduce((sum, l) => sum + l.amountMinor, 0);

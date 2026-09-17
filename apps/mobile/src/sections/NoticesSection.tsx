@@ -136,15 +136,19 @@ export default function NoticesScreen() {
               ) : null;
           }
         }}
-        renderSectionHeader={({ section }) =>
-          section.key === 'posts' ? (
+        renderSectionHeader={({ section }) => {
+          const isSample = section.key === 'events' ? eventsQuery.isSample : postsQuery.isSample;
+          const trailing = isSample ? (
+            <Text variant="caption" tone="muted">Sample data</Text>
+          ) : undefined;
+          return section.key === 'posts' ? (
             <View style={{ marginTop: theme.spacing.lg }}>
-              <SectionLabel>{section.title}</SectionLabel>
+              <SectionLabel trailing={trailing}>{section.title}</SectionLabel>
             </View>
           ) : (
-            <SectionLabel>{section.title}</SectionLabel>
-          )
-        }
+            <SectionLabel trailing={trailing}>{section.title}</SectionLabel>
+          );
+        }}
         ItemSeparatorComponent={() => <View style={{ height: theme.spacing.sm }} />}
         stickySectionHeadersEnabled={false}
         ListHeaderComponent={

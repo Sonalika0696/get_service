@@ -71,6 +71,11 @@ export default function RequestsScreen() {
               <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
                 {t('requests.subtitle')}
               </Text>
+              {query.isSample ? (
+                <Text variant="caption" tone="muted" style={{ marginTop: 4 }}>
+                  Sample data
+                </Text>
+              ) : null}
             </View>
 
             <Segmented<Segment>

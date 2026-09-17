@@ -5,6 +5,8 @@ import type {
 } from '@sft/api-client';
 import { api } from '../lib/api';
 import { queryClient as globalQueryClient } from '../lib/query';
+import { demoResidentPolls } from '../lib/demoData';
+import { withSampleFallback } from '../lib/sampleFallback';
 
 /**
  * Mutation keys doubling as restart-persistence anchors (FRONTEND_PLAN
@@ -34,11 +36,16 @@ globalQueryClient.setMutationDefaults(CREATE_POLL_MUTATION_KEY, {
  * — the list is small (dozens, not thousands) and one round-trip beats two.
  */
 export function useResidentPolls() {
-  return useQuery({
+  const query = useQuery({
     queryKey: ['resident-polls'],
     queryFn: () => api<ResidentPollDetail[]>('/bulk-buy/polls'),
     staleTime: 30_000,
   });
+
+  // Falls back to curated sample polls once settled with an empty list —
+  // see sampleFallback.ts. The "Mine" segment still shows the real empty
+  // state, since no sample poll's creatorId matches the real caller.
+  return withSampleFallback(query, (polls) => polls.length === 0, demoResidentPolls);
 }
 
 export function useResidentPoll(id: string | undefined) {

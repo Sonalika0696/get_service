@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { JobBlogPost, CreateJobPostBody } from '@sft/api-client';
 import { api } from '../lib/api';
+import { demoJobPosts } from '../lib/demoData';
+import { withSampleFallback } from '../lib/sampleFallback';
 
 /**
  * The community feed. Backed by GET /jobs — the shipped job-blog module,
@@ -12,7 +14,7 @@ import { api } from '../lib/api';
  * still serves both kinds.
  */
 export function useJobPosts() {
-  return useQuery({
+  const query = useQuery({
     queryKey: ['job-posts'],
     queryFn: async () => {
       const posts = await api<JobBlogPost[]>('/jobs');
@@ -20,6 +22,10 @@ export function useJobPosts() {
     },
     staleTime: 60_000,
   });
+
+  // Falls back to a curated sample hiring post once settled with an empty
+  // list (or a real error) — see sampleFallback.ts.
+  return withSampleFallback(query, (posts) => posts.length === 0, demoJobPosts);
 }
 
 export function useJobPost(id: string | undefined) {

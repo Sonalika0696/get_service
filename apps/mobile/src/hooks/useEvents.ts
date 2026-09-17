@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { EventSummary, EventDetail } from '@sft/api-client';
 import { api } from '../lib/api';
 import { queryClient as globalQueryClient } from '../lib/query';
+import { demoEvents } from '../lib/demoData';
+import { withSampleFallback } from '../lib/sampleFallback';
 
 /**
  * Restart-persistence anchor (FRONTEND_PLAN §3.3 stretch) — see the matching
@@ -24,7 +26,7 @@ globalQueryClient.setMutationDefaults(OPT_IN_EVENT_MUTATION_KEY, {
  * When Phase 11 ships GET /events, this repopulates unchanged.
  */
 export function useEvents() {
-  return useQuery({
+  const query = useQuery({
     queryKey: ['events'],
     queryFn: async (): Promise<EventSummary[]> => {
       try {
@@ -36,6 +38,10 @@ export function useEvents() {
     },
     staleTime: 60_000,
   });
+
+  // Falls back to a curated sample event once settled with an empty list
+  // (or a real error) — see sampleFallback.ts.
+  return withSampleFallback(query, (events) => events.length === 0, demoEvents);
 }
 
 export function useEvent(id: string | undefined) {

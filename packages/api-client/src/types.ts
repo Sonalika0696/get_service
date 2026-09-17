@@ -173,6 +173,58 @@ export type BillsHubResponse = {
   lines: BillLine[];
 };
 
+// ------------ Home + Bills aggregates (shipped: GET /me/home, GET /me/bills) ------------
+
+/** One row in HomeAggregate.joinableServiceRequests — a resident-poll the
+ * caller hasn't joined yet, trimmed to what the home hero needs. */
+export type JoinableServiceRequest = {
+  id: string;
+  title: string;
+  status: string;
+  participantCount: number;
+  threshold: number | null;
+};
+
+/**
+ * `GET /me/home`. Money is a DECIMAL rupee STRING in MAJOR units (e.g.
+ * "12450.00") — convert with a helper at the hook boundary, never display
+ * it raw. `upcomingEvents` is always `[]` until Phase 11 ships the events
+ * aggregate.
+ */
+export type HomeAggregate = {
+  amountDue: string;
+  overdueCount: number;
+  actionsNeeded: number;
+  joinableServiceRequests: JoinableServiceRequest[];
+  upcomingEvents: unknown[];
+};
+
+/** One row of `GET /me/bills`. Money fields are DECIMAL rupee STRINGS in
+ * MAJOR units, same convention as HomeAggregate.amountDue. `kind` is a
+ * coarser split than the client's own BillKind — mapped onto it in
+ * useBills.ts. */
+export type BillsPageItem = {
+  id: string;
+  kind: 'MAINTENANCE' | 'PROCUREMENT';
+  title: string;
+  label: string;
+  amountDue: string;
+  amountPaid: string;
+  status: string;
+  dueDate: string | null;
+  basis: string;
+  evidenceType: string;
+  evidenceId: string;
+};
+
+/** `GET /me/bills?cursor=&limit=&kind=` — cursor-paginated + ETag. A single
+ * first page is enough for the app today; `nextCursor` is there for the
+ * infinite-scroll follow-up. */
+export type BillsPage = {
+  items: BillsPageItem[];
+  nextCursor: string | null;
+};
+
 // ------------ Payments (Phase 4B — shipped) ------------
 
 export type CreateOrderBody = {

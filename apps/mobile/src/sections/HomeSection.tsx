@@ -11,30 +11,16 @@ import { StatTile } from '../components/StatTile';
 import { RequestRow } from '../components/RequestRow';
 import { useTheme } from '../theme/ThemeProvider';
 import { useAuth } from '../auth/AuthProvider';
-import { useBillsHub } from '../hooks/useBills';
+import { useHome } from '../hooks/useHome';
 import { useTabs } from './TabsContext';
-import type { BillKind } from '@sft/api-client';
-
-function billKindLabel(kind: BillKind): string {
-  switch (kind) {
-    case 'MAINTENANCE': return 'Maintenance';
-    case 'ELECTRICITY': return 'Electricity';
-    case 'WATER': return 'Water';
-    case 'BULK_BUY_SHARE': return 'Group buy';
-    case 'EVENT_CHARGE': return 'Event';
-    case 'ADJUSTMENT': return 'Adjustment';
-  }
-}
-
-function formatDueOn(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-}
 
 /**
- * Home. Backed by `GET /me/home` (FRONTEND_PLAN §3.2) once the aggregate
- * endpoint ships. Until then, greeting comes from the live /me identity
- * (F1) and the dues + stats + joinable-request cards render preview data
- * shaped like the aggregate will be.
+ * Home. Backed by `GET /me/home` (FRONTEND_PLAN §3.2, shipped) via
+ * useHome(): dues amount, overdue/actions counts and the joinable-requests
+ * list all come from that one aggregate. Greeting still comes from the live
+ * /me identity (F1). useHome() degrades to curated sample data when the
+ * real call has nothing usable (see demoData.ts) — the "Sample data"
+ * caption below the greeting is the tell.
  */
 type GreetingKey = 'home.greeting.morning' | 'home.greeting.afternoon' | 'home.greeting.evening';
 
@@ -66,22 +52,25 @@ function useGreetingKey(): GreetingKey {
   return key;
 }
 
-const preview = {
-  flat: { label: 'A-1204', society: 'Willow Grove' },
-  amountMinor: 1245000,
-  captions: ['Maintenance', 'Water', 'Group buy'],
-  dueOn: '25 Sep',
-  stats: {
-    openRequests: '3',
-    upcomingEvents: '2',
-    unreadNotices: '5',
-    workInFlat: '1',
-  },
-  joinable: [
-    { id: 'r1', category: 'Plumbing', title: 'Kitchen tap leak, block A', participants: 2, thresholdAt: 4 },
-    { id: 'r2', category: 'Pest control', title: 'Quarterly common-area treatment', participants: 27, thresholdAt: 30 },
-  ],
-};
+/**
+ * No identity field carries the flat/society label yet (MeResponse only has
+ * societyId) — kept as a static placeholder until an identity aggregate
+ * exposes it, rather than fabricating a fetch for it here.
+ */
+const FLAT_LABEL = { society: 'Willow Grove', flat: 'A-1204' };
+
+/**
+ * Dues-card chips summarising *why* something's due, built from the
+ * aggregate's own flags since the home endpoint doesn't break dues down by
+ * bill kind (Bills does that).
+ */
+function duesCaptions(overdueCount: number, actionsNeeded: number, amountDueMinor: number): string[] {
+  if (amountDueMinor <= 0) return ['Nothing due'];
+  const captions: string[] = [];
+  if (overdueCount > 0) captions.push(`${overdueCount} overdue`);
+  if (actionsNeeded > 0) captions.push(`${actionsNeeded} action${actionsNeeded > 1 ? 's' : ''} needed`);
+  return captions.length > 0 ? captions : ['Due this cycle'];
+}
 
 export default function HomeScreen() {
   const theme = useTheme();
@@ -89,29 +78,22 @@ export default function HomeScreen() {
   const { t } = useTranslation();
   const { me } = useAuth();
   const { goTo } = useTabs();
-  const bills = useBillsHub();
+  const home = useHome();
   const hello = t(useGreetingKey());
 
   const firstName = me?.name?.trim().split(/\s+/)[0];
 
-  // Dues on the home hero come from the real bills hub so the dashboard and
-  // the Bills tab never disagree. Captions are the distinct bill kinds that
-  // are actually due; empty until the aggregate has data.
-  const dueLines = (bills.data?.lines ?? []).filter(
-    (l) => l.status === 'DUE' || l.status === 'OVERDUE' || l.status === 'PARTIAL',
-  );
-  const totalDueMinor = bills.data?.totalDueMinor ?? 0;
-  const captions = Array.from(new Set(dueLines.map((l) => billKindLabel(l.kind)))).slice(0, 3);
-  const nextDueOn = dueLines
-    .map((l) => l.dueOn)
-    .sort()
-    .find(Boolean);
+  const amountDueMinor = home.data?.amountDueMinor ?? 0;
+  const overdueCount = home.data?.overdueCount ?? 0;
+  const actionsNeeded = home.data?.actionsNeeded ?? 0;
+  const joinable = home.data?.joinableServiceRequests ?? [];
+  const upcomingEventsCount = home.data?.upcomingEvents.length ?? 0;
 
   return (
     <Screen>
       <View style={{ marginTop: theme.spacing.xs }}>
         <Text variant="caption" tone="muted" weight="semibold">
-          {preview.flat.society} · {preview.flat.label}
+          {FLAT_LABEL.society} · {FLAT_LABEL.flat}
         </Text>
         <Text
           variant="display"
@@ -121,12 +103,19 @@ export default function HomeScreen() {
         >
           {hello}{firstName ? `, ${firstName}` : ''}
         </Text>
+        {home.isSample ? (
+          <Text variant="caption" tone="muted" style={{ marginTop: 4 }}>
+            Sample data
+          </Text>
+        ) : null}
       </View>
 
       <DuesCard
-        amountMinor={totalDueMinor}
-        dueOn={nextDueOn ? formatDueOn(nextDueOn) : null}
-        captions={captions.length > 0 ? captions : ['Nothing due']}
+        amountMinor={amountDueMinor}
+        // The home aggregate doesn't carry a due date (Bills does, per
+        // bill line) — no "Due by" line here rather than a fabricated one.
+        dueOn={null}
+        captions={duesCaptions(overdueCount, actionsNeeded, amountDueMinor)}
         onPressPay={() => goTo('bills')}
         onPressHistory={() => goTo('bills')}
       />
@@ -136,14 +125,14 @@ export default function HomeScreen() {
         <View style={{ flexDirection: 'row', gap: theme.spacing.sm }}>
           <StatTile
             Icon={Handshake}
-            value={preview.stats.openRequests}
+            value={String(joinable.length)}
             label={t('home.stats.openRequests')}
             tone="accent"
             onPress={() => goTo('requests')}
           />
           <StatTile
             Icon={CalendarBlank}
-            value={preview.stats.upcomingEvents}
+            value={String(upcomingEventsCount)}
             label={t('home.stats.upcomingEvents')}
             tone="info"
             onPress={() => router.push('/events')}
@@ -152,14 +141,14 @@ export default function HomeScreen() {
         <View style={{ flexDirection: 'row', gap: theme.spacing.sm, marginTop: theme.spacing.sm }}>
           <StatTile
             Icon={Bell}
-            value={preview.stats.unreadNotices}
+            value={String(actionsNeeded)}
             label={t('home.stats.unreadNotices')}
             tone="warning"
             onPress={() => goTo('notices')}
           />
           <StatTile
             Icon={Wrench}
-            value={preview.stats.workInFlat}
+            value={String(overdueCount)}
             label={t('home.stats.workInFlat')}
             tone="success"
           />
@@ -183,13 +172,13 @@ export default function HomeScreen() {
           {t('home.neighboursAlsoNeed')}
         </SectionLabel>
         <View style={{ gap: theme.spacing.sm }}>
-          {preview.joinable.map((r) => (
+          {joinable.slice(0, 3).map((r) => (
             <RequestRow
               key={r.id}
-              category={r.category}
+              category={titleCaseStatus(r.status)}
               title={r.title}
-              participants={r.participants}
-              thresholdAt={r.thresholdAt}
+              participants={r.participantCount}
+              thresholdAt={r.threshold ?? Math.max(r.participantCount, 1)}
               onPress={() => goTo('requests')}
             />
           ))}
@@ -197,4 +186,11 @@ export default function HomeScreen() {
       </View>
     </Screen>
   );
+}
+
+/** `status` on a joinable request is a raw backend string (e.g. "OPEN") —
+ * this is only ever used as the small overline label above the title. */
+function titleCaseStatus(status: string): string {
+  if (!status) return '';
+  return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
 }

@@ -27,3 +27,15 @@ export function formatMinor(
 export function minorToMajor(minor: number): number {
   return Math.round(minor) / 100;
 }
+
+/**
+ * The other boundary: `GET /me/home` and `GET /me/bills` serialise money as
+ * DECIMAL rupee strings in MAJOR units (Prisma Decimal on the wire, e.g.
+ * "12450.00"). Converts to the integer MINOR units every display component
+ * expects. Guards against a malformed/non-numeric string so a bad payload
+ * degrades to 0 rather than propagating NaN into a render.
+ */
+export function majorStringToMinor(major: string): number {
+  const value = Number(major);
+  return Number.isFinite(value) ? Math.round(value * 100) : 0;
+}
