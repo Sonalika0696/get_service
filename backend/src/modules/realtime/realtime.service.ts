@@ -16,8 +16,10 @@ export const DOMAIN_EVENT_NAME = 'domain-event';
 export type DomainEventType =
   | 'service_request.created'
   | 'service_request.pooled'
+  | 'service_request.joined'
   | 'service_request.assigned'
   | 'service_request.confirmed'
+  | 'service_request.cancelled'
   | 'event.created'
   | 'event.fired'
   | 'event.expired'

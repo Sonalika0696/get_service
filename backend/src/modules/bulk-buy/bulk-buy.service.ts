@@ -1,10 +1,11 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../infra/prisma/prisma.service.js';
 import { Clock } from '../../infra/clock/clock.service.js';
 import { RazorpayService } from '../../infra/razorpay/razorpay.service.js';
 import { LedgerService } from '../ledger/ledger.service.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import { AuditService, type AppendAuditLogInput } from '../audit/audit.service.js';
+import { RealtimeService, type DomainEventType } from '../realtime/realtime.service.js';
 import { Prisma } from '../../generated/prisma/client.js';
 import { AccountKind, BookingStatus, CommitmentStatus, JobCardStatus, JobCardTier, OfferRecurrence, OfferStatus, PayoutStatus, ServiceRequestStatus, ServiceRequestType, RoleKind } from '../../generated/prisma/enums.js';
 import type { BookingModel, JobCardModel, MilestoneModel, OfferModel, PayoutModel, ServiceRequestModel } from '../../generated/prisma/models.js';
@@ -119,6 +120,8 @@ export type ResidentPollDetail = ServiceRequestModel & {
  */
 @Injectable()
 export class BulkBuyService {
+  private readonly logger = new Logger(BulkBuyService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly clock: Clock,
@@ -126,6 +129,7 @@ export class BulkBuyService {
     private readonly payments: PaymentsService,
     private readonly razorpay: RazorpayService,
     private readonly auditService: AuditService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   // -------------------------------------------------------------------
@@ -1003,6 +1007,9 @@ export class BulkBuyService {
       },
     });
 
+    // Post-commit, best-effort — see pushResidentPollRealtime's doc comment.
+    await this.pushResidentPollRealtime('service_request.created', poll);
+
     return this.toResidentPollDetail(poll, creatorId);
   }
 
@@ -1041,7 +1048,8 @@ export class BulkBuyService {
     }
     const ladder: LadderRung[] | null = dto.discountLadder ? dto.discountLadder.map((rung) => ({ minN: rung.minN, pct: rung.pct })) : null;
 
-    return this.prisma.$transaction(async (tx) => {
+    let fired = false;
+    const detail = await this.prisma.$transaction(async (tx) => {
       // Serializes against joinResidentPoll on the SAME poll (same
       // namespace+key) — see RESIDENT_POLL_FIRE_LOCK_NAMESPACE's doc
       // comment. Must be the first statement, before any read.
@@ -1079,17 +1087,24 @@ export class BulkBuyService {
         const stillOpen = await tx.serviceRequest.findUnique({ where: { id: pollId }, select: { status: true } });
         if (stillOpen?.status === ServiceRequestStatus.OPEN) {
           await this.fireResidentPoll(tx, updated, commitmentCount);
+          fired = true;
         }
       }
 
       const finalPoll = await tx.serviceRequest.findUniqueOrThrow({ where: { id: pollId } });
       return this.loadResidentPollDetail(tx, finalPoll, null);
     });
+
+    // Post-commit only. One event per action: if confirming also fired the
+    // pool, neighbours get the more significant "pooled" rather than two
+    // back-to-back banners.
+    await this.pushResidentPollRealtime(fired ? 'service_request.pooled' : 'service_request.confirmed', detail);
+    return detail;
   }
 
   /** Vendor declines (via a COMMITTEE member) — poll is CANCELLED outright; no fire, ever, for this poll. */
   async vendorDecline(societyId: string, pollId: string): Promise<ResidentPollDetail> {
-    return this.prisma.$transaction(async (tx) => {
+    const detail = await this.prisma.$transaction(async (tx) => {
       const poll = await tx.serviceRequest.findUnique({ where: { id: pollId } });
       if (!poll || poll.societyId !== societyId) {
         throw new NotFoundException('Poll not found');
@@ -1112,6 +1127,9 @@ export class BulkBuyService {
 
       return this.loadResidentPollDetail(tx, updated, null);
     });
+
+    await this.pushResidentPollRealtime('service_request.cancelled', detail);
+    return detail;
   }
 
   /**
@@ -1146,6 +1164,7 @@ export class BulkBuyService {
       throw new ForbiddenException('Not a resident of this society');
     }
 
+    let fired = false;
     await this.prisma.$transaction(async (tx) => {
       // Serializes against vendorConfirm (and other concurrent joins) on the
       // SAME poll (same namespace+key) — see
@@ -1180,10 +1199,17 @@ export class BulkBuyService {
         now < current.closesAt.getTime()
       ) {
         await this.fireResidentPoll(tx, current, commitmentCount);
+        fired = true;
       }
     });
 
-    return this.getResidentPoll(societyId, pollId, residentId);
+    const detail = await this.getResidentPoll(societyId, pollId, residentId);
+    // Post-commit only. "joined" is deliberately NOT "pooled": in the
+    // service-requests module "pooled" means the threshold was reached, and
+    // clients surface it as a banner — every individual join must not look
+    // like that. A join that tips the pool over fires, and sends "pooled".
+    await this.pushResidentPollRealtime(fired ? 'service_request.pooled' : 'service_request.joined', detail);
+    return detail;
   }
 
   /**
@@ -1361,6 +1387,29 @@ export class BulkBuyService {
   private toBookingDetail(booking: BookingModel & { jobCards: JobCardModel[] }, payout: PayoutModel | null, milestones: MilestoneModel[]): BookingDetail {
     const { jobCards, ...rest } = booking as BookingModel & { jobCards: JobCardModel[] };
     return { ...rest, jobCards, payout, milestones: [...milestones].sort((a, b) => a.sequence - b.sequence) };
+  }
+
+  /**
+   * Post-commit, best-effort real-time push for Flow B resident polls — the
+   * same contract as ServiceRequestsService.pushRealtime: RealtimeService
+   * already never throws, but this wraps it again so a live-push failure of
+   * any kind can never make an already-committed create/join/confirm/decline
+   * look like it failed. Payload matches ServiceRequestRealtimePayload
+   * exactly (lean and non-sensitive; clients refetch detail via REST), so
+   * clients handle both modules' service_request.* events identically.
+   */
+  private async pushResidentPollRealtime(type: DomainEventType, poll: { id: string; pollType: string; title: string; status: string; societyId: string }): Promise<void> {
+    try {
+      await this.realtime.emitToSociety(poll.societyId, type, {
+        id: poll.id,
+        type: poll.pollType,
+        title: poll.title,
+        status: poll.status,
+        societyId: poll.societyId,
+      });
+    } catch (error) {
+      this.logger.error(`Post-commit realtime push "${type}" failed for resident poll ${poll.id} (state change already committed)`, error instanceof Error ? error.stack : String(error));
+    }
   }
 
   private async getResidentPollInternal(societyId: string, id: string): Promise<ServiceRequestModel> {

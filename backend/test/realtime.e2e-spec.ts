@@ -31,6 +31,11 @@ import { OccupancyRole } from '../src/generated/prisma/enums.js';
  *     gateway disconnects it outright, and it never sees a `domain-event`;
  *  3. a resident of society B does not receive society A's push (room
  *     isolation — societies never share a `society:<id>` room);
+ *  3b. a resident RAISING a pooled bulk-buy request (Flow B,
+ *     POST /bulk-buy/polls) pushes `service_request.created` to a
+ *     neighbour's socket, and a single neighbour joining pushes
+ *     `service_request.joined` — deliberately not `pooled`, which clients
+ *     surface as "the threshold was reached";
  *  4. the push is post-commit and best-effort: with RealtimeService's
  *     `emitToSociety` stubbed to throw, the underlying REST create still
  *     returns 201 and the row is durably committed (fresh Prisma read) —
@@ -114,6 +119,7 @@ describe('Real-time push layer (e2e)', () => {
   let societyBId: string;
   const flatIds: string[] = [];
   const userIds: string[] = [];
+  const vendorIds: string[] = [];
   const openSockets: Socket[] = [];
 
   async function latestMailTo(email: string, subject: string): Promise<SendMailInput> {
@@ -212,6 +218,8 @@ describe('Real-time push layer (e2e)', () => {
 
     await prisma.participation.deleteMany({ where: { serviceRequest: { societyId: { in: [societyAId, societyBId] } } } });
     await prisma.serviceRequest.deleteMany({ where: { societyId: { in: [societyAId, societyBId] } } });
+    await prisma.vendorSocietyLink.deleteMany({ where: { societyId: { in: [societyAId, societyBId] } } });
+    await prisma.vendor.deleteMany({ where: { id: { in: vendorIds } } });
     await prisma.auditLog.deleteMany({ where: { societyId: { in: [societyAId, societyBId] } } });
     await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.otp.deleteMany({ where: { userId: { in: userIds } } });
@@ -291,6 +299,49 @@ describe('Real-time push layer (e2e)', () => {
     // ...but society B's resident, watched over the same window, never does.
     await delay(500);
     expect(receivedByB).toBeNull();
+  });
+
+  it('pushes service_request.created to a neighbour when a resident raises a pooled bulk-buy request, and service_request.joined (not pooled) on a single join', async () => {
+    const raiserFlat = await prisma.flat.create({ data: { societyId: societyAId, unitNo: `RTA-FB1-${randomUUID().slice(0, 8)}`, maintenanceAmount: 1000 } });
+    const neighbourFlat = await prisma.flat.create({ data: { societyId: societyAId, unitNo: `RTA-FB2-${randomUUID().slice(0, 8)}`, maintenanceAmount: 1000 } });
+    flatIds.push(raiserFlat.id, neighbourFlat.id);
+    const vendor = await prisma.vendor.create({ data: { name: `Realtime Flow B Vendor ${randomUUID().slice(0, 8)}` } });
+    vendorIds.push(vendor.id);
+    await prisma.vendorSocietyLink.create({ data: { vendorId: vendor.id, societyId: societyAId } });
+
+    const raiser = await signupAndLogin(societyAId, `rt-fb-raiser-${randomUUID()}@example.com`, raiserFlat.id, OccupancyRole.OWNER_OCCUPIER);
+    const neighbour = await signupAndLogin(societyAId, `rt-fb-neighbour-${randomUUID()}@example.com`, neighbourFlat.id, OccupancyRole.TENANT);
+
+    // The neighbour's socket is the one that matters: this is the "shows up
+    // live on someone else's Requests tab" case that previously never fired.
+    const neighbourSocket = connectSocket(neighbour.rawToken);
+    await waitForReady(neighbourSocket);
+    const createdEvent = waitForDomainEvent(neighbourSocket);
+
+    const createRes = await raiser.agent
+      .post('/api/v1/bulk-buy/polls')
+      .send({ taggedVendorId: vendor.id, category: 'Groceries', title: 'Bulk rice order', proposedMinimum: 5, closesAt: futureIso(86_400_000) })
+      .expect(201);
+    const created = createRes.body as ServiceRequestBody;
+
+    const createdEnvelope = await createdEvent;
+    expect(createdEnvelope.type).toBe('service_request.created');
+    expect((createdEnvelope.payload as ServiceRequestBody).id).toBe(created.id);
+    expect((createdEnvelope.payload as ServiceRequestBody).societyId).toBe(societyAId);
+    expect((createdEnvelope.payload as { type: string }).type).toBe('BULK_BUY_RESIDENT');
+
+    // One neighbour joining, far below the proposed minimum of 5 (and no
+    // vendor confirmation yet), is a join — not a threshold being reached.
+    const raiserSocket = connectSocket(raiser.rawToken);
+    await waitForReady(raiserSocket);
+    const joinedEvent = waitForDomainEvent(raiserSocket);
+
+    await neighbour.agent.post(`/api/v1/bulk-buy/polls/${created.id}/join`).expect(201);
+
+    const joinedEnvelope = await joinedEvent;
+    expect(joinedEnvelope.type).toBe('service_request.joined');
+    expect((joinedEnvelope.payload as ServiceRequestBody).id).toBe(created.id);
+    expect((joinedEnvelope.payload as ServiceRequestBody).status).toBe('OPEN');
   });
 
   it('is post-commit and best-effort: a throwing RealtimeService still lets the REST create succeed and commit', async () => {
