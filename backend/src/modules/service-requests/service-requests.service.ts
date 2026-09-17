@@ -1,8 +1,9 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../infra/prisma/prisma.service.js';
 import { Clock } from '../../infra/clock/clock.service.js';
 import { AuditService, type AppendAuditLogInput } from '../audit/audit.service.js';
 import { BulkBuyService } from '../bulk-buy/bulk-buy.service.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import { Prisma } from '../../generated/prisma/client.js';
 import {
   JobCardTier,
@@ -21,6 +22,24 @@ import type { ConfirmServiceRequestDto } from './dto/confirm-service-request.dto
 
 type Decimal = Prisma.Decimal;
 const Decimal = Prisma.Decimal;
+
+/** Kind of Phase 8.3 lifecycle transition a service-request notification is reporting. */
+type ServiceRequestNotificationKind = 'pooled' | 'assigned' | 'confirmed';
+
+/**
+ * Phase 8.3: what dispatchNotifications needs to fan mail out AFTER a
+ * transaction has committed — just the recipient list plus enough context
+ * to pick a template. No DB handles — those only live inside the tx that
+ * produced this. Mirrors PollsService's PendingNotification exactly (see
+ * that file's doc comment for the post-commit/best-effort rationale this
+ * reuses verbatim).
+ */
+interface PendingServiceRequestNotification {
+  requestId: string;
+  title: string;
+  kind: ServiceRequestNotificationKind;
+  recipientEmails: string[];
+}
 
 /**
  * Phase 8.2: serializes join() (threshold evaluation) and confirm() on the
@@ -86,11 +105,14 @@ export type ServiceRequestDetail = ServiceRequestModel & {
  */
 @Injectable()
 export class ServiceRequestsService {
+  private readonly logger = new Logger(ServiceRequestsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly clock: Clock,
     private readonly bulkBuy: BulkBuyService,
     private readonly auditService: AuditService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   // -------------------------------------------------------------------
@@ -201,6 +223,7 @@ export class ServiceRequestsService {
     }
 
     let pooledAudit: AppendAuditLogInput | null = null;
+    let pooledNotification: PendingServiceRequestNotification | null = null;
 
     await this.prisma.$transaction(async (tx) => {
       // Must be the first statement — see SERVICE_REQUEST_LOCK_NAMESPACE's
@@ -241,11 +264,18 @@ export class ServiceRequestsService {
           subjectId: id,
           payload: { threshold: stillOpen.threshold, participantCount: activeCount },
         };
+        // Read-only, still inside the tx — see collectRecipients's doc
+        // comment. Dispatch itself happens only after this transaction
+        // has committed, below.
+        pooledNotification = await this.collectRecipients(tx, id, sr.title, 'pooled');
       }
     });
 
     if (pooledAudit) {
       await this.auditService.appendBestEffort(pooledAudit);
+    }
+    if (pooledNotification) {
+      await this.dispatchNotifications(pooledNotification);
     }
 
     return this.get(societyId, id, residentId);
@@ -288,13 +318,24 @@ export class ServiceRequestsService {
     }
 
     const now = this.clock.now();
-    const result = await this.prisma.serviceRequest.updateMany({
-      where: { id, status: { in: [ServiceRequestStatus.OPEN, ServiceRequestStatus.POOLED] } },
-      data: { status: ServiceRequestStatus.ASSIGNED, assignedVendorId: dto.vendorId, assignedAt: now, assignedByUserId: actorId },
+
+    // Wrapped in a transaction purely so recipient collection for the
+    // post-commit notification reads the SAME committed snapshot as the
+    // status flip (collectRecipients's read-only-inside-tx contract) —
+    // the conditional updateMany itself is still the only write here,
+    // preserving the single-writer/no-advisory-lock stance from this
+    // method's own doc comment.
+    let assignedNotification: PendingServiceRequestNotification | null = null;
+    await this.prisma.$transaction(async (tx) => {
+      const result = await tx.serviceRequest.updateMany({
+        where: { id, status: { in: [ServiceRequestStatus.OPEN, ServiceRequestStatus.POOLED] } },
+        data: { status: ServiceRequestStatus.ASSIGNED, assignedVendorId: dto.vendorId, assignedAt: now, assignedByUserId: actorId },
+      });
+      if (result.count === 0) {
+        throw new BadRequestException('Service request was assigned or moved on by a concurrent request');
+      }
+      assignedNotification = await this.collectRecipients(tx, id, sr.title, 'assigned');
     });
-    if (result.count === 0) {
-      throw new BadRequestException('Service request was assigned or moved on by a concurrent request');
-    }
 
     await this.auditService.appendBestEffort({
       societyId,
@@ -304,6 +345,9 @@ export class ServiceRequestsService {
       subjectId: id,
       payload: { vendorId: dto.vendorId, category: sr.category, pricingCardId: card.id },
     });
+    if (assignedNotification) {
+      await this.dispatchNotifications(assignedNotification);
+    }
 
     return this.get(societyId, id, actorId);
   }
@@ -336,6 +380,7 @@ export class ServiceRequestsService {
    */
   async confirm(societyId: string, id: string, actorId: string, dto: ConfirmServiceRequestDto): Promise<ServiceRequestDetail> {
     let executedAudit: AppendAuditLogInput | null = null;
+    let confirmedNotification: PendingServiceRequestNotification | null = null;
 
     const detail = await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SERVICE_REQUEST_LOCK_NAMESPACE}, hashtext(${id}))`;
@@ -359,10 +404,24 @@ export class ServiceRequestsService {
         throw new BadRequestException('The assigned vendor no longer has a published pricing card for this category');
       }
 
-      const participations = await tx.participation.findMany({ where: { serviceRequestId: id, status: ParticipationStatus.ACTIVE } });
+      const participations = await tx.participation.findMany({
+        where: { serviceRequestId: id, status: ParticipationStatus.ACTIVE },
+        include: { resident: true },
+      });
       if (participations.length === 0) {
         throw new BadRequestException('No active participants to confirm against');
       }
+
+      // Read-only, still inside the tx — see collectRecipients's doc
+      // comment. Built from the same participations snapshot the escrow
+      // is about to be created against; dispatch happens only after this
+      // transaction (money and all) has committed, below.
+      confirmedNotification = {
+        requestId: id,
+        title: sr.title,
+        kind: 'confirmed',
+        recipientEmails: participations.map((p) => p.resident.email),
+      };
 
       const contribution = new Decimal(dto.contribution).toDecimalPlaces(2);
       const now = this.clock.now();
@@ -418,6 +477,9 @@ export class ServiceRequestsService {
 
     if (executedAudit) {
       await this.auditService.appendBestEffort(executedAudit);
+    }
+    if (confirmedNotification) {
+      await this.dispatchNotifications(confirmedNotification);
     }
 
     return detail;
@@ -495,6 +557,52 @@ export class ServiceRequestsService {
   // -------------------------------------------------------------------
   // Internal helpers
   // -------------------------------------------------------------------
+
+  /**
+   * Phase 8.3 — read-only, runs INSIDE the caller's transaction: gathers
+   * who to notify for a pooled/assigned/confirmed transition — never
+   * calls the mailer. Mirrors PollsService.collectRecipients exactly.
+   */
+  private async collectRecipients(
+    tx: Prisma.TransactionClient,
+    id: string,
+    title: string,
+    kind: ServiceRequestNotificationKind,
+  ): Promise<PendingServiceRequestNotification> {
+    const participations = await tx.participation.findMany({
+      where: { serviceRequestId: id, status: ParticipationStatus.ACTIVE },
+      include: { resident: true },
+    });
+    return { requestId: id, title, kind, recipientEmails: participations.map((p) => p.resident.email) };
+  }
+
+  /**
+   * Phase 8.3 — runs AFTER the transaction has committed. Best-effort:
+   * each send is isolated in its own try/catch so one recipient's
+   * bounced/broken mailbox can't stop the rest of the batch, and any
+   * failure is logged rather than thrown — this must never be able to
+   * roll back or otherwise reverse the already-committed POOLED / ASSIGNED
+   * / CONFIRMED transition (or, for CONFIRMED, the escrow it created).
+   * Mirrors PollsService.dispatchNotifications exactly.
+   */
+  private async dispatchNotifications(pending: PendingServiceRequestNotification): Promise<void> {
+    for (const email of pending.recipientEmails) {
+      try {
+        if (pending.kind === 'pooled') {
+          await this.notifications.sendServiceRequestPooled(email, pending.title);
+        } else if (pending.kind === 'assigned') {
+          await this.notifications.sendVendorAssigned(email, pending.title);
+        } else {
+          await this.notifications.sendVendorConfirmed(email, pending.title);
+        }
+      } catch (error) {
+        this.logger.error(
+          `Post-commit service-request-${pending.kind} notification failed for request ${pending.requestId} -> ${email} (state change already committed)`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
+  }
 
   private async getInternal(societyId: string, id: string): Promise<ServiceRequestModel> {
     const sr = await this.prisma.serviceRequest.findUnique({ where: { id } });

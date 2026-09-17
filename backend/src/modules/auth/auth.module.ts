@@ -15,6 +15,7 @@ import { OfficerAuthService } from './officer-auth.service.js';
 import { OtpService } from './otp.service.js';
 import { SessionController } from './session.controller.js';
 import { SessionService } from './session.service.js';
+import { DevAuthController } from './dev-auth.controller.js';
 
 /**
  * Global: AuthGuard/RolesGuard/SocietyScopeGuard/PrincipalGuard need to be
@@ -55,7 +56,7 @@ import { SessionService } from './session.service.js';
       }),
     }),
   ],
-  controllers: [AuthController, OfficerAuthController, SessionController],
+  controllers: [AuthController, OfficerAuthController, SessionController, DevAuthController],
   providers: [AuthService, OfficerAuthService, OtpService, SessionService, AuthGuard, RolesGuard, SocietyScopeGuard, PrincipalGuard],
   // Re-export UsersModule itself (not just a provider token) so consumers
   // of AuthGuard elsewhere can resolve its UserContextService dependency.

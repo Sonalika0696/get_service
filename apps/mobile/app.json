@@ -28,7 +28,7 @@
     },
     "extra": {
       "apiBaseUrl": "http://localhost:4000/api/v1",
-      "devBearerToken": null
+      "devBearerToken": "64GsORE-j7ix1M3KdcoSx21KKSvTep9kj9bvv5Rnn2o"
     }
   }
 }

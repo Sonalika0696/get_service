@@ -60,4 +60,34 @@ export class NotificationsService {
       html: `<p><strong>"${pollTitle}"</strong> closed without reaching the minimum number of commitments and has <strong>EXPIRED</strong>.</p>`,
     });
   }
+
+  /** Phase 8.3 — sent to every ACTIVE participant the moment a ServiceRequest reaches its threshold and pools. */
+  async sendServiceRequestPooled(to: string, requestTitle: string): Promise<void> {
+    await this.mailer.send({
+      to,
+      subject: 'Service request pooled — enough neighbours joined',
+      text: `"${requestTitle}" has reached its participant threshold and is now POOLED.`,
+      html: `<p><strong>"${requestTitle}"</strong> has reached its participant threshold and is now <strong>POOLED</strong>.</p>`,
+    });
+  }
+
+  /** Phase 8.3 — sent to every ACTIVE participant once a committee member sources a vendor for their ServiceRequest. */
+  async sendVendorAssigned(to: string, requestTitle: string): Promise<void> {
+    await this.mailer.send({
+      to,
+      subject: 'Vendor assigned to your service request',
+      text: `A vendor has been sourced for "${requestTitle}". You will be notified once the engagement is confirmed.`,
+      html: `<p>A vendor has been sourced for <strong>"${requestTitle}"</strong>. You will be notified once the engagement is confirmed.</p>`,
+    });
+  }
+
+  /** Phase 8.3 — sent to every ACTIVE participant once the committee relays the vendor's confirmation and the engagement is escrowed. */
+  async sendVendorConfirmed(to: string, requestTitle: string): Promise<void> {
+    await this.mailer.send({
+      to,
+      subject: 'Service request confirmed — contribution due',
+      text: `The vendor for "${requestTitle}" has been confirmed. Your contribution is now due and will be collected via escrow.`,
+      html: `<p>The vendor for <strong>"${requestTitle}"</strong> has been confirmed. Your contribution is now due and will be collected via escrow.</p>`,
+    });
+  }
 }

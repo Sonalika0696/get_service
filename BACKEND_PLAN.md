@@ -1,226 +1,220 @@
 # Backend Implementation Plan
 
-Companion to [ARCHITECTURE.md](ARCHITECTURE.md). Sequenced, incremental, single-feature-first. Each phase leaves the backend in a **runnable, testable state**.
+**Version 2.0.** Companion to [ARCHITECTURE.md](ARCHITECTURE.md), the V2.0 Report of Understanding and Software Design Document as amended by [DOC_AMENDMENTS_V2.md](DOC_AMENDMENTS_V2.md). Decisions in [DECISIONS_V2_SCOPE.md](DECISIONS_V2_SCOPE.md). Progress in [SUPERVISOR.md](SUPERVISOR.md).
 
-Delivery principle: **the base is usable at Phase 1** (auth + one feature). Every phase after adds one feature and does not break earlier ones. No time boundation — phases move on quality, not clock.
+Phases 0–5 are complete and end-to-end verified. Phases 6–13 are new and map 1:1 onto the frontend phases in [FRONTEND_PLAN.md](FRONTEND_PLAN.md).
 
-Progress is tracked in [SUPERVISOR.md](SUPERVISOR.md).
-
----
-
-## Phase 0 — Foundation *(pre-feature; nothing user-visible yet)*
-
-**Goal:** the backend runs, connects to Postgres, has one seeded society, one committee member, and one resident. No features yet — only the platform for them.
-
-- [ ] Repo scaffold: `backend/` NestJS app, ESLint + Prettier, tsconfig, package.json
-- [ ] `docker-compose.yml` at repo root: Postgres 16 + Maildev
-- [ ] Prisma set up; initial migration for base entities: `User`, `Society` (with `audit_tail_hash`), `Flat` (with `ownership_share` default 1.0), `Occupancy` (`role` enum `OWNER_OCCUPIER | OWNER_ABSENTEE | TENANT`, `delegated_to_user_id` nullable), `Role`
-- [ ] `config/` module with Zod-validated env
-- [ ] `common/` primitives: logger, error filter, validation pipe, `Clock` service
-- [ ] `AuditLogInterceptor` writing to `AuditLog` — **hash-chained** (`previous_hash` + `entry_hash = SHA-256(previous_hash || canonicalJson(payload))`); Postgres advisory lock on the society-scoped chain to guarantee serialised appends; `Society.audit_tail_hash` cached
-- [ ] `audit/verify` service: recomputes forward from genesis; returns the first divergent row (or `null`)
-- [ ] Health check route: `GET /health` returns `{ok: true, db: "up"}`
-- [ ] Seed script: 1 society ("Test Society"), 90 flats, 1 committee member, 2 owner-occupiers, 1 owner-absentee (with tenant delegation), 2 tenants (no KYC yet — placeholder identities)
-
-**Definition of done:** `pnpm --filter backend start:dev` runs. `curl /health` returns ok. `SELECT count(*) FROM "Flat"` returns 90.
+**Sequencing note.** SDD §10 as first drafted placed electricity billing first, on the grounds that it exercises ledger, apportionment and audit together and therefore de-risks everything after it. That rationale is spent — the ledger and audit chain are built and independently verified. Sequencing is now by product dependency, and identity generalisation comes first because it blocks the vendor portal, the operator console and every client surface.
 
 ---
 
-## Phase 1 — Auth and Job Blog *(first usable feature end-to-end)*
+## Completed phases
 
-**Why Job Blog first:** smallest complete feature. No payments, no vendors, no escrow — proves the stack works end-to-end with real domain logic. High user value on its own.
+| Phase | Delivered | Rework required |
+|---|---|---|
+| **0** — Foundation | NestJS, config, Prisma, hash-chained `AuditLog` with verification, seed | — |
+| **1** — Auth + notice board | Email OTP, DB-backed sessions, job blog with moderation | Phone OTP replaces email; bearer tokens (Phase 6) |
+| **2** — Vendor marketplace | Directory, GSTIN verification, tier promotion, rating aggregate | `Vendor` splits from `VendorSocietyLink`; vendor login (Phase 7) |
+| **3** — Poll engine | Advisory / binding / event polls, ownership weighting, auto-fire on minimum | `Vote`, `VoteChoice`, `PollWeightMode` deleted; commitment mechanic becomes `ServiceRequest` / `Participation` (Phase 8) |
+| **4** — Ledger, payments, procurement | Double-entry ledger with conservation invariant, aggregator sandbox, offer → commit → escrow → sign-off → settlement, milestones, retention | Commission removed; `Account.balance` becomes a rebuildable cache; approval ladder replaces single-treasurer authorisation (Phase 6) |
+| **5** — Resident-initiated procurement | Resident tags a vendor, poll fires down the shared settlement path | Resident no longer names the vendor; committee sources (Phase 8) |
 
-**Goal:** a resident can log in and post a job. Another resident can browse it. Committee can moderate.
-
-- [ ] `auth/` module: signup, email OTP, session (JWT in httpOnly cookie), logout
-- [ ] `AuthGuard`, `SocietyScopeGuard`, `RolesGuard`
-- [ ] `@CurrentUser`, `@Roles`, `@SocietyScope` decorators
-- [ ] `users/` module: profile read/update
-- [ ] `job-blog/` module:
-  - Post CRUD (create, list, get, soft-delete)
-  - Kind: `HIRING` or `SEEKING`
-  - Hiring post requires company email → verification link → status flip
-  - Rate limiter: 1 post / resident / month (society-configurable)
-  - Committee `flag/remove` action
-  - Auto-archive after 60 days
-- [ ] `notifications/` module (minimal): email dispatch via Maildev
-- [ ] E2E test: signup → OTP → verify → create hiring post → company email verify → post visible → committee flag → post hidden
-
-**Definition of done:** a fresh developer clones the repo, runs the one-command dev flow, signs up, and posts a job.
+**Standing state:** 66 unit tests, 38 e2e tests, green against real PostgreSQL *(was 75 / 39 before the V2.0 scope cleanup: 9 tally-util unit tests and 3 voting e2e tests deleted with the feature; 2 e2e tests added — one proving no voting surface exists, one covering close-early)*.
 
 ---
 
-## Phase 2 — Vendor Marketplace
+## Phase 6 — Identity, society management and the approval ladder
 
-**Goal:** committee onboards vendors; residents browse a directory; residents can rate a vendor after a job (job rating stub — real job flow comes in Phase 4).
+**Modules:** M1, M2, M14 · **Frontend:** F1, F6
 
-- [ ] `vendors/` module:
-  - Vendor entity, geolocation, service radius, categories, `gstin`, `gstin_verified_at`
-  - Verification tier state machine: `UNVERIFIED → SOCIETY_ATTESTED → PLATFORM_AUDITED`
-  - Access request records (resident-vendor consent events)
-  - Ratings table + aggregate maintained lazily
-- [ ] `infra/gstinapi/` client: free-tier GSTIN lookup; retries + timeouts; feature-flagged so tests can stub it
-- [ ] Vendor onboarding: on committee approval, if GSTIN provided → call `gstinapi.in`; if the response says "Active", auto-promote to `SOCIETY_ATTESTED` and stamp `gstin_verified_at`; lookup failures logged, non-fatal
-- [ ] `kyc/` module (light): document upload stub (local disk in dev)
-- [ ] Endpoints: list vendors, vendor detail, committee onboard/approve, resident submit rating (stub until Phase 4 wires real jobs)
-- [ ] E2E test: committee onboards a vendor with a valid test-mode GSTIN → tier auto-flips to `SOCIETY_ATTESTED` → resident sees it in directory → resident rates it (stub) → vendor detail shows aggregate rating
+**Goal:** a platform operator can create a society and import its flats; a resident can sign up by phone and be ratified by the committee; a vendor and an operator can authenticate at all. Expenditure is governed by a three-rung ladder.
 
-**Definition of done:** vendor directory is real and populated; committee tools work.
+This phase is the keystone. Nothing else in the plan can start without it.
 
----
+**Sub-phase sequencing** *(agreed with the supervisor 2026-09-16; build → test → commit each before the next, suite stays green):*
+- **6.1 Scope cleanup** — ✅ **done & e2e-green** (voting, commission, dead account kinds removed; I2 + I8 asserted). Landed in the working tree; see the decisions log. *Not yet committed to `master` at time of writing — commit a checkpoint before starting 6.2.*
+- **6.2 Identity** — principal model + phone OTP + bearer tokens + password/TOTP 2FA + role guards. *Highest leverage: unblocks vendor + operator login and both clients.*
+- **6.3 Society management** — society/flat-CSV/occupancy/role CRUD + committee ratification queue + `Delegation` + `ConsentGrant`.
+- **6.4 Approval ladder (M14)** — generalise `PayoutAuthorisation` to N approvers; three rungs; reject same/repeat identity; per-society thresholds; `DEPUTY_TREASURER` live.
+- **6.5 Cross-cutting** — I6 balance cache + assertion worker; `shared/openapi.json` + typed client; OTP/auth rate limiting; **expose `GET /audit/verify`** (pulled forward — see below).
 
-## Phase 3 — Poll engine (event polls first, no money)
+- [ ] **Principal model.** Replace the implicit "resident of exactly one society" identity with a discriminated `RESIDENT | VENDOR | OPERATOR` principal. `UserContextService.load()` currently returns `null` without an active `Occupancy`, and `AuthGuard` converts that to `401` — so a vendor or operator cannot authenticate today.
+- [ ] `CurrentUserContext` becomes a discriminated union; `societyId` and `occupancyRole` are no longer unconditionally present
+- [ ] New guards: `@ResidentOnly()`, `@VendorOnly()`, `@OperatorOnly()`; `SocietyScopeGuard` gains an operator bypass
+- [ ] **Phone OTP** as the resident credential; `User.phone` becomes the anchor. Email retained as a contact field
+- [ ] **Password + mandatory TOTP 2FA** for committee officers and vendors (SDD §5.1)
+- [ ] **Bearer tokens** accepted alongside the session cookie. `SessionService.validate()` already does the work — this is one guard
+- [ ] Society CRUD; **flat register CSV import** validating that area factors sum to unity within tolerance
+- [ ] Occupancy management: move-in, move-out, tenure clock
+- [ ] **Committee ratification queue** — no self-registered account activates without it (SDD §5.3 phantom-resident threat)
+- [ ] `Delegation` entity, scoped and revocable; financial and voting capabilities excluded at the type level
+- [ ] `ConsentGrant` entity, enforced at query time rather than at display time
+- [ ] Role assignment: `COMMITTEE`, `TREASURER`, `DEPUTY_TREASURER`
+- [ ] **Approval ladder (M14):** generalise `PayoutAuthorisation` from an implied two approvers to N. Rung 1 single officer; rung 2 two distinct identities; rung 3 configurable committee majority. Reject same-identity and repeat-identity approval
+- [ ] Thresholds and majority fraction as per-society configuration
+- [x] **Scope cleanup:** delete `Vote`, `VoteChoice`, `PollWeightMode`, `AccountKind.VOUCHER`, `AccountKind.LENDING_SIM`, `AccountKind.COMMISSION_SINK`; remove commission splitting from settlement *(done 2026-09-16 — also removed `ADVISORY`/`BINDING` poll types, `PASSED`/`FAILED` statuses and `Flat.ownershipShare`; renamed `Booking.commissionTaken` → `retentionSetAside`. Migration `20260916150000_v2_remove_voting_lending_commission` refuses to run if any ledger history, commission or voting data would be destroyed)*
+- [ ] **Invariant I6:** `Account.balance` becomes a cache written only by the posting layer, with a scheduled worker asserting equality against the derived value
+- [ ] **`shared/openapi.json`** generated from decorators; typed client generated; CI fails on drift
+- [ ] Rate limiting on OTP and auth endpoints
+- [ ] **Expose `GET /audit/verify` (pulled forward from Phase 12 — supervisor suggestion).** `AuditService.verifyChain` is built and e2e-proven but has no route. Surfacing it now — resident-callable, returns "intact" or the first divergent row — lets every client and the operator console lean on one of the four novelty claims from day one, at near-zero cost. Phase 12 keeps only the *scheduled* verification worker and the audit filter/read endpoints.
+- [ ] **Move notifications out of the DB transaction (rework — supervisor suggestion).** The Phase 3 poll fire/expiry paths `await` mail dispatch *inside* the posting transaction, so a mail failure would roll back a state change that already succeeded. As notifications become cross-cutting infrastructure (RoU §5 amendment A7), dispatch must be best-effort and **post-commit** (enqueue on transaction success), never able to fail or reverse a committed money/state change.
 
-**Goal:** a resident can create an event poll (Diwali dinner, shared cab). Neighbours join. No money flows yet — this is the pure poll mechanic used later by bulk-buy.
-
-- [ ] `polls/` module:
-  - Poll entity with `poll_type: ADVISORY | BINDING | EVENT | BULK_BUY_RESIDENT`
-  - `weight_mode: UNIFORM | OWNERSHIP_WEIGHTED` (only meaningful for BINDING)
-  - `quorum_pct`, `passing_pct`, `closes_at` per poll (defaults: 60% / simple majority)
-  - `Vote { poll_id, voter_hash, choice, weight }` — voter hash so aggregate results are readable but individual votes are anonymous outside the audit committee
-  - Commitments table (bulk-buy poll variant only)
-  - Min-commitments + deadline auto-fire / auto-cancel
-  - Poll creator can close early
-  - **Guards:** binding polls reject votes from `TENANT`; ownership-weighted votes multiply by `Flat.ownership_share`; a flat with both `OWNER_ABSENTEE` and `TENANT` counts only the owner's vote on binding polls
-- [ ] Notification hooks: on join, on fire, on expiry, on close
-- [ ] E2E tests:
-  - Advisory: resident creates advisory poll → tenant + owner both vote → poll closes → outcome recorded (each vote weight 1)
-  - Binding + weighted: committee creates binding poll → tenant vote rejected → owner-occupier + owner-absentee vote → outcome computed with ownership_share weights
-  - Event: resident creates event poll → neighbour joins → poll fires → notifications sent
-
-**Definition of done:** the poll engine is reusable and will slot into bulk-buy Flow B without rework.
+**Definition of done:** an operator creates a society, imports 90 flats, a resident signs up by phone and is ratified, a vendor logs in with 2FA, and a payout above the upper threshold requires and collects a committee majority — with every identity on the audit chain.
 
 ---
 
-## Phase 4 — Bulk-Buy Flow A + Razorpay + Escrow Ledger
+## Phase 7 — Vendor portal and pricing cards
 
-**Goal:** a vendor publishes a minimum-booking offer; residents commit and pay; escrow holds funds in the society sub-account; on completion, treasurer + system co-authorise payout.
+**Modules:** M4 (partial) · **Frontend:** F3
 
-This is the biggest phase. Split into 4A–4D internal milestones.
+**Goal:** a vendor publishes an immutable, versioned pricing card that will later bind them.
 
-### 4A — Ledger foundation
-- [ ] `ledger/` module: `Account`, `LedgerEntry` (append-only), sub-account kinds
-- [ ] Unit-of-work helper wrapping Prisma transactions
-- [ ] Idempotency-key middleware
-- [ ] Nightly reconciliation stub (runs but no real bank data yet)
+- [ ] Split `Vendor` from `VendorSocietyLink` — one vendor identity, one rating aggregate, many societies
+- [ ] `PricingCard`: vendor, category, version, effective from, superseded at, GST rate. **Immutable once published**
+- [ ] `PricingLine`: label, basis (per visit / per hour / per unit / percentage), rate, minimum, conditions. Visit charge is a first-class line, not an implicit extra
+- [ ] Card revision creates a new version; superseded versions remain readable for any engagement that froze them
+- [ ] Card publication writes to the audit chain
+- [ ] Vendor profile self-service: categories, service radius, bank account for settlement
+- [ ] Trade licence capture alongside the existing GSTIN verification
+- [ ] Operator endpoint: promote a vendor to `PLATFORM_AUDITED`
 
-### 4B — Razorpay sandbox integration
-- [ ] `infra/razorpay/`: client wrapper (test-mode keys only)
-- [ ] `payments/` module: order create, capture, refund
-- [ ] Webhook route with signed-payload verification and idempotency
-- [ ] Every payment event → ledger entry
-
-### 4C — Bulk-buy Flow A
-- [ ] `bulk-buy/` module: `Offer` entity with `discount_ladder: Json` (e.g. `[{minN: 5, pct: 5}, {minN: 10, pct: 10}]`), `min_commitments` (equal to ladder's lowest `minN`), `deadline`
-- [ ] DTO validation: ladder is non-empty, `minN` strictly increasing, `pct` monotonic, no duplicates
-- [ ] Vendor create offer → resident opt-in → commitment record; live tier computed from ladder + commitment count
-- [ ] Auto-fire on N reached → **applied tier = ladder entry with highest `minN ≤ commitments_count`** → escrow-in for each commitment via Razorpay
-- [ ] `Booking → JobCard[]` created on fire; each `JobCard.applied_discount_pct` snapshotted at fire time (later joiners cannot retroactively change price)
-- [ ] Per-flat sign-off endpoint
-- [ ] Payout authorisation flow: system-auth (rule-check pass) + treasurer manual → single Razorpay refund/payout in sandbox → ledger entries
-
-### 4D — Two-tier flow for large jobs
-- [ ] JobCard.tier `SMALL | LARGE`
-- [ ] Milestone-based payout for LARGE
-- [ ] Defect-liability retention
-
-**Definition of done:** vendor posts offer → residents pay via Razorpay test cards → funds sit in escrow → sign-off → treasurer co-authorises → payout completes → ledger reconciles.
+**Definition of done:** a vendor publishes a card, revises it twice, and all three versions remain independently retrievable.
 
 ---
 
-## Phase 5 — Bulk-Buy Flow B (resident-initiated polls)
+## Phase 8 — Service requests and pooling
 
-**Goal:** any resident can tag a vendor and open a poll; if the vendor's minimum is met, it fires exactly like Flow A.
+**Modules:** M7 · **Frontend:** F4
 
-- [ ] `bulk-buy/` extension: `Poll` reuses the Phase 3 poll engine, adds `tagged_vendor_id` and `vendor_confirmed_minimum`
-- [ ] Vendor confirms/declines a tag request
-- [ ] On fire: reuse Flow A's booking/escrow path
-- [ ] Weekly-recurring variant of Offer (`recurring: WEEKLY`) for staples
+**Goal:** the core resident loop. A resident raises a need, neighbours join, the committee sources a vendor, the price freezes.
 
-**Definition of done:** a resident with no offer visible to them can pull a bulk-buy into existence by tagging a vendor.
+- [ ] `ServiceRequest`: society, raised-by flat, **origin** (resident or committee), category, description, window, threshold, status
+- [ ] `Participation`: request, flat, joined at, contribution, status. An opt-in record — no weight, no choice
+- [ ] Migrate the Phase 3 commitment mechanic onto these entities; retire the `Poll` naming
+- [ ] **Per-category participation threshold** as society configuration, frozen onto the request at creation
+- [ ] Below threshold at closing: pool lapses, contributions return
+- [ ] Committee assigns a vendor from the directory. No bidding
+- [ ] **Card freeze at vendor confirmation**, written to the audit chain, governing every participating flat identically
+- [ ] Committee-origin requests retain the shipped Phase 4C offer path (annual contracts, festival orders)
+- [ ] Notification fan-out: threshold reached, vendor assigned, vendor confirmed
+- [ ] Concurrency: the advisory-lock pattern from the Phase 5 double-fire fix applies to threshold evaluation
 
----
-
-## Phase 6 — Vouchers
-
-**Goal:** voucher wallet exists; used as a partial payment method in bulk-buy commitments; issued as promo (and later, in Phase 9, as lending repayment output).
-
-- [ ] `vouchers/` module: wallet, `Voucher` records with expiry
-- [ ] Bulk-buy commitment supports partial voucher redemption
-- [ ] Endpoints: read wallet, redemption is internal
-- [ ] Ledger entries: `commission_sink → voucher_pool` on issue; `voucher_pool → society_bulk_buy` on redemption
-
-**Definition of done:** a resident can pay a bulk-buy commitment partly with vouchers, partly with Razorpay.
+**Definition of done:** a resident raises "AC not cooling", two neighbours join, the threshold for that category is met, the committee assigns a vendor, the vendor confirms, and all three flats hold the identical frozen card.
 
 ---
 
-## Phase 7 — Governance and Disputes (with automated triage)
+## Phase 9 — Collection, reconciliation and the bills hub
 
-**Goal:** dispute cases flow through automated triage into committee approval; governance proposals + votes.
+**Modules:** M11, M12 (partial) · **Frontend:** F5
 
-- [ ] `governance/` module: `Proposal`, `Vote`
-- [ ] `disputes/` module:
-  - `Dispute` entity with case type
-  - **Automated triage rule engine**: categorises dispute (missed SLA, quality, payment mismatch, no-show), recommends resolution (refund X%, re-do, partial payout), routes to committee
-  - Committee accept/override endpoint
-  - Ledger entries on resolution (refund from `dispute_hold`, partial payout, etc.)
-- [ ] Dispute-hold sub-account movement on dispute open
+**Goal:** every obligation a flat owes appears in one place and can be cleared in one session.
 
-**Definition of done:** a disputed job goes into a hold, triage runs, committee resolves, funds move correctly.
+- [ ] `VirtualAccount` per flat — **attribution key only**, no role in authentication
+- [ ] Sub-ledger partition of the master account: maintenance, electricity, water, procurement escrow, events, welfare, sinking, corpus
+- [ ] Cross-pocket movement requires an explicit dual-authorised journal; no implicit sweep
+- [ ] `BankStatementLine` ingestion from CSV; match by virtual account; **unmatched credits queue for treasurer review, never auto-allocated**
+- [ ] Collection through the payment aggregator, settling to the society's account
+- [ ] **`GET /me/bills`** — the consolidated hub. Composes maintenance, utilities, procurement contributions and event charges in **one query**, not six service calls
+- [ ] Every line carries its computation basis and a link to underlying evidence
+- [ ] **`GET /me/home`** — the mobile aggregate: amount due, actions needed, joinable requests, upcoming events
+- [ ] Statement history per flat, exportable, verifiable against the audit chain
+- [ ] Arrears ageing, configurable late fees, instalment forbearance on the society's own receivable
+- [ ] Cursor pagination and `ETag` support on every list endpoint
+- [ ] Server-timing headers; p95 instrumentation per endpoint
 
----
-
-## Phase 8 — Simulation harness *(Python, offline)*
-
-**Goal:** the lending research module produces artefacts the frontend can render. Runs offline via CLI; not part of the request path.
-
-- [ ] `simulation/` Python package with `pyproject.toml`
-- [ ] `synthetic/` society generator (90 flats parameterised) — emits ground-truth labels for pool-formation and vendor-recommendation alongside the requests
-- [ ] `engine/` discrete-day loop for 3 months
-- [ ] `strategies/` for the three repayment paths
-- [ ] `analysis/sensitivity.py` + `analysis/monte_carlo.py` — parameter sweeps + N-run averaging
-- [ ] `analysis/functional.py` — runs the aggregation engine and recommender over the synthetic requests, computes **precision / recall / F1** for pool-formation and for vendor-recommendation at trust thresholds `{0.3, 0.4, 0.5, 0.6, 0.7}`; results appended under `report.json.functional`
-- [ ] `cli.py`: `python -m sim run --scenario baseline` writes `outputs/report.json` (with `functional`, `sensitivity`, `monte_carlo` sections) and PNGs
-- [ ] Six shipped scenarios (baseline, low opt-in, high default, all-maintenance, all-voucher, mixed)
-- [ ] pytest coverage on engine determinism + strategy invariants + functional-metric monotonicity (recall shouldn't grow when the threshold rises)
-
-**Definition of done:** a run of `python -m sim run --scenario baseline` writes reproducible artefacts to `outputs/`.
+**Definition of done:** a resident sees maintenance, a procurement contribution and an event charge in one payload under 500 ms p95, and clears all three in one session.
 
 ---
 
-## Phase 9 — Lending UI backing (reads simulation outputs)
+## Phase 10 — Electricity and water billing
 
-**Goal:** the backend exposes lending views built on simulation outputs. Not a live product; a research surface.
+**Modules:** M5, M6 · **Frontend:** F7
 
-- [ ] `lending/` module:
-  - `LoanRequest`, `LoanAgreement`, `RepaymentSchedule`, `MaintenanceAdjustment` entities
-  - **Hard rules enforced in code**: owner-only, 2× monthly maintenance cap, 90-day tenor, society-level monthly volume cap
-  - Read-endpoints for lending dashboards backed by `simulation/outputs/report.json`
-  - Write-endpoints (`request`, `agreement`) accept records to the UI but flag them `simulation_only=true`
-- [ ] Explicit non-production banner returned in every lending response payload for the frontend to surface
+**Goal:** the economic heart of the dissertation. Sub-metered recovery, apportioned common area, reconciled against the bulk invoice.
 
-**Definition of done:** simulated lending UI is fully backed; hard rules can be shown enforcing correctly on synthetic actions.
+- [ ] **Worker tier** — Redis-backed queue. Billing runs are long and must be restartable
+- [ ] `Meter` (flat or common), `Reading` (immutable; corrections post a reversing reading), `TariffSchedule` (JSONB, versioned by effective date), `BillingCycle`, `FlatBill`
+- [ ] Pipeline, each stage idempotent and resumable: **ingest → validate → compute → apportion → reconcile → publish**
+- [ ] Readings written to the audit chain **at capture**, before any computation
+- [ ] Validation flags negative consumption, stalled meters, rollover, out-of-bounds values. **A flagged meter halts the cycle** rather than billing a suspect figure
+- [ ] Tariff slabs, fixed charges, duty and cess applied from the schedule in force for the period
+- [ ] Common-area consumption derived as bulk less the sum of sub-meters, apportioned by area factor with deterministic rounding-residue allocation
+- [ ] Reconciliation against the licensee's bulk invoice; **variance published, not absorbed**
+- [ ] `FlatBill.computationTrace` — formula and inputs, so the resident sees the derivation
+- [ ] Configuration A (individually metered) bypasses stages 2–5: store consumer number, present bill, route through the BBPS adapter
+- [ ] **Water:** `WaterSource` across municipal, tanker and borewell; blended per-kilolitre rate per cycle, published with derivation
+- [ ] Partial sub-meter deployment: metered flats billed on measurement, unmetered on the fallback basis, basis recorded per bill, cross-subsidy reported
 
----
-
-## Phase 10 — Admin, reports, polish
-
-**Goal:** committee + treasurer surfaces are complete; AGM statement generatable; audit views ready.
-
-- [ ] `admin/` endpoints: aggregates only, never individual balances
-- [ ] Monthly financial statement generator (society-level)
-- [ ] Audit-log query endpoint with filters
-- [ ] `GET /audit/verify` endpoint surfaced to committee: recomputes the chain and reports either "chain intact through row N with tail hash …" or "first divergence at row K"
-- [ ] Reconciliation dashboard: ledger vs Razorpay daily settlement report
-
-**Definition of done:** everything a committee needs is exposed. Nothing residents shouldn't see is exposed.
+**Definition of done:** twelve months of synthetic readings produce twelve reconciled cycles; a 400-flat run completes under 60 s; any charge traces back to a reading.
 
 ---
 
-## Standing tasks (every phase)
+## Phase 11 — Events, charge sheets and settlement
 
-- Add e2e test for the phase's happy path.
-- Regenerate OpenAPI + shared types after every API change.
-- Update `SUPERVISOR.md` as each item completes.
-- Keep migrations reversible.
-- Every new endpoint has explicit `@Roles(...)` and `@SocietyScope()` where applicable.
+**Modules:** M8, M4 (remainder) · **Frontend:** F8
+
+**Goal:** close the procurement loop, and let the committee run paid community events.
+
+- [ ] `Event`: **committee-created only**. Title, descriptions, capacity, window, **per-flat opt-in charge**, concessions, and a refund policy **fixed at creation**
+- [ ] `Registration` with waitlist and automatic promotion on release
+- [ ] Collection into an event-specific sub-ledger; automatic refund on cancellation or under-subscription per the fixed policy
+- [ ] Post-event settlement reconciling collections against vendor invoices; surplus disposed of per the policy already set
+- [ ] `ChargeSheet`: vendor-submitted, itemised, matched line by line against the frozen card
+- [ ] **Automatic variance computation** per line and in total; in-card lines pass, out-of-card lines flag
+- [ ] Resident acknowledgement; dispute routes to committee adjudication with both documents as evidence
+- [ ] Settlement from the relevant sub-ledger under the Phase 6 approval ladder, less any hold-back
+- [ ] Dispute triage by category and amount
+
+**Definition of done:** a vendor submits a sheet with one out-of-card line, a resident disputes it, the committee adjudicates, and settlement reflects the decision — every step on the chain.
+
+---
+
+## Phase 12 — Treasury, audit exposure, camps and donations
+
+**Modules:** M12 (full), M13, M9, M10 · **Frontend:** F9
+
+**Goal:** the society's own corpus is managed and every claim the platform makes is independently checkable.
+
+- [ ] `FixedDeposit`: principal, rate, placed at, maturity, initiated by, approved by. **Two distinct identities**
+- [ ] Sweep rule with operating-float floor and minimum tenor; balances above the floor generate a placement proposal
+- [ ] Maturity ladder derived by query, distributing maturities across the year
+- [ ] Interest posts to society income accounts only; **invariant I4** rejects any journal crediting interest to a flat
+- [ ] ~~`GET /audit/verify` endpoint~~ — **moved to Phase 6.5** (pulled forward, supervisor suggestion). This phase assumes it already exists.
+- [ ] Scheduled verification worker, alerting on divergence (the automated counterpart to the Phase 6 on-demand endpoint)
+- [ ] Audit log read and filter endpoints
+- [ ] `HealthCamp` and `CampRegistration` — provider receives name, flat and slot only. **Invariant I5: no field capable of holding clinical information exists**
+- [ ] `DonationCampaign` and `Contribution` — internal welfare fund under dual authorisation; external pass-through recording participation only
+- [ ] Anonymity toward residents supported; anonymity toward the auditor is not
+
+**Definition of done:** the chain verifies through the API, a row tampered by raw SQL is caught at the correct sequence position, and a corpus placement requires two identities.
+
+---
+
+## Phase 13 — Simulation harness *(Python, offline)*
+
+**Modules:** — · **Frontend:** reporting surface, deferred
+
+**Goal:** the economic evaluation the dissertation cites. Rewritten — the lending scenarios are withdrawn.
+
+- [ ] 90-flat reference society, twelve-month horizon, Monte Carlo to stable intervals
+- [ ] **Bulk high-tension versus aggregate individual low-tension cost** — the principal economic result
+- [ ] Sensitivity to tariff differential, common-area load fraction, and any regulatory cap on recoverable margin
+- [ ] Aggregation saving on pooled requests by participation rate and category threshold, measured against published card rates. Isolates the volume effect, since vendors do not bid
+- [ ] Collection-rate distribution and arrears ageing under varying payment behaviour
+- [ ] Water cost volatility under seasonal tanker dependency
+- [ ] Corpus sweep yield against liquidity risk — frequency with which a laddered profile fails a seasonal call
+- [ ] Functional-accuracy block: billing correctness at slab boundaries, apportionment to rounding tolerance, idempotency, pricing-card binding, access-control matrix asserted exhaustively
+- [ ] Reproducibility: seed, parameters and timestamp written with every run
+
+**Definition of done:** `python -m sim run --scenario baseline` writes reproducible artefacts, and the bulk-tariff saving is reported with stable confidence intervals.
+
+---
+
+## Standing tasks, every phase
+
+- Regenerate `shared/openapi.json` and the typed client on any contract change; CI fails on drift
+- Every new endpoint carries a p95 measurement before the phase closes; **> 500 ms is a bug, not a tuning note**
+- Every state change that matters is on the audit chain
+- e2e tests run against real PostgreSQL, never a mock
+- Update [SUPERVISOR.md](SUPERVISOR.md) and its demo bar on the last commit of each phase
+- Any compliance invariant touched by a phase gets an explicit test asserting it still holds
