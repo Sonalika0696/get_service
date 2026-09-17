@@ -38,3 +38,8 @@ coverage/
 .agents/
 .codex/
 .gemini/
+
+# Local-only planning docs (kept locally, never committed)
+/CRITIQUE.md
+/SUPERVISOR.md
+/PRODUCT_PLAN.md
