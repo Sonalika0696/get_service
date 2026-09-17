@@ -2,16 +2,16 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { PiggyBank, Lock, Layers, ShieldCheck } from 'lucide-react';
+import { Lock, Layers, ShieldCheck } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import { Card, CardHeader, CardBody } from '@/components/ui/card';
 import { Tabs } from '@/components/ui/tabs';
 import { DataTable, type Column } from '@/components/ui/data-table';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
-import { PendingPanel } from '@/components/ui/pending-panel';
 import { AuditChainVerifier } from '@/components/treasury/audit-chain';
 import { PocketTransfersPanel } from '@/components/treasury/pocket-transfers';
+import { FixedDepositsPanel } from '@/components/treasury/fixed-deposits';
 import { PocketBars } from '@/components/charts/pocket-bars';
 import { treasury } from '@/lib/endpoints';
 import { getIdentity } from '@/lib/session';
@@ -126,16 +126,7 @@ export default function TreasuryPage() {
       {tab === 'corpus' && (
         <div className="space-y-lg">
           <PocketTransfersPanel />
-          <PendingPanel
-            icon={PiggyBank}
-            title="Fixed deposits"
-            need="GET/POST /treasury/corpus/deposits"
-            points={[
-              'Park surplus corpus into fixed deposits automatically',
-              'A maturity ladder so deposits come due through the year',
-              'Two admins must approve each placement',
-            ]}
-          />
+          <FixedDepositsPanel />
         </div>
       )}
     </>

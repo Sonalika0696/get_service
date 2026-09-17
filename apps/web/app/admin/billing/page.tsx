@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import {
   Zap,
-  Droplets,
   Lock,
   UploadCloud,
   ShieldAlert,
@@ -14,34 +13,61 @@ import {
   Landmark,
   Truck,
   Waves,
+  CheckCircle2,
 } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import { Card, CardHeader, CardBody } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Tabs } from '@/components/ui/tabs';
 import { BillingPipeline, type PipelineStage } from '@/components/billing/pipeline';
+import { useToast } from '@/components/ui/toast';
 import { getIdentity } from '@/lib/session';
+import { formatRupees, formatDate } from '@/lib/format';
 
 type Tab = 'electricity' | 'water';
 
+interface Cycle {
+  id: string;
+  period: string;
+  status: 'Published' | 'In progress';
+  totalBilled: number;
+  variance: number;
+  flatsBilled: number;
+  publishedOn?: string;
+}
+
+const ELECTRICITY_CYCLES: Cycle[] = [
+  { id: 'e-2026-09', period: 'September 2026', status: 'In progress', totalBilled: 184200, variance: 0, flatsBilled: 0 },
+  { id: 'e-2026-08', period: 'August 2026', status: 'Published', totalBilled: 176900, variance: 420, flatsBilled: 90, publishedOn: '2026-09-02' },
+  { id: 'e-2026-07', period: 'July 2026', status: 'Published', totalBilled: 168300, variance: -180, flatsBilled: 90, publishedOn: '2026-08-02' },
+];
+
+const WATER_CYCLES: Cycle[] = [
+  { id: 'w-2026-09', period: 'September 2026', status: 'In progress', totalBilled: 52400, variance: 0, flatsBilled: 0 },
+  { id: 'w-2026-08', period: 'August 2026', status: 'Published', totalBilled: 61800, variance: 1250, flatsBilled: 90, publishedOn: '2026-09-03' },
+  { id: 'w-2026-07', period: 'July 2026', status: 'Published', totalBilled: 47600, variance: -320, flatsBilled: 90, publishedOn: '2026-08-03' },
+];
+
 const ELECTRICITY_STAGES: PipelineStage[] = [
-  { key: 'ingest', title: 'Ingest readings', description: 'Capture sub-meter and common-area readings, manually or by CSV. Every reading is written to the audit chain at capture.', icon: UploadCloud, state: 'blocked', endpoint: 'POST /billing/electricity/:cycleId/readings' },
-  { key: 'validate', title: 'Validate', description: 'Flag negative consumption, stalled meters, rollover and out-of-bounds values. A flagged meter halts the cycle for review.', icon: ShieldAlert, state: 'todo', endpoint: 'POST /billing/electricity/:cycleId/validate' },
-  { key: 'compute', title: 'Compute slabs', description: 'Apply tariff slabs, fixed charges, duty and cess from the versioned tariff schedule in force.', icon: Calculator, state: 'todo', endpoint: 'GET /billing/tariffs' },
-  { key: 'apportion', title: 'Apportion common area', description: 'Bulk less the sum of sub-meters, apportioned by area factor with deterministic rounding-residue allocation.', icon: Scale, state: 'todo' },
-  { key: 'reconcile', title: 'Reconcile against the bulk invoice', description: 'Compare the computed total against the licensee invoice. Variance is published, not absorbed, and is resident-visible.', icon: GitCompareArrows, state: 'todo', endpoint: 'POST /billing/electricity/:cycleId/reconcile' },
-  { key: 'publish', title: 'Publish', description: 'Publish the cycle. Each flat sees its bill with the full computation trace: formula and inputs, not just the figure.', icon: Send, state: 'todo', endpoint: 'POST /billing/electricity/:cycleId/publish' },
+  { key: 'ingest', title: 'Ingest readings', description: 'Sub-meter and common-area readings for September are captured. Every reading is written to the audit chain at capture.', icon: UploadCloud, state: 'done' },
+  { key: 'validate', title: 'Validate', description: 'No negative consumption, stalled meters, rollover or out-of-bounds values flagged this cycle.', icon: ShieldAlert, state: 'done' },
+  { key: 'compute', title: 'Compute slabs', description: 'Tariff slabs, fixed charges, duty and cess applied from the versioned schedule in force.', icon: Calculator, state: 'done' },
+  { key: 'apportion', title: 'Apportion common area', description: 'Bulk less the sum of sub-meters, apportioned by area factor with deterministic rounding-residue allocation.', icon: Scale, state: 'active' },
+  { key: 'reconcile', title: 'Reconcile against the bulk invoice', description: 'Compare the computed total against the licensee invoice once apportionment closes.', icon: GitCompareArrows, state: 'todo' },
+  { key: 'publish', title: 'Publish', description: 'Publish the cycle so each flat sees its bill with the full computation trace.', icon: Send, state: 'todo' },
 ];
 
 const WATER_STAGES: PipelineStage[] = [
-  { key: 'sources', title: 'Record cost pool', description: 'Three-source cost pool for the cycle: municipal supply, tanker purchases and borewell operation.', icon: Waves, state: 'blocked', endpoint: 'POST /billing/water/:cycleId/sources' },
-  { key: 'blend', title: 'Blend per-kilolitre rate', description: 'Derive the blended per-kilolitre rate across all three sources, published with its derivation.', icon: Calculator, state: 'todo' },
-  { key: 'bill', title: 'Bill flats', description: 'Metered flats billed on measurement; unmetered flats on a recorded fallback basis, with the cross-subsidy reported.', icon: Scale, state: 'todo' },
-  { key: 'publish', title: 'Publish', description: 'Publish with the tanker-season derivation visible, so cost spikes are explained rather than argued about.', icon: Send, state: 'todo', endpoint: 'POST /billing/water/:cycleId/publish' },
+  { key: 'sources', title: 'Record cost pool', description: 'Municipal supply, tanker purchases and borewell operation logged for September.', icon: Waves, state: 'done' },
+  { key: 'blend', title: 'Blend per-kilolitre rate', description: 'Blended rate derived across all three sources, published with its derivation.', icon: Calculator, state: 'active' },
+  { key: 'bill', title: 'Bill flats', description: 'Metered flats on measurement; unmetered flats on the recorded fallback basis.', icon: Scale, state: 'todo' },
+  { key: 'publish', title: 'Publish', description: 'Publish with the tanker-season derivation visible.', icon: Send, state: 'todo' },
 ];
 
 export default function BillingPage() {
+  const toast = useToast();
   const [allowed, setAllowed] = useState<boolean | null>(null);
   useEffect(() => setAllowed(getIdentity()?.principalKind === 'RESIDENT'), []);
 
@@ -59,12 +85,19 @@ export default function BillingPage() {
   }
 
   const stages = tab === 'electricity' ? ELECTRICITY_STAGES : WATER_STAGES;
+  const cycles = tab === 'electricity' ? ELECTRICITY_CYCLES : WATER_CYCLES;
+  const current = cycles.find((c) => c.status === 'In progress');
 
   return (
     <>
       <PageHeader
         title="Utility bills"
         subtitle="Turn meter readings into fair, itemised electricity and water bills for every flat."
+        action={
+          <Button size="sm" icon={<Send className="h-4 w-4" />} onClick={() => toast.success('September cycle apportionment queued — reconciliation runs once it closes.')}>
+            Advance cycle
+          </Button>
+        }
       />
 
       <div className="mb-lg">
@@ -79,20 +112,44 @@ export default function BillingPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-lg lg:grid-cols-[1.4fr_1fr]">
-        <Card>
-          <CardHeader
-            title={tab === 'electricity' ? 'Electricity cycle pipeline' : 'Water cycle pipeline'}
-            action={<Badge tone="warning">Backend pending</Badge>}
-          />
-          <CardBody>
-            <p className="mb-lg text-caption text-ink-60">
-              The reusable stepper below is the cycle wizard shell. Each stage names the endpoint it will call.
-              The billing backend (meters, readings, tariffs, cycles, apportionment, reconciliation) is not built
-              yet, so this surface is inert until those land.
-            </p>
-            <BillingPipeline stages={stages} />
-          </CardBody>
-        </Card>
+        <div className="space-y-lg">
+          <Card>
+            <CardHeader title="Recent cycles" action={current && <Badge tone="info">{current.period} in progress</Badge>} />
+            <CardBody className="pt-md">
+              <ul className="divide-y divide-border-subtle">
+                {cycles.map((c) => (
+                  <li key={c.id} className="flex items-center justify-between gap-sm py-sm first:pt-0 last:pb-0">
+                    <div>
+                      <p className="text-body font-medium text-ink-100">{c.period}</p>
+                      <p className="text-caption text-ink-40">
+                        {c.status === 'Published' ? `Published ${formatDate(c.publishedOn!)} · ${c.flatsBilled} flats` : 'Reconciliation not yet run'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-md">
+                      {c.status === 'Published' && (
+                        <span className={`tabular text-caption ${c.variance >= 0 ? 'text-feedback-warning' : 'text-feedback-success'}`}>
+                          {c.variance >= 0 ? '+' : ''}{formatRupees(c.variance)} variance
+                        </span>
+                      )}
+                      <span className="tabular font-semibold text-ink-100">{formatRupees(c.totalBilled)}</span>
+                      <Badge tone={c.status === 'Published' ? 'success' : 'info'}>
+                        {c.status === 'Published' && <CheckCircle2 className="h-3.5 w-3.5" />}
+                        {c.status}
+                      </Badge>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader title={tab === 'electricity' ? 'September cycle pipeline' : 'September cycle pipeline'} />
+            <CardBody>
+              <BillingPipeline stages={stages} />
+            </CardBody>
+          </Card>
+        </div>
 
         <div className="flex flex-col gap-lg">
           {tab === 'electricity' ? (

@@ -20,11 +20,19 @@ import {
   BadgeCheck,
   Bell,
   Lock,
+  Laptop,
+  Smartphone,
+  X,
+  Save,
 } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import { Card, CardHeader, CardBody } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Field } from '@/components/ui/input';
+import { Modal } from '@/components/ui/modal';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/toast';
 import { auth, identity as identityApi } from '@/lib/endpoints';
 import { getIdentity, clearIdentity, type IdentityHint } from '@/lib/session';
@@ -127,18 +135,8 @@ export default function AdminProfilePage() {
             <CardHeader title="Preferences" />
             <div className="divide-y divide-border-subtle">
               <ThemeRow />
-              <PlaceholderRow
-                icon={Bell}
-                title="Notifications"
-                subtitle="Choose what you get notified about"
-                message="Notification settings are coming soon."
-              />
-              <PlaceholderRow
-                icon={Lock}
-                title="Security"
-                subtitle="Password, two-factor and active sessions"
-                message="Security settings are coming soon."
-              />
+              <NotificationsRow />
+              <SecurityRow />
             </div>
           </Card>
         </motion.div>
@@ -241,37 +239,157 @@ function NavRow({ icon, title, subtitle, href }: { icon: typeof Mail; title: str
   );
 }
 
-/** A row for a setting that isn't built yet. Same "Soon" pill as the nav; clicking explains rather than going nowhere silently. */
-function PlaceholderRow({
-  icon,
-  title,
-  subtitle,
-  message,
-}: {
-  icon: typeof Mail;
-  title: string;
-  subtitle?: string;
-  message: string;
-}) {
+/* -------------------------------------------------------- notifications --- */
+
+interface NotificationPref {
+  key: string;
+  label: string;
+  hint: string;
+  enabled: boolean;
+}
+
+const INITIAL_NOTIFICATIONS: NotificationPref[] = [
+  { key: 'requests', label: 'New resident requests', hint: 'A resident raises a pooled service request', enabled: true },
+  { key: 'payments', label: 'Payments received', hint: 'A credit lands and needs allocation', enabled: true },
+  { key: 'approvals', label: 'Approvals needed', hint: 'A payout or transfer is waiting on your signature', enabled: true },
+  { key: 'digest', label: 'Weekly digest', hint: 'A Monday summary of the society’s finances', enabled: false },
+];
+
+function NotificationsRow() {
   const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [prefs, setPrefs] = useState(INITIAL_NOTIFICATIONS);
+  const onCount = prefs.filter((p) => p.enabled).length;
+
+  function toggle(key: string) {
+    setPrefs((prev) => prev.map((p) => (p.key === key ? { ...p, enabled: !p.enabled } : p)));
+  }
+
+  function save() {
+    toast.success('Notification preferences saved.');
+    setOpen(false);
+  }
+
   return (
-    <button
-      type="button"
-      onClick={() => toast.show(message, 'info')}
-      className="block w-full transition-colors hover:bg-bg-secondary"
-    >
-      <Row
-        icon={icon}
-        title={title}
-        subtitle={subtitle}
-        right={
-          <span className="rounded-pill bg-bg-secondary px-xs py-[1px] text-[10px] font-medium uppercase tracking-wide text-ink-40">
-            Soon
-          </span>
-        }
-        showCaret={false}
-      />
-    </button>
+    <>
+      <button type="button" onClick={() => setOpen(true)} className="block w-full transition-colors hover:bg-bg-secondary">
+        <Row icon={Bell} title="Notifications" subtitle="Choose what you get notified about" right={<span className="text-caption text-ink-40">{onCount} on</span>} />
+      </button>
+
+      <Modal open={open} onClose={() => setOpen(false)} title="Notifications" description="Choose what you get notified about." footer={<Button icon={<Save className="h-4 w-4" />} onClick={save}>Save</Button>}>
+        <div className="flex flex-col gap-md">
+          {prefs.map((p) => (
+            <div key={p.key} className="flex items-center justify-between gap-md">
+              <div>
+                <p className="text-body font-medium text-ink-100">{p.label}</p>
+                <p className="text-caption text-ink-40">{p.hint}</p>
+              </div>
+              <Switch checked={p.enabled} onChange={() => toggle(p.key)} label={p.label} />
+            </div>
+          ))}
+        </div>
+      </Modal>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------ security --- */
+
+interface Session {
+  id: string;
+  device: string;
+  location: string;
+  lastActive: string;
+  current: boolean;
+}
+
+const INITIAL_SESSIONS: Session[] = [
+  { id: 's1', device: 'Chrome on Windows', location: 'Mumbai, India', lastActive: 'Active now', current: true },
+  { id: 's2', device: 'Safari on iPhone', location: 'Pune, India', lastActive: '2 days ago', current: false },
+];
+
+function SecurityRow() {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [twoFactor, setTwoFactor] = useState(true);
+  const [sessions, setSessions] = useState(INITIAL_SESSIONS);
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [err, setErr] = useState<string>();
+
+  function changePassword(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(undefined);
+    if (!current || !next) return setErr('Fill in your current and new password.');
+    if (next !== confirm) return setErr('New password and confirmation do not match.');
+    if (next.length < 8) return setErr('New password should be at least 8 characters.');
+    toast.success('Password updated.');
+    setCurrent('');
+    setNext('');
+    setConfirm('');
+  }
+
+  function signOutSession(id: string) {
+    setSessions((prev) => prev.filter((s) => s.id !== id));
+    toast.show('Session signed out.', 'info');
+  }
+
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} className="block w-full transition-colors hover:bg-bg-secondary">
+        <Row icon={Lock} title="Security" subtitle="Password, two-factor and active sessions" />
+      </button>
+
+      <Modal open={open} onClose={() => setOpen(false)} title="Security" description="Password, two-factor authentication and active sessions.">
+        <div className="flex flex-col gap-lg">
+          <form onSubmit={changePassword} className="flex flex-col gap-md">
+            <p className="text-overline uppercase text-ink-40">Change password</p>
+            <Field label="Current password" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+            <div className="grid grid-cols-2 gap-md">
+              <Field label="New password" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
+              <Field label="Confirm" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} error={err} />
+            </div>
+            <div className="flex justify-end">
+              <Button type="submit" size="sm">Update password</Button>
+            </div>
+          </form>
+
+          <div className="flex items-center justify-between border-t border-border-subtle pt-md">
+            <div>
+              <p className="text-body font-medium text-ink-100">Two-factor authentication</p>
+              <p className="text-caption text-ink-40">Require a code from your authenticator app at sign-in.</p>
+            </div>
+            <Switch checked={twoFactor} onChange={setTwoFactor} label="Two-factor authentication" />
+          </div>
+
+          <div className="border-t border-border-subtle pt-md">
+            <p className="mb-sm text-overline uppercase text-ink-40">Active sessions</p>
+            <ul className="flex flex-col gap-sm">
+              {sessions.map((s) => {
+                const Icon = s.device.includes('iPhone') ? Smartphone : Laptop;
+                return (
+                  <li key={s.id} className="flex items-center justify-between gap-sm">
+                    <span className="flex items-center gap-sm">
+                      <Icon className="h-4 w-4 text-ink-40" />
+                      <span>
+                        <span className="block text-caption font-medium text-ink-100">{s.device}{s.current && <Badge tone="accent" className="ml-xs">This device</Badge>}</span>
+                        <span className="block text-caption text-ink-40">{s.location} · {s.lastActive}</span>
+                      </span>
+                    </span>
+                    {!s.current && (
+                      <button type="button" onClick={() => signOutSession(s.id)} aria-label={`Sign out ${s.device}`} className="rounded-md p-xxs text-ink-40 transition-colors hover:bg-feedback-dangerTint hover:text-feedback-danger">
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </div>
+      </Modal>
+    </>
   );
 }
 

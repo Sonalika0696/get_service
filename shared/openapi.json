@@ -78,6 +78,26 @@
         ],
         "type": "object"
       },
+      "CaptureReadingDto": {
+        "properties": {
+          "billingCycleId": {
+            "description": "Optional link to the billing cycle this reading was captured for.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "capturedAt": {
+            "type": "string"
+          },
+          "value": {
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "type": "object"
+      },
       "ConfirmServiceRequestDto": {
         "properties": {
           "contribution": {
@@ -87,6 +107,27 @@
         },
         "required": [
           "contribution"
+        ],
+        "type": "object"
+      },
+      "ContributeDto": {
+        "properties": {
+          "amount": {
+            "description": "Major units (rupees), INR only — no currency field is accepted (FCRA).",
+            "minimum": 1,
+            "type": "number"
+          },
+          "anonymous": {
+            "description": "Hides the contributor from OTHER residents only — the audit chain always records them.",
+            "type": "boolean"
+          },
+          "externalReference": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount"
         ],
         "type": "object"
       },
@@ -132,6 +173,122 @@
           "occupancyId",
           "delegateUserId",
           "scope"
+        ],
+        "type": "object"
+      },
+      "CreateDonationCampaignDto": {
+        "properties": {
+          "closesAt": {
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "INTERNAL_WELFARE",
+              "EXTERNAL_PASS_THROUGH"
+            ],
+            "type": "string"
+          },
+          "opensAt": {
+            "type": "string"
+          },
+          "purpose": {
+            "description": "Bye-law purpose (INTERNAL) or the campaign's stated cause (EXTERNAL) — always required.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "recipientIssues80G": {
+            "description": "EXTERNAL only — the recipient issues 80G certificates (the platform never does).",
+            "type": "boolean"
+          },
+          "recipientOrgName": {
+            "description": "EXTERNAL only.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "recipientOrgUrl": {
+            "description": "EXTERNAL only.",
+            "format": "uri",
+            "type": "string"
+          },
+          "targetAmount": {
+            "minimum": 1,
+            "type": "number"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "title",
+          "purpose",
+          "opensAt"
+        ],
+        "type": "object"
+      },
+      "CreateHealthCampDto": {
+        "properties": {
+          "campDate": {
+            "type": "string"
+          },
+          "chargePerRegistration": {
+            "description": "Major units (rupees). 0 = free.",
+            "minimum": 0,
+            "type": "number"
+          },
+          "description": {
+            "type": "string"
+          },
+          "providerName": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "registrationClosesAt": {
+            "type": "string"
+          },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/CreateHealthCampSlotDto"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "venue": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "providerName",
+          "title",
+          "campDate",
+          "registrationClosesAt",
+          "chargePerRegistration",
+          "slots"
+        ],
+        "type": "object"
+      },
+      "CreateHealthCampSlotDto": {
+        "properties": {
+          "capacity": {
+            "minimum": 1,
+            "type": "number"
+          },
+          "endsAt": {
+            "type": "string"
+          },
+          "startsAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "startsAt",
+          "endsAt",
+          "capacity"
         ],
         "type": "object"
       },
@@ -499,6 +656,48 @@
         ],
         "type": "object"
       },
+      "CreateTariffScheduleDto": {
+        "properties": {
+          "dutyCess": {
+            "additionalProperties": true,
+            "description": "Optional duty/cess group; missing/malformed defaults to all-zero (see tariff-config.parser.ts).",
+            "type": "object"
+          },
+          "effectiveFrom": {
+            "description": "ISO date string; the tariff is \"in force\" from this date onward (see TariffScheduleService.currentFor).",
+            "type": "string"
+          },
+          "fixedCharges": {
+            "additionalProperties": true,
+            "description": "Optional flat-charge group; missing/malformed defaults to all-zero (see tariff-config.parser.ts).",
+            "type": "object"
+          },
+          "note": {
+            "maxLength": 1000,
+            "type": "string"
+          },
+          "slabs": {
+            "description": "Ordered telescoping slab array — see tariff-config.types.ts's Slab doc\ncomment. Element-level validation happens in the service via\nparseTariffConfig. `@Type(() => Object)` is REQUIRED here, not\ndecorative: without it, NestJS's global ValidationPipe\n(transform:true + transformOptions.enableImplicitConversion:true, see\nvalidation.pipe.ts) reflects this property's design:type as the bare\n`Array` constructor (TypeScript can't reflect `unknown[]`'s element\nshape) and, with no `@Type()` telling class-transformer what each\nelement actually is, coerces every element via `Array.from(element)` —\nwhich silently turns each `{upTo, rate}` slab object into `[]` (no\n`length`/iterator on a plain object) before this DTO ever reaches\nTariffScheduleService.create. `@Type(() => Object)` tells\nclass-transformer each element is a plain object, not something to be\narray-coerced, and leaves its fields untouched for parseTariffConfig\nto validate.",
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "utility": {
+            "enum": [
+              "ELECTRICITY",
+              "WATER"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "utility",
+          "effectiveFrom",
+          "slabs"
+        ],
+        "type": "object"
+      },
       "CreateVendorDto": {
         "properties": {
           "categories": {
@@ -607,6 +806,19 @@
         "type": "object"
       },
       "IngestBankStatementDto": {
+        "properties": {
+          "csv": {
+            "maxLength": 500000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "csv"
+        ],
+        "type": "object"
+      },
+      "IngestReadingsDto": {
         "properties": {
           "csv": {
             "maxLength": 500000,
@@ -750,6 +962,35 @@
         ],
         "type": "object"
       },
+      "OpenBillingCycleDto": {
+        "properties": {
+          "bulkConsumption": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "bulkInvoiceAmount": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "period": {
+            "description": "Billing period, 'YYYY-MM' — same format TariffScheduleService.currentFor and MaintenanceBillingService.generateForPeriod already use.",
+            "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+            "type": "string"
+          },
+          "utility": {
+            "enum": [
+              "ELECTRICITY",
+              "WATER"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "utility",
+          "period"
+        ],
+        "type": "object"
+      },
       "PostAdjustmentDto": {
         "properties": {
           "amount": {
@@ -770,7 +1011,9 @@
               "EVENTS",
               "WELFARE",
               "SINKING",
-              "CORPUS"
+              "CORPUS",
+              "FIXED_DEPOSIT",
+              "INTEREST_INCOME"
             ],
             "type": "string"
           },
@@ -788,7 +1031,9 @@
               "EVENTS",
               "WELFARE",
               "SINKING",
-              "CORPUS"
+              "CORPUS",
+              "FIXED_DEPOSIT",
+              "INTEREST_INCOME"
             ],
             "type": "string"
           },
@@ -803,6 +1048,34 @@
           "creditKind",
           "amount",
           "reasonCode"
+        ],
+        "type": "object"
+      },
+      "ProposeDepositDto": {
+        "properties": {
+          "bankName": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "principal": {
+            "minimum": 1,
+            "type": "number"
+          },
+          "ratePct": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "tenorDays": {
+            "minimum": 7,
+            "type": "number"
+          }
+        },
+        "required": [
+          "principal",
+          "ratePct",
+          "tenorDays",
+          "bankName"
         ],
         "type": "object"
       },
@@ -853,6 +1126,161 @@
         ],
         "type": "object"
       },
+      "ReconcileBillingCycleDto": {
+        "properties": {
+          "bulkConsumption": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "bulkInvoiceAmount": {
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "bulkInvoiceAmount"
+        ],
+        "type": "object"
+      },
+      "RecordWaterSourceDto": {
+        "properties": {
+          "billingCycleId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "cost": {
+            "description": "Cost of this source's supply in the period.",
+            "minimum": 0,
+            "type": "number"
+          },
+          "kilolitres": {
+            "description": "Volume supplied in the period, kilolitres.",
+            "minimum": 0,
+            "type": "number"
+          },
+          "kind": {
+            "enum": [
+              "MUNICIPAL",
+              "TANKER",
+              "BOREWELL"
+            ],
+            "type": "string"
+          },
+          "period": {
+            "description": "Billing period, 'YYYY-MM'.",
+            "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "kilolitres",
+          "cost",
+          "period"
+        ],
+        "type": "object"
+      },
+      "RegisterCampDto": {
+        "properties": {
+          "attendeeName": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "slotId": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "slotId",
+          "attendeeName"
+        ],
+        "type": "object"
+      },
+      "RegisterMeterDto": {
+        "properties": {
+          "consumerNumber": {
+            "description": "Config A only — the licensee consumer number for BBPS bill presentment.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "flatId": {
+            "description": "Required for kind=FLAT; must be omitted for COMMON/BULK.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "FLAT",
+              "COMMON",
+              "BULK"
+            ],
+            "type": "string"
+          },
+          "multiplier": {
+            "description": "CT/multiplier applied to raw dial deltas. Defaults to 1 (schema default) when omitted.",
+            "minimum": 1,
+            "type": "number"
+          },
+          "serial": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "utility": {
+            "enum": [
+              "ELECTRICITY",
+              "WATER"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "utility",
+          "kind",
+          "serial"
+        ],
+        "type": "object"
+      },
+      "RenewDepositDto": {
+        "properties": {
+          "ratePct": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "tenorDays": {
+            "minimum": 7,
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "RequestDisbursementDto": {
+        "properties": {
+          "amount": {
+            "minimum": 1,
+            "type": "number"
+          },
+          "campaignId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "payeeName": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "purpose": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "payeeName",
+          "purpose"
+        ],
+        "type": "object"
+      },
       "RequestOtpDto": {
         "properties": {
           "email": {
@@ -887,7 +1315,9 @@
               "EVENTS",
               "WELFARE",
               "SINKING",
-              "CORPUS"
+              "CORPUS",
+              "FIXED_DEPOSIT",
+              "INTEREST_INCOME"
             ],
             "type": "string"
           },
@@ -914,7 +1344,9 @@
               "EVENTS",
               "WELFARE",
               "SINKING",
-              "CORPUS"
+              "CORPUS",
+              "FIXED_DEPOSIT",
+              "INTEREST_INCOME"
             ],
             "type": "string"
           }
@@ -967,6 +1399,40 @@
           "lowerThreshold",
           "upperThreshold",
           "majorityFraction"
+        ],
+        "type": "object"
+      },
+      "SetTreasuryConfigDto": {
+        "properties": {
+          "defaultBankName": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "defaultRatePct": {
+            "maximum": 20,
+            "minimum": 0,
+            "type": "number"
+          },
+          "defaultTenorDays": {
+            "minimum": 7,
+            "type": "number"
+          },
+          "minTenorDays": {
+            "minimum": 7,
+            "type": "number"
+          },
+          "operatingFloatFloor": {
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "operatingFloatFloor",
+          "minTenorDays",
+          "defaultTenorDays",
+          "defaultRatePct",
+          "defaultBankName"
         ],
         "type": "object"
       },
@@ -1207,6 +1673,19 @@
           "code"
         ],
         "type": "object"
+      },
+      "WithdrawDepositDto": {
+        "properties": {
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -1225,6 +1704,106 @@
   },
   "openapi": "3.0.0",
   "paths": {
+    "/api/v1/audit/logs": {
+      "get": {
+        "operationId": "AuditController_listLogs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "actorId",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "subjectId",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "subjectType",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
+    "/api/v1/audit/logs/{sequence}": {
+      "get": {
+        "operationId": "AuditController_getLog",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sequence",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
     "/api/v1/audit/verify": {
       "get": {
         "operationId": "AuditController_verify",
@@ -1649,6 +2228,159 @@
         ]
       }
     },
+    "/api/v1/billing-cycles": {
+      "get": {
+        "operationId": "BillingCycleController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "BillingCycle"
+        ]
+      },
+      "post": {
+        "operationId": "BillingCycleController_open",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenBillingCycleDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "BillingCycle"
+        ]
+      }
+    },
+    "/api/v1/billing-cycles/{id}": {
+      "get": {
+        "operationId": "BillingCycleController_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "BillingCycle"
+        ]
+      }
+    },
+    "/api/v1/billing-cycles/{id}/reconcile": {
+      "post": {
+        "operationId": "BillingCycleController_reconcile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconcileBillingCycleDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "BillingCycle"
+        ]
+      }
+    },
+    "/api/v1/billing-cycles/{id}/run": {
+      "post": {
+        "operationId": "BillingCycleController_run",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "BillingCycle"
+        ]
+      }
+    },
     "/api/v1/bookings/{id}": {
       "get": {
         "operationId": "BookingsController_get",
@@ -2017,6 +2749,74 @@
         ]
       }
     },
+    "/api/v1/collections/arrears": {
+      "get": {
+        "operationId": "CollectionsController_arrears",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "bucket",
+            "required": false,
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Collections"
+        ]
+      }
+    },
+    "/api/v1/collections/status": {
+      "get": {
+        "operationId": "CollectionsController_status",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Collections"
+        ]
+      }
+    },
     "/api/v1/dashboard/operator": {
       "get": {
         "operationId": "DashboardController_operator",
@@ -2070,6 +2870,149 @@
         ]
       }
     },
+    "/api/v1/donation-campaigns": {
+      "get": {
+        "operationId": "DonationCampaignsController_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "ETag: computed over the exact page body — same contract as GET /pocket-transfers.",
+        "tags": [
+          "DonationCampaigns"
+        ]
+      },
+      "post": {
+        "operationId": "DonationCampaignsController_create",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDonationCampaignDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "DonationCampaigns"
+        ]
+      }
+    },
+    "/api/v1/donation-campaigns/{id}": {
+      "get": {
+        "operationId": "DonationCampaignsController_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "DonationCampaigns"
+        ]
+      }
+    },
+    "/api/v1/donation-campaigns/{id}/close": {
+      "post": {
+        "operationId": "DonationCampaignsController_close",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "DonationCampaigns"
+        ]
+      }
+    },
+    "/api/v1/donation-campaigns/{id}/contributions": {
+      "post": {
+        "operationId": "DonationCampaignsController_contribute",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContributeDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "DonationCampaigns"
+        ]
+      }
+    },
     "/api/v1/flats/{id}/virtual-account": {
       "get": {
         "operationId": "VirtualAccountsController_getForFlat",
@@ -2097,6 +3040,250 @@
         },
         "tags": [
           "VirtualAccounts"
+        ]
+      }
+    },
+    "/api/v1/health-camps": {
+      "get": {
+        "operationId": "HealthCampsController_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "ETag: computed over the exact page body — same contract as GET /pocket-transfers.",
+        "tags": [
+          "HealthCamps"
+        ]
+      },
+      "post": {
+        "operationId": "HealthCampsController_create",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateHealthCampDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "HealthCamps"
+        ]
+      }
+    },
+    "/api/v1/health-camps/process-due": {
+      "post": {
+        "operationId": "HealthCampsController_processDue",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "HealthCamps"
+        ]
+      }
+    },
+    "/api/v1/health-camps/{id}": {
+      "get": {
+        "operationId": "HealthCampsController_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "HealthCamps"
+        ]
+      }
+    },
+    "/api/v1/health-camps/{id}/cancel": {
+      "post": {
+        "operationId": "HealthCampsController_cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "HealthCamps"
+        ]
+      }
+    },
+    "/api/v1/health-camps/{id}/complete": {
+      "post": {
+        "operationId": "HealthCampsController_complete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "HealthCamps"
+        ]
+      }
+    },
+    "/api/v1/health-camps/{id}/registrations": {
+      "post": {
+        "operationId": "HealthCampsController_registerForCamp",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterCampDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "HealthCamps"
+        ]
+      }
+    },
+    "/api/v1/health-camps/{id}/registrations/{regId}/cancel": {
+      "post": {
+        "operationId": "HealthCampsController_cancelRegistration",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "regId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "HealthCamps"
+        ]
+      }
+    },
+    "/api/v1/health-camps/{id}/roster": {
+      "get": {
+        "operationId": "HealthCampsController_roster",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "HealthCamps"
         ]
       }
     },
@@ -2675,8 +3862,30 @@
             "description": ""
           }
         },
+        "summary": "Self-service profile edit. SECURITY: the phone number is a sign-in\ncredential (phone OTP), so it can NOT be changed here. Writing an\nunverified number would let anyone holding a session re-point the\naccount's OTP delivery to a phone they control, and keep signing in\nafter that session is revoked; the old `phoneVerifiedAt` would also\nstay set against a number that was never verified. A phone change must\nverify the NEW number first (dedicated flow, not built yet). Sending\nthe current phone unchanged is accepted as a no-op, so clients that\nresubmit the whole form keep working for name edits.",
         "tags": [
           "Users"
+        ]
+      }
+    },
+    "/api/v1/me/approvals": {
+      "get": {
+        "operationId": "ApprovalsController_getInbox",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Approvals"
         ]
       }
     },
@@ -2870,6 +4079,119 @@
         },
         "tags": [
           "Home"
+        ]
+      }
+    },
+    "/api/v1/meters": {
+      "get": {
+        "operationId": "MetersController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Meters"
+        ]
+      },
+      "post": {
+        "operationId": "MetersController_register",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterMeterDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Meters"
+        ]
+      }
+    },
+    "/api/v1/meters/{id}/readings": {
+      "get": {
+        "operationId": "ReadingsController_listForMeter",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Readings"
+        ]
+      },
+      "post": {
+        "operationId": "ReadingsController_capture",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaptureReadingDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Readings"
+        ]
+      }
+    },
+    "/api/v1/meters/{id}/retire": {
+      "post": {
+        "operationId": "MetersController_retire",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Meters"
         ]
       }
     },
@@ -4185,6 +5507,60 @@
         ]
       }
     },
+    "/api/v1/readings/ingest": {
+      "post": {
+        "operationId": "ReadingsController_ingest",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestReadingsDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Readings"
+        ]
+      }
+    },
+    "/api/v1/readings/{id}/reverse": {
+      "post": {
+        "operationId": "ReadingsController_reverse",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Readings"
+        ]
+      }
+    },
     "/api/v1/service-requests": {
       "get": {
         "operationId": "ServiceRequestsController_list",
@@ -4762,6 +6138,447 @@
         ]
       }
     },
+    "/api/v1/tariffs": {
+      "get": {
+        "operationId": "TariffScheduleController_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "utility",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "TariffSchedule"
+        ]
+      },
+      "post": {
+        "operationId": "TariffScheduleController_create",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTariffScheduleDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "TariffSchedule"
+        ]
+      }
+    },
+    "/api/v1/tariffs/current": {
+      "get": {
+        "operationId": "TariffScheduleController_current",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "utility",
+            "required": false,
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "TariffSchedule"
+        ]
+      }
+    },
+    "/api/v1/treasury/config": {
+      "get": {
+        "operationId": "TreasuryController_getConfig",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Treasury"
+        ]
+      },
+      "put": {
+        "operationId": "TreasuryController_setConfig",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTreasuryConfigDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Treasury"
+        ]
+      }
+    },
+    "/api/v1/treasury/deposits": {
+      "get": {
+        "operationId": "TreasuryController_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "ETag: computed over the exact page body (`{ items, nextCursor }`) — same contract as GET /pocket-transfers.",
+        "tags": [
+          "Treasury"
+        ]
+      },
+      "post": {
+        "operationId": "TreasuryController_proposeDeposit",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposeDepositDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Treasury"
+        ]
+      }
+    },
+    "/api/v1/treasury/deposits/process-maturities": {
+      "post": {
+        "operationId": "TreasuryController_processMaturities",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Treasury"
+        ]
+      }
+    },
+    "/api/v1/treasury/deposits/{id}": {
+      "get": {
+        "operationId": "TreasuryController_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Treasury"
+        ]
+      }
+    },
+    "/api/v1/treasury/deposits/{id}/authorise-placement": {
+      "post": {
+        "operationId": "TreasuryController_authorisePlacement",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Treasury"
+        ]
+      }
+    },
+    "/api/v1/treasury/deposits/{id}/cancel": {
+      "post": {
+        "operationId": "TreasuryController_cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Treasury"
+        ]
+      }
+    },
+    "/api/v1/treasury/deposits/{id}/mature": {
+      "post": {
+        "operationId": "TreasuryController_mature",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Treasury"
+        ]
+      }
+    },
+    "/api/v1/treasury/deposits/{id}/renew": {
+      "post": {
+        "operationId": "TreasuryController_renew",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenewDepositDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Treasury"
+        ]
+      }
+    },
+    "/api/v1/treasury/deposits/{id}/withdraw": {
+      "post": {
+        "operationId": "TreasuryController_withdraw",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WithdrawDepositDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Treasury"
+        ]
+      }
+    },
+    "/api/v1/treasury/ladder": {
+      "get": {
+        "operationId": "TreasuryController_ladder",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Treasury"
+        ]
+      }
+    },
+    "/api/v1/treasury/sweep/propose": {
+      "post": {
+        "operationId": "TreasuryController_sweepPropose",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Treasury"
+        ]
+      }
+    },
     "/api/v1/vendors": {
       "get": {
         "operationId": "VendorsController_list",
@@ -5124,6 +6941,189 @@
         },
         "tags": [
           "Vendors"
+        ]
+      }
+    },
+    "/api/v1/water-sources": {
+      "get": {
+        "operationId": "WaterController_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "billingCycleId",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Water"
+        ]
+      },
+      "post": {
+        "operationId": "WaterController_recordSource",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordWaterSourceDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Water"
+        ]
+      }
+    },
+    "/api/v1/welfare-disbursements": {
+      "get": {
+        "operationId": "WelfareDisbursementsController_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "ETag: computed over the exact page body — same contract as GET /pocket-transfers.",
+        "tags": [
+          "WelfareDisbursements"
+        ]
+      },
+      "post": {
+        "operationId": "WelfareDisbursementsController_request",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestDisbursementDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "WelfareDisbursements"
+        ]
+      }
+    },
+    "/api/v1/welfare-disbursements/{id}/authorise": {
+      "post": {
+        "operationId": "WelfareDisbursementsController_authorise",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "WelfareDisbursements"
+        ]
+      }
+    },
+    "/api/v1/welfare-disbursements/{id}/cancel": {
+      "post": {
+        "operationId": "WelfareDisbursementsController_cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "WelfareDisbursements"
         ]
       }
     },

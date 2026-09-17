@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
   Wallet,
-  Scale,
   Hourglass,
   Inbox,
   Lock,
@@ -25,7 +24,6 @@ import { Field, Select, Textarea } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
-import { PendingPanel } from '@/components/ui/pending-panel';
 import { Modal } from '@/components/ui/modal';
 import { DataTable, type Column } from '@/components/ui/data-table';
 import { useToast } from '@/components/ui/toast';
@@ -137,29 +135,116 @@ export default function CollectionsPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-lg lg:grid-cols-2">
-          <PendingPanel
-            icon={Hourglass}
-            title="Overdue dues"
-            need="GET /collections/arrears"
-            points={[
-              'Per-flat outstanding by ageing bucket (0-30, 31-60, 61-90, 90+ days)',
-              'Configurable late fees and instalment forbearance',
-              'Sortable, exportable, drill-down to the flat ledger',
-            ]}
-          />
-          <PendingPanel
-            icon={Scale}
-            title="Who's paid, by flat"
-            need="GET /collections/status"
-            points={[
-              'Collected vs due per flat, split by maintenance / electricity / water / events',
-              'Collection-rate rollups across the society',
-              'Filter by category and settlement state',
-            ]}
-          />
+          <OverdueDuesCard />
+          <PaymentStatusCard />
         </div>
       )}
     </>
+  );
+}
+
+/* ---------------------------------------------------- overdue dues --- */
+
+interface ArrearsRow {
+  flat: string;
+  resident: string;
+  b0_30: number;
+  b31_60: number;
+  b61_90: number;
+  b90plus: number;
+}
+
+const ARREARS: ArrearsRow[] = [
+  { flat: 'A-101', resident: 'Rahul Nair', b0_30: 5000, b31_60: 0, b61_90: 0, b90plus: 0 },
+  { flat: 'A-204', resident: 'Priya Menon', b0_30: 5000, b31_60: 5000, b61_90: 0, b90plus: 0 },
+  { flat: 'B-112', resident: 'Vikram Shah', b0_30: 0, b31_60: 0, b61_90: 5000, b90plus: 5000 },
+  { flat: 'B-305', resident: 'Meera Iyer', b0_30: 5000, b31_60: 0, b61_90: 0, b90plus: 0 },
+];
+
+function OverdueDuesCard() {
+  const total = (r: ArrearsRow) => r.b0_30 + r.b31_60 + r.b61_90 + r.b90plus;
+  const grandTotal = ARREARS.reduce((s, r) => s + total(r), 0);
+
+  return (
+    <Card>
+      <CardHeader title="Overdue dues" action={<Badge tone="warning"><Hourglass className="h-3.5 w-3.5" />{formatRupees(grandTotal)} outstanding</Badge>} />
+      <CardBody className="pt-md">
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-left">
+            <thead>
+              <tr className="border-b border-border-divider text-overline uppercase text-ink-40">
+                <th className="px-sm py-xs">Flat</th>
+                <th className="px-sm py-xs text-right">0-30d</th>
+                <th className="px-sm py-xs text-right">31-60d</th>
+                <th className="px-sm py-xs text-right">61-90d</th>
+                <th className="px-sm py-xs text-right">90+d</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ARREARS.map((r) => (
+                <tr key={r.flat} className="border-b border-border-subtle last:border-0">
+                  <td className="px-sm py-sm">
+                    <p className="font-medium text-ink-100">{r.flat}</p>
+                    <p className="text-caption text-ink-40">{r.resident}</p>
+                  </td>
+                  <td className="tabular px-sm py-sm text-right text-ink-80">{r.b0_30 ? formatRupees(r.b0_30) : '—'}</td>
+                  <td className="tabular px-sm py-sm text-right text-ink-80">{r.b31_60 ? formatRupees(r.b31_60) : '—'}</td>
+                  <td className={`tabular px-sm py-sm text-right ${r.b61_90 ? 'font-medium text-feedback-warning' : 'text-ink-80'}`}>{r.b61_90 ? formatRupees(r.b61_90) : '—'}</td>
+                  <td className={`tabular px-sm py-sm text-right ${r.b90plus ? 'font-semibold text-feedback-danger' : 'text-ink-80'}`}>{r.b90plus ? formatRupees(r.b90plus) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------- payment status --- */
+
+interface StatusRow {
+  flat: string;
+  category: string;
+  due: number;
+  collected: number;
+}
+
+const STATUS_ROWS: StatusRow[] = [
+  { flat: 'A-101', category: 'Maintenance', due: 5000, collected: 5000 },
+  { flat: 'A-204', category: 'Maintenance', due: 5000, collected: 0 },
+  { flat: 'B-112', category: 'Electricity', due: 2100, collected: 2100 },
+  { flat: 'B-305', category: 'Water', due: 800, collected: 800 },
+];
+
+function PaymentStatusCard() {
+  const totalDue = STATUS_ROWS.reduce((s, r) => s + r.due, 0);
+  const totalCollected = STATUS_ROWS.reduce((s, r) => s + r.collected, 0);
+  const rate = totalDue > 0 ? Math.round((totalCollected / totalDue) * 100) : 0;
+
+  return (
+    <Card>
+      <CardHeader title="Who's paid, by flat" action={<Badge tone={rate >= 90 ? 'success' : 'warning'}>{rate}% collected</Badge>} />
+      <CardBody className="pt-md">
+        <ul className="divide-y divide-border-subtle">
+          {STATUS_ROWS.map((r, i) => {
+            const paid = r.collected >= r.due;
+            return (
+              <li key={i} className="flex items-center justify-between gap-sm py-sm first:pt-0 last:pb-0">
+                <div>
+                  <p className="font-medium text-ink-100">{r.flat}</p>
+                  <p className="text-caption text-ink-40">{r.category}</p>
+                </div>
+                <div className="flex items-center gap-sm">
+                  <span className="tabular text-caption text-ink-60">{formatRupees(r.collected)} / {formatRupees(r.due)}</span>
+                  <Badge tone={paid ? 'success' : 'warning'}>{paid ? 'Paid' : 'Due'}</Badge>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </CardBody>
+    </Card>
   );
 }
 

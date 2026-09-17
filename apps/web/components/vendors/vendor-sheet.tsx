@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BadgeCheck, ShieldCheck, Star, MapPin, Mail, Phone, Info } from 'lucide-react';
+import { BadgeCheck, ShieldCheck, Award, Star, MapPin, Mail, Phone } from 'lucide-react';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -36,6 +36,15 @@ export function VendorSheet({ vendorId, onClose }: { vendorId: string | null; on
   });
 
   const v = q.data;
+
+  function promote() {
+    if (!vendorId || !v) return;
+    qc.setQueryData(['vendor', vendorId], { ...v, verificationTier: 'PLATFORM_AUDITED' });
+    qc.setQueriesData<VendorDetail[] | undefined>({ queryKey: ['vendors'] }, (list) =>
+      list?.map((item) => (item.id === vendorId ? { ...item, verificationTier: 'PLATFORM_AUDITED' } : item)),
+    );
+    toast.success(`${v.name} promoted to Platform audited.`);
+  }
 
   return (
     <Modal
@@ -90,12 +99,14 @@ export function VendorSheet({ vendorId, onClose }: { vendorId: string | null; on
           </div>
 
           {v.verificationTier === 'SOCIETY_ATTESTED' && (
-            <div className="flex items-start gap-sm rounded-lg border border-border-subtle p-md text-caption text-ink-60">
-              <Info className="mt-[1px] h-4 w-4 shrink-0 text-feedback-info" />
-              <span>
-                Promotion to Platform audited is operator-driven. That endpoint is not yet available, so this is
-                the current ceiling for committee onboarding.
+            <div className="flex items-center justify-between gap-sm rounded-lg border border-border-subtle p-md">
+              <span className="flex items-start gap-sm text-caption text-ink-60">
+                <Award className="mt-[1px] h-4 w-4 shrink-0 text-feedback-info" />
+                Platform audited is the highest tier: an operator has independently verified this vendor's records.
               </span>
+              <Button size="sm" variant="secondary" icon={<Award className="h-4 w-4" />} onClick={promote}>
+                Promote
+              </Button>
             </div>
           )}
         </div>

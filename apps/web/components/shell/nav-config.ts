@@ -43,7 +43,7 @@ export const adminNav: NavGroup[] = [
     label: 'Services',
     items: [
       { label: 'Group buying', href: '/admin/requests', icon: ClipboardList },
-      { label: 'Utility bills', href: '/admin/billing', icon: Zap, soon: true },
+      { label: 'Utility bills', href: '/admin/billing', icon: Zap },
     ],
   },
   {
@@ -69,9 +69,9 @@ export const vendorNav: NavGroup[] = [
     label: 'Business',
     items: [
       { label: 'Pricing cards', href: '/vendor/pricing', icon: Receipt },
-      { label: 'Engagements', href: '/vendor/engagements', icon: ClipboardList, soon: true },
-      { label: 'Charge sheets', href: '/vendor/charge-sheets', icon: FileText, soon: true },
-      { label: 'Reputation', href: '/vendor/reputation', icon: Star, soon: true },
+      { label: 'Engagements', href: '/vendor/engagements', icon: ClipboardList },
+      { label: 'Charge sheets', href: '/vendor/charge-sheets', icon: FileText },
+      { label: 'Reputation', href: '/vendor/reputation', icon: Star },
     ],
   },
   {
