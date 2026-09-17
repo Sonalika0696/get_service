@@ -245,13 +245,26 @@ export class PaymentsService {
    * RAZORPAY_ENABLED) but deliberately posts nothing to the ledger — see
    * class doc comment.
    */
-  async refund(societyId: string, id: string): Promise<RefundInitiatedResult> {
+  async refund(societyId: string, id: string, amountRupees?: number | Prisma.Decimal): Promise<RefundInitiatedResult> {
     const payment = await this.get(societyId, id);
     if (payment.status !== PaymentStatus.CAPTURED || !payment.paymentId) {
       throw new BadRequestException(`Payment ${id} is not in a refundable state (status=${payment.status})`);
     }
 
-    const refund = await this.razorpay.refund({ paymentId: payment.paymentId, amount: rupeesToPaise(payment.amount) });
+    // Optional partial amount, for fixed-at-creation refund policies (e.g. an
+    // event's 50% withdrawal refund). Still ONE refund per Payment in v1: the
+    // refund.processed webhook reverses exactly the refunded amount, and the
+    // payment then becomes REFUNDED, so a second refund is rejected above.
+    let refundAmount: number | Prisma.Decimal = payment.amount;
+    if (amountRupees !== undefined) {
+      const requested = new Decimal(amountRupees.toString());
+      if (requested.lessThanOrEqualTo(0) || requested.greaterThan(payment.amount)) {
+        throw new BadRequestException(`Refund amount must be greater than 0 and at most the captured amount (${payment.amount.toString()})`);
+      }
+      refundAmount = requested;
+    }
+
+    const refund = await this.razorpay.refund({ paymentId: payment.paymentId, amount: rupeesToPaise(refundAmount) });
 
     return {
       refundId: refund.id,
