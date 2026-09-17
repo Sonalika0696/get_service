@@ -5,11 +5,25 @@ import type { Server } from 'socket.io';
 export const DOMAIN_EVENT_NAME = 'domain-event';
 
 /**
- * Discriminator values emitted today. Phase 9 (bills) will add its own
- * `bill.*` kinds down `emitToUser` — see that method's doc comment — without
- * needing any change here.
+ * Discriminator values emitted today. Phase 9.2 (maintenance billing) adds
+ * `bill.published` (MaintenanceBillingService.generateForPeriod, post-commit,
+ * pushed to the flat's primary ratified resident) and `bill.paid`
+ * (PaymentsService.applyCapture's MaintenanceCharge branch, post-commit,
+ * same resident) down `emitToUser` — see that method's doc comment.
+ * `bill.updated` is reserved for a future charge-mutation push (e.g. a
+ * late-fee accrual pass or a waiver) — nothing emits it yet.
  */
-export type DomainEventType = 'service_request.created' | 'service_request.pooled' | 'service_request.assigned' | 'service_request.confirmed' | 'event.created' | 'event.fired' | 'event.expired';
+export type DomainEventType =
+  | 'service_request.created'
+  | 'service_request.pooled'
+  | 'service_request.assigned'
+  | 'service_request.confirmed'
+  | 'event.created'
+  | 'event.fired'
+  | 'event.expired'
+  | 'bill.published'
+  | 'bill.paid'
+  | 'bill.updated';
 
 export interface DomainEventEnvelope<T = unknown> {
   type: DomainEventType | string;

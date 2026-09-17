@@ -24,6 +24,7 @@ import { LedgerModule } from './modules/ledger/ledger.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
 import { BulkBuyModule } from './modules/bulk-buy/bulk-buy.module.js';
 import { ServiceRequestsModule } from './modules/service-requests/service-requests.module.js';
+import { MaintenanceModule } from './modules/maintenance/maintenance.module.js';
 import { OperatorModule } from './modules/operator/operator.module.js';
 import { VirtualAccountsModule } from './modules/virtual-accounts/virtual-accounts.module.js';
 import { SocietyModule } from './modules/society/society.module.js';
@@ -69,6 +70,7 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     PaymentsModule,
     BulkBuyModule,
     ServiceRequestsModule,
+    MaintenanceModule,
     OperatorModule,
     VirtualAccountsModule,
     SocietyModule,

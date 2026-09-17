@@ -3,10 +3,27 @@ import { PrismaService } from '../../infra/prisma/prisma.service.js';
 import { RazorpayService } from '../../infra/razorpay/razorpay.service.js';
 import { LedgerService } from '../ledger/ledger.service.js';
 import { IdempotencyService } from '../ledger/idempotency.service.js';
-import { AccountKind, CommitmentStatus, PaymentStatus } from '../../generated/prisma/enums.js';
-import type { Prisma } from '../../generated/prisma/client.js';
+import { RealtimeService } from '../realtime/realtime.service.js';
+import { AccountKind, CommitmentStatus, MaintenanceChargeStatus, RatificationStatus, PaymentStatus } from '../../generated/prisma/enums.js';
+import { Prisma } from '../../generated/prisma/client.js';
 import type { PaymentModel } from '../../generated/prisma/models.js';
 import type { CreateOrderDto } from './dto/create-order.dto.js';
+
+type Decimal = Prisma.Decimal;
+const Decimal = Prisma.Decimal;
+
+/**
+ * Phase 9.2 — captured inside applyCapture's transaction (when the branch
+ * fires) and pushed AFTER handleWebhook's transaction commits, exactly like
+ * ServiceRequestsService's PendingServiceRequestNotification pattern: the
+ * DB write and the best-effort push are never in the same unit of work.
+ */
+interface PendingBillPaidPush {
+  residentId: string;
+  chargeId: string;
+  amount: string;
+  status: MaintenanceChargeStatus;
+}
 
 export interface CreateOrderResult {
   orderId: string;
@@ -61,6 +78,7 @@ export class PaymentsService {
     private readonly razorpay: RazorpayService,
     private readonly ledger: LedgerService,
     private readonly idempotency: IdempotencyService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   async createOrder(societyId: string, residentId: string, idempotencyKey: string, dto: CreateOrderDto): Promise<CreateOrderResult> {
@@ -182,6 +200,12 @@ export class PaymentsService {
       throw new BadRequestException('Webhook payload missing event id');
     }
 
+    // Set inside the tx below only when applyCapture's MaintenanceCharge
+    // branch actually advances a charge — see PendingBillPaidPush's doc
+    // comment. Stays null on a replayed event (idempotency.runOnce skips
+    // running `fn` entirely) or a BULK_BUY capture, so no accidental push.
+    let pendingBillPush: PendingBillPaidPush | null = null;
+
     const { body } = await this.idempotency.runOnce<{ received: boolean }>('razorpay:webhook', eventId, null, async (tx) => {
       await tx.webhookEvent.create({
         data: { eventId, type: rawEvent.event ?? 'unknown', payload: rawEvent as unknown as Prisma.InputJsonValue },
@@ -190,7 +214,7 @@ export class PaymentsService {
       switch (rawEvent.event) {
         case 'payment.captured':
         case 'order.paid':
-          await this.applyCapture(tx, rawEvent);
+          pendingBillPush = await this.applyCapture(tx, rawEvent);
           break;
         case 'refund.processed':
           await this.applyRefund(tx, rawEvent);
@@ -201,10 +225,29 @@ export class PaymentsService {
 
       return { status: 200, body: { received: true } };
     });
+
+    // Post-commit, best-effort — the capture (and, if applicable, the
+    // MaintenanceCharge advance) is already durably committed by this
+    // point; this push is a pure convenience on top of it, never a
+    // precondition — mirrors ServiceRequestsService.pushRealtime's
+    // placement exactly.
+    if (pendingBillPush) {
+      await this.pushBillPaid(pendingBillPush);
+    }
+
     return body;
   }
 
-  private async applyCapture(tx: Prisma.TransactionClient, rawEvent: RazorpayWebhookEvent): Promise<void> {
+  /**
+   * Phase 9.2 (decision #3): branches on `payment.linkedEntityType`. A
+   * `'MaintenanceCharge'`-linked payment credits AccountKind.MAINTENANCE
+   * (not BULK_BUY) and, in this SAME tx, advances the linked
+   * MaintenanceCharge (see advanceMaintenanceCharge). Every other
+   * linkedEntityType (in particular `'Commitment'`, bulk-buy's own) is
+   * UNTOUCHED — still posts to BULK_BUY exactly as before, byte-identical
+   * to the pre-Phase-9.2 behaviour.
+   */
+  private async applyCapture(tx: Prisma.TransactionClient, rawEvent: RazorpayWebhookEvent): Promise<PendingBillPaidPush | null> {
     const paymentEntity = rawEvent.payload?.payment?.entity;
     const orderId = paymentEntity?.order_id;
     const razorpayPaymentId = paymentEntity?.id;
@@ -223,15 +266,16 @@ export class PaymentsService {
     // `order.paid` for the same capture, as two events with two different
     // ids, so IdempotencyService.runOnce (keyed on event.id) does not catch
     // this pair — without this check the second event would credit
-    // BULK_BUY a second time for money that only moved once. Whichever of
-    // the two capture-type events arrives first does the work; the other is
-    // a verified no-op, regardless of arrival order.
+    // BULK_BUY/MAINTENANCE a second time for money that only moved once.
+    // Whichever of the two capture-type events arrives first does the work;
+    // the other is a verified no-op, regardless of arrival order.
     if (payment.status === PaymentStatus.CAPTURED) {
       this.logger.log(`Ignoring duplicate capture event for already-captured Payment ${payment.id} (order ${orderId}) — no second ledger entry posted.`);
-      return;
+      return null;
     }
 
     const amountRupees = amountPaise / 100;
+    const isMaintenance = payment.linkedEntityType === 'MaintenanceCharge' && Boolean(payment.linkedEntityId);
 
     await tx.payment.update({
       where: { id: payment.id },
@@ -242,7 +286,7 @@ export class PaymentsService {
       {
         societyId: payment.societyId,
         debitKind: AccountKind.EXTERNAL,
-        creditKind: AccountKind.BULK_BUY,
+        creditKind: isMaintenance ? AccountKind.MAINTENANCE : AccountKind.BULK_BUY,
         amount: amountRupees,
         reasonCode: 'PAYMENT_CAPTURED',
         linkedEntityType: 'Payment',
@@ -257,15 +301,87 @@ export class PaymentsService {
     // minimal and guarded: updateMany + a PENDING-only where clause is a
     // silent no-op for every non-bulk-buy Payment (no Commitment row to
     // match) and can't clobber a Commitment that's already FUNDED or was
-    // CANCELLED out from under it.
+    // CANCELLED out from under it. UNCHANGED from pre-Phase-9.2 — a
+    // MaintenanceCharge-linked payment never matches this where clause.
     if (payment.linkedEntityType === 'Commitment' && payment.linkedEntityId) {
       await tx.commitment.updateMany({
         where: { id: payment.linkedEntityId, status: CommitmentStatus.PENDING },
         data: { status: CommitmentStatus.FUNDED },
       });
     }
+
+    if (isMaintenance) {
+      return this.advanceMaintenanceCharge(tx, payment.linkedEntityId as string, amountRupees);
+    }
+    return null;
   }
 
+  /**
+   * PENDING/PARTIAL -> PARTIAL/PAID hook, mirrored on the Commitment->FUNDED
+   * hook's guarded-updateMany style above: `paidAmount` is incremented by
+   * this capture's amount, and status flips to PAID once
+   * `paidAmount >= amount + lateFeeAccrued`, else PARTIAL. The updateMany's
+   * `status: { in: [PENDING, PARTIAL] }` guard means a charge that's
+   * somehow already PAID/WAIVED is left untouched (defense in depth on top
+   * of the payment-level CAPTURED guard above, which is what actually
+   * prevents a double-apply in practice). Returns a push descriptor for the
+   * caller's post-commit `bill.paid` emit, or null if there's nothing to
+   * push (missing charge row, or the guard didn't match).
+   */
+  private async advanceMaintenanceCharge(tx: Prisma.TransactionClient, chargeId: string, amountRupees: number): Promise<PendingBillPaidPush | null> {
+    const charge = await tx.maintenanceCharge.findUnique({ where: { id: chargeId } });
+    if (!charge) {
+      this.logger.warn(`payment.captured linked to missing MaintenanceCharge ${chargeId} — MAINTENANCE ledger already credited, but no charge row to advance`);
+      return null;
+    }
+
+    const newPaidAmount = charge.paidAmount.plus(amountRupees);
+    const totalDue = charge.amount.plus(charge.lateFeeAccrued);
+    const newStatus = newPaidAmount.greaterThanOrEqualTo(totalDue) ? MaintenanceChargeStatus.PAID : MaintenanceChargeStatus.PARTIAL;
+
+    const result = await tx.maintenanceCharge.updateMany({
+      where: { id: chargeId, status: { in: [MaintenanceChargeStatus.PENDING, MaintenanceChargeStatus.PARTIAL] } },
+      data: { paidAmount: newPaidAmount, status: newStatus },
+    });
+    if (result.count === 0) {
+      this.logger.warn(`MaintenanceCharge ${chargeId} was not PENDING/PARTIAL when its payment captured — paidAmount/status not advanced (status=${charge.status})`);
+      return null;
+    }
+
+    const occupancy = await tx.occupancy.findFirst({
+      where: { flatId: charge.flatId, tenureEndedAt: null, ratificationStatus: RatificationStatus.RATIFIED },
+      orderBy: { tenureStartedAt: 'asc' },
+      select: { userId: true },
+    });
+    if (!occupancy) {
+      this.logger.warn(`No ratified resident found for flat ${charge.flatId} — bill.paid not pushed for charge ${chargeId}`);
+      return null;
+    }
+
+    return { residentId: occupancy.userId, chargeId, amount: newPaidAmount.toString(), status: newStatus };
+  }
+
+  /** Post-commit, best-effort `bill.paid` push — see PendingBillPaidPush's doc comment for why this never runs inside the webhook's own tx. */
+  private async pushBillPaid(pending: PendingBillPaidPush): Promise<void> {
+    try {
+      await this.realtime.emitToUser(pending.residentId, 'bill.paid', {
+        chargeId: pending.chargeId,
+        amount: pending.amount,
+        status: pending.status,
+        kind: 'MAINTENANCE',
+      });
+    } catch (error) {
+      this.logger.error(`Post-commit bill.paid push failed for charge ${pending.chargeId} (payment already captured)`, error instanceof Error ? error.stack : String(error));
+    }
+  }
+
+  /**
+   * Phase 9.2 (decision #3): same branch as applyCapture — a
+   * `'MaintenanceCharge'`-linked payment reverses AccountKind.MAINTENANCE
+   * (not BULK_BUY) and, in this SAME tx, reverts the linked charge's
+   * paidAmount/status. Every other linkedEntityType is UNTOUCHED — still
+   * reverses BULK_BUY exactly as before.
+   */
   private async applyRefund(tx: Prisma.TransactionClient, rawEvent: RazorpayWebhookEvent): Promise<void> {
     const refundEntity = rawEvent.payload?.refund?.entity;
     const razorpayPaymentId = refundEntity?.payment_id;
@@ -291,6 +407,7 @@ export class PaymentsService {
     }
 
     const amountRupees = amountPaise / 100;
+    const isMaintenance = payment.linkedEntityType === 'MaintenanceCharge' && Boolean(payment.linkedEntityId);
 
     await tx.payment.update({
       where: { id: payment.id },
@@ -300,7 +417,7 @@ export class PaymentsService {
     await this.ledger.post(
       {
         societyId: payment.societyId,
-        debitKind: AccountKind.BULK_BUY,
+        debitKind: isMaintenance ? AccountKind.MAINTENANCE : AccountKind.BULK_BUY,
         creditKind: AccountKind.EXTERNAL,
         amount: amountRupees,
         reasonCode: 'PAYMENT_REFUNDED',
@@ -309,6 +426,31 @@ export class PaymentsService {
       },
       tx,
     );
+
+    if (isMaintenance) {
+      await this.revertMaintenanceCharge(tx, payment.linkedEntityId as string, amountRupees);
+    }
+  }
+
+  /** Symmetric reversal of advanceMaintenanceCharge — decrements paidAmount (floored at 0) and steps status back down; never re-marks PAID. */
+  private async revertMaintenanceCharge(tx: Prisma.TransactionClient, chargeId: string, amountRupees: number): Promise<void> {
+    const charge = await tx.maintenanceCharge.findUnique({ where: { id: chargeId } });
+    if (!charge) {
+      this.logger.warn(`refund.processed linked to missing MaintenanceCharge ${chargeId} — MAINTENANCE ledger already reversed, but no charge row to revert`);
+      return;
+    }
+
+    const totalDue = charge.amount.plus(charge.lateFeeAccrued);
+    const newPaidAmount = Decimal.max(0, charge.paidAmount.minus(amountRupees));
+    const newStatus = newPaidAmount.lessThanOrEqualTo(0) ? MaintenanceChargeStatus.PENDING : newPaidAmount.lessThan(totalDue) ? MaintenanceChargeStatus.PARTIAL : charge.status;
+
+    const result = await tx.maintenanceCharge.updateMany({
+      where: { id: chargeId, status: { in: [MaintenanceChargeStatus.PARTIAL, MaintenanceChargeStatus.PAID] } },
+      data: { paidAmount: newPaidAmount, status: newStatus },
+    });
+    if (result.count === 0) {
+      this.logger.warn(`MaintenanceCharge ${chargeId} was not PARTIAL/PAID when its payment refunded — paidAmount/status not reverted (status=${charge.status})`);
+    }
   }
 }
 
