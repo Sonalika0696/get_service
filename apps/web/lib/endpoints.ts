@@ -1,9 +1,15 @@
 import { api } from './api';
 import type {
   AccountBalance,
+  AllocateBankStatementLineInput,
   ApprovalConfig,
   ApproveVendorResult,
   AuditVerifyResult,
+  BankStatementIngestResult,
+  BankStatementLineDetail,
+  BankStatementLinesPage,
+  CashflowRange,
+  CashflowSeries,
   CreateOfferInput,
   CreatePricingCardInput,
   CreatePricingLineInput,
@@ -15,7 +21,10 @@ import type {
   OfferStatus,
   OfficerIdentity,
   OperatorDashboardKpis,
+  PocketTransferDetail,
+  PocketTransferPage,
   PricingCardDetail,
+  RequestTransferInput,
   ResidentIdentity,
   ResidentPollDetail,
   ReconciliationReport,
@@ -169,6 +178,43 @@ export const collections = {
     api.get<ReconciliationReport>(`/ledger/reconciliation${date ? `?date=${date}` : ''}`),
 };
 
+/* ----------------------------------- bank statements (Phase 9.5) --- */
+
+export const bankStatements = {
+  /** Body is a raw CSV string: header `valuedate,amount,narration,reference`. Partial-success import. */
+  ingest: (csv: string) => api.post<BankStatementIngestResult>('/bank-statements/ingest', { csv }),
+  lines: (params?: { status?: string; cursor?: string; limit?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    if (params?.cursor) qs.set('cursor', params.cursor);
+    if (params?.limit) qs.set('limit', params.limit);
+    const s = qs.toString();
+    return api.get<BankStatementLinesPage>(`/bank-statements/lines${s ? `?${s}` : ''}`);
+  },
+  allocate: (id: string, input: AllocateBankStatementLineInput) =>
+    api.post<BankStatementLineDetail>(`/bank-statements/lines/${id}/allocate`, input),
+  ignore: (id: string) => api.post<BankStatementLineDetail>(`/bank-statements/lines/${id}/ignore`),
+};
+
+/* ----------------------------------- pocket transfers (Phase 9.6) --- */
+
+export const pocketTransfers = {
+  /** Opens a dual-authorised cross-pocket transfer request. */
+  request: (input: RequestTransferInput) => api.post<PocketTransferDetail>('/pocket-transfers', input),
+  /** Adds the caller's authorisation; the backend executes it once enough distinct officers have signed. */
+  authorise: (id: string) => api.post<PocketTransferDetail>(`/pocket-transfers/${id}/authorise`),
+  cancel: (id: string) => api.post<PocketTransferDetail>(`/pocket-transfers/${id}/cancel`),
+  list: (params?: { status?: string; cursor?: string; limit?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    if (params?.cursor) qs.set('cursor', params.cursor);
+    if (params?.limit) qs.set('limit', params.limit);
+    const s = qs.toString();
+    return api.get<PocketTransferPage>(`/pocket-transfers${s ? `?${s}` : ''}`);
+  },
+  get: (id: string) => api.get<PocketTransferDetail>(`/pocket-transfers/${id}`),
+};
+
 /* -------------------------------------------- governance (M14) --- */
 
 export const governance = {
@@ -187,6 +233,8 @@ export const treasury = {
   ledger: () => api.get<LedgerResponse>('/ledger'),
   /** Re-verify the hash-chained audit log end to end (any resident, society-scoped). */
   verifyChain: () => api.get<AuditVerifyResult>('/audit/verify'),
+  /** Dated income/expense/net timeseries (COMMITTEE). */
+  cashflow: (range?: CashflowRange) => api.get<CashflowSeries>(`/ledger/cashflow${range ? `?range=${range}` : ''}`),
 };
 
 export type { AccountBalance };

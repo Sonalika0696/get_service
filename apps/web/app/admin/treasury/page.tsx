@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { PiggyBank, ArrowLeftRight, Lock, Layers, ShieldCheck } from 'lucide-react';
+import { PiggyBank, Lock, Layers, ShieldCheck } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import { Card, CardHeader, CardBody } from '@/components/ui/card';
 import { Tabs } from '@/components/ui/tabs';
@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PendingPanel } from '@/components/ui/pending-panel';
 import { AuditChainVerifier } from '@/components/treasury/audit-chain';
+import { PocketTransfersPanel } from '@/components/treasury/pocket-transfers';
 import { PocketBars } from '@/components/charts/pocket-bars';
 import { treasury } from '@/lib/endpoints';
 import { getIdentity } from '@/lib/session';
@@ -123,7 +124,8 @@ export default function TreasuryPage() {
       )}
 
       {tab === 'corpus' && (
-        <div className="grid grid-cols-1 gap-lg lg:grid-cols-2">
+        <div className="space-y-lg">
+          <PocketTransfersPanel />
           <PendingPanel
             icon={PiggyBank}
             title="Fixed deposits"
@@ -132,16 +134,6 @@ export default function TreasuryPage() {
               'Park surplus corpus into fixed deposits automatically',
               'A maturity ladder so deposits come due through the year',
               'Two admins must approve each placement',
-            ]}
-          />
-          <PendingPanel
-            icon={ArrowLeftRight}
-            title="Move money between funds"
-            need="POST /ledger/journal (two approvals)"
-            points={[
-              'Transfer between funds (e.g. operating to sinking)',
-              'Requires two different admins to approve before it goes through',
-              'The single-admin adjustment tool exists; the two-approval transfer is not built yet',
             ]}
           />
         </div>

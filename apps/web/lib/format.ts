@@ -48,6 +48,15 @@ const ACCOUNT_LABELS: Record<string, string> = {
   RETENTION: 'Retention held',
   DISPUTE: 'Dispute hold',
   EXTERNAL: 'Bank / external',
+  // Phase 9.1 sub-ledger pockets — a bank-statement credit or a cross-pocket
+  // transfer targets one of these seven; see lib/pocket.ts POCKET_KINDS.
+  MAINTENANCE: 'Maintenance fund',
+  ELECTRICITY: 'Electricity fund',
+  WATER: 'Water fund',
+  EVENTS: 'Events fund',
+  WELFARE: 'Welfare fund',
+  SINKING: 'Sinking fund',
+  CORPUS: 'Corpus fund',
 };
 
 /** Human label for a ledger account kind. */

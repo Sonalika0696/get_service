@@ -87,8 +87,9 @@ export default function LoginPage() {
 /* ------------------------------------------------- dev quick sign-in --- */
 
 const DEV_ACCOUNTS = [
-  { label: 'Admin', caption: 'Full access', email: 'committee@test-society.local', icon: Building2 },
-  { label: 'Vendor', caption: 'CoolBreeze AC Services', email: 'vendor@coolbreeze.local', icon: Store },
+  { label: 'Admin', caption: 'Committee (Rajesh Kumar)', email: 'rajesh.kumar@gmail.com', icon: Building2 },
+  { label: 'Vendor', caption: 'CoolBreeze AC Services', email: 'vendor.coolbreeze@societyfintech.dev', icon: Store },
+  { label: 'Operator', caption: 'Platform operator', email: 'ops.lead@societyfintech.dev', icon: ShieldCheck },
 ];
 
 function DevPanel() {
@@ -130,14 +131,14 @@ function DevPanel() {
             loading={busy === a.email}
             onClick={() => signIn(a.email)}
           >
-            <span className="flex items-center gap-xs">
-              <a.icon className="h-4 w-4" />
+            <span className="flex shrink-0 items-center gap-xs">
+              <a.icon className="h-4 w-4 shrink-0" />
               <span className="flex flex-col items-start leading-tight">
                 <span>{a.label}</span>
                 <span className="text-[11px] font-normal text-ink-40">{a.caption}</span>
               </span>
             </span>
-            <span className="text-ink-40">{a.email}</span>
+            <span className="ml-sm min-w-0 truncate text-right text-[11px] text-ink-40" title={a.email}>{a.email}</span>
           </Button>
         ))}
       </div>

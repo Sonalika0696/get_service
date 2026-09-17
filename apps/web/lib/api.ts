@@ -5,7 +5,7 @@
  * token is ever read or stored in JS.
  */
 
-const BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:3000/api/v1';
+export const BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:4000/api/v1';
 
 export class ApiError extends Error {
   constructor(

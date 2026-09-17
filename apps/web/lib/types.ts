@@ -362,3 +362,97 @@ export interface RevisePricingCardInput {
   gstRatePct: number;
   effectiveFrom: string;
 }
+
+/* ------------------------------------------- ledger cashflow (Phase 9) --- */
+
+export type CashflowRange = '7d' | '30d' | '90d' | '12m';
+
+/** One day's bucket in a GET /ledger/cashflow series. Amounts are rupee decimal strings. */
+export interface CashflowBucket {
+  date: string;
+  income: string;
+  expense: string;
+  net: string;
+}
+
+export interface CashflowSeries {
+  range: CashflowRange;
+  from: string;
+  to: string;
+  series: CashflowBucket[];
+}
+
+/* ------------------------------------ bank statements (Phase 9.5) --- */
+
+export type BankStatementLineStatus = 'UNMATCHED' | 'MATCHED' | 'ALLOCATED' | 'IGNORED';
+
+/** The seven Phase 9.1 sub-ledger pockets a bank-statement credit may be allocated into. */
+export type PocketKind = 'MAINTENANCE' | 'ELECTRICITY' | 'WATER' | 'EVENTS' | 'WELFARE' | 'SINKING' | 'CORPUS';
+
+export interface BankStatementLineDetail {
+  id: string;
+  societyId: string;
+  valueDate: string;
+  amount: string;
+  narration: string;
+  reference: string | null;
+  matchedFlatId: string | null;
+  status: BankStatementLineStatus;
+  allocatedById: string | null;
+  allocatedAt: string | null;
+  createdAt: string;
+}
+
+export interface BankStatementLinesPage {
+  items: BankStatementLineDetail[];
+  nextCursor: string | null;
+}
+
+export interface BankStatementIngestResult {
+  ingested: number;
+  matched: number;
+  unmatched: number;
+  errors: string[];
+}
+
+export interface AllocateBankStatementLineInput {
+  flatId?: string;
+  pocketKind: PocketKind;
+}
+
+/* ------------------------------------- pocket transfers (Phase 9.6) --- */
+
+export type PocketTransferStatus = 'PENDING' | 'EXECUTED' | 'CANCELLED';
+
+/** The transfer row plus a live authorisation readout. */
+export interface PocketTransferDetail {
+  id: string;
+  societyId: string;
+  fromKind: PocketKind;
+  toKind: PocketKind;
+  amount: string;
+  reasonCode: string;
+  note: string | null;
+  status: PocketTransferStatus;
+  requestedById: string;
+  executedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Count of DISTINCT officers who have authorised this transfer so far. */
+  authorisedCount: number;
+  /** The number of DISTINCT officers required, evaluated as of this read. */
+  requiredApprovers: number;
+}
+
+export interface PocketTransferPage {
+  items: PocketTransferDetail[];
+  nextCursor: string | null;
+}
+
+export interface RequestTransferInput {
+  fromKind: PocketKind;
+  toKind: PocketKind;
+  amount: number;
+  reasonCode: string;
+  note?: string;
+}
