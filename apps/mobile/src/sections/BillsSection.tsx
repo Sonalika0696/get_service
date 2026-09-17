@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { View, FlatList } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 import { Receipt, ClockCounterClockwise } from '../icons/phosphor';
 import type { PaymentRail } from '@sft/api-client';
 import { Text } from '../components/Text';
@@ -30,6 +31,7 @@ type Segment = 'due' | 'all';
 export default function BillsScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [segment, setSegment] = useState<Segment>('due');
 
@@ -59,9 +61,9 @@ export default function BillsScreen() {
         ListHeaderComponent={
           <View style={{ gap: theme.spacing.lg }}>
             <View>
-              <Text variant="display" weight="semibold">Bills</Text>
+              <Text variant="display" weight="semibold">{t('bills.title')}</Text>
               <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
-                Every obligation for your flat, with the number that produced it.
+                {t('bills.subtitle')}
               </Text>
             </View>
 
@@ -75,24 +77,24 @@ export default function BillsScreen() {
               value={segment}
               onChange={setSegment}
               options={[
-                { value: 'due', label: 'Due now' },
-                { value: 'all', label: 'All' },
+                { value: 'due', label: t('bills.segment.dueNow') },
+                { value: 'all', label: t('bills.segment.all') },
               ]}
             />
 
             <SectionLabel>
-              {segment === 'due' ? 'Due now' : 'Every line'}
+              {segment === 'due' ? t('bills.sectionLabel.dueNow') : t('bills.sectionLabel.everyLine')}
             </SectionLabel>
           </View>
         }
         ListEmptyComponent={
           hub.isLoading ? (
-            <ListLoading label="Loading bills" />
+            <ListLoading label={t('bills.loading')} />
           ) : hub.isError ? (
             <ListError
               message={
                 (hub.error as { message?: string } | null)?.message ??
-                'Bills are unreachable right now. Check your connection and try again.'
+                t('bills.errorFallback')
               }
               onRetry={() => hub.refetch()}
             />
@@ -100,12 +102,8 @@ export default function BillsScreen() {
             <ListEmpty
               Icon={Receipt}
               illustration="bills"
-              title={segment === 'due' ? 'Nothing due' : 'No bills yet'}
-              body={
-                segment === 'due'
-                  ? "You're all caught up. Anything new lands here as soon as it's issued."
-                  : 'Bills appear here as soon as the committee publishes a cycle or a pooled request fires.'
-              }
+              title={segment === 'due' ? t('bills.empty.dueTitle') : t('bills.empty.allTitle')}
+              body={segment === 'due' ? t('bills.empty.dueBody') : t('bills.empty.allBody')}
             />
           ) : null
         }
@@ -134,6 +132,7 @@ function HeroDueCard({
   onPressHistory: () => void;
 }) {
   const theme = useTheme();
+  const { t } = useTranslation();
   return (
     <View
       style={{
@@ -147,7 +146,7 @@ function HeroDueCard({
     >
       <View>
         <Text variant="caption" tone="onAccent" style={{ opacity: 0.72 }}>
-          Total due
+          {t('bills.totalDue')}
         </Text>
         <Money
           minor={totalMinor}
@@ -157,9 +156,7 @@ function HeroDueCard({
           showDecimals={false}
         />
         <Text variant="caption" tone="onAccent" style={{ opacity: 0.72, marginTop: 4 }}>
-          {totalMinor > 0
-            ? 'Across every rail. Pay each line on its own tap to keep the audit trail clean.'
-            : 'You are all clear.'}
+          {totalMinor > 0 ? t('bills.acrossRails') : t('bills.allClear')}
         </Text>
       </View>
 
@@ -185,7 +182,7 @@ function HeroDueCard({
 
       <View>
         <Button
-          label="Statement history"
+          label={t('bills.statementHistory')}
           variant="secondary"
           leftIcon={<ClockCounterClockwise size={16} color={theme.colors.accent[700]} weight="regular" />}
           onPress={onPressHistory}

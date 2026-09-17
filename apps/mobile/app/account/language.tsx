@@ -2,26 +2,28 @@ import React, { useState } from 'react';
 import { View, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Check } from '../../src/icons/phosphor';
 import { Text } from '../../src/components/Text';
 import { Button } from '../../src/components/Button';
 import { Card } from '../../src/components/Card';
 import { useTheme } from '../../src/theme/ThemeProvider';
 import { kv } from '../../src/lib/storage';
-
-const LANGUAGE_KEY = 'gatex.language';
+import { setLanguage, LANGUAGE_STORAGE_KEY, SUPPORTED_LANGUAGES, type SupportedLanguage } from '../../src/i18n';
 
 const LANGUAGES = [
   { code: 'en', label: 'English', native: 'English' },
   { code: 'hi', label: 'Hindi', native: 'हिन्दी' },
   { code: 'mr', label: 'Marathi', native: 'मराठी' },
   { code: 'kn', label: 'Kannada', native: 'ಕನ್ನಡ' },
-] as const;
+] as const satisfies readonly { code: SupportedLanguage; label: string; native: string }[];
 
-function readStoredLanguage(): string {
+function readStoredLanguage(): SupportedLanguage {
   try {
-    const stored = kv.getString(LANGUAGE_KEY);
-    if (stored && LANGUAGES.some((l) => l.code === stored)) return stored;
+    const stored = kv.getString(LANGUAGE_STORAGE_KEY);
+    if (stored && (SUPPORTED_LANGUAGES as readonly string[]).includes(stored)) {
+      return stored as SupportedLanguage;
+    }
   } catch {
     // Best-effort; fall back to English below.
   }
@@ -29,22 +31,20 @@ function readStoredLanguage(): string {
 }
 
 /**
- * Language selection. Only the picker and its persistence are real right
- * now — the app itself still renders in English regardless of choice, so
- * this is a visual/preference screen until localisation ships.
+ * Language selection. Picking an option calls `setLanguage`, which switches
+ * i18next's active language (every screen using `useTranslation` re-renders
+ * live) and persists the choice under the same MMKV key this screen has
+ * always used.
  */
 export default function Language() {
   const theme = useTheme();
   const router = useRouter();
-  const [selected, setSelected] = useState(() => readStoredLanguage());
+  const { t } = useTranslation();
+  const [selected, setSelected] = useState<SupportedLanguage>(() => readStoredLanguage());
 
-  const select = (code: string) => {
+  const select = (code: SupportedLanguage) => {
     setSelected(code);
-    try {
-      kv.set(LANGUAGE_KEY, code);
-    } catch {
-      // Best-effort; selection still updates in-session state.
-    }
+    setLanguage(code);
   };
 
   return (
@@ -52,7 +52,7 @@ export default function Language() {
       <Stack.Screen options={{ headerShown: false }} />
       <View style={{ paddingHorizontal: theme.screenPadding, paddingTop: theme.spacing.sm }}>
         <Button
-          label="Back"
+          label={t('common.back')}
           variant="ghost"
           leftIcon={<ArrowLeft size={18} color={theme.colors.accent[700]} weight="bold" />}
           onPress={() => router.back()}
@@ -67,9 +67,9 @@ export default function Language() {
         }}
       >
         <View>
-          <Text variant="display" weight="semibold">Language</Text>
+          <Text variant="display" weight="semibold">{t('account.language.title')}</Text>
           <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
-            Pick the language you'd like GateX to use.
+            {t('account.language.subtitle')}
           </Text>
         </View>
 
@@ -104,7 +104,7 @@ export default function Language() {
         </Card>
 
         <Text variant="caption" tone="muted">
-          Full app localisation is in progress — screens currently display in English regardless of this choice.
+          {t('account.language.disclaimer')}
         </Text>
       </ScrollView>
     </SafeAreaView>

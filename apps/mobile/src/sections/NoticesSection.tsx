@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { View, SectionList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 import { PencilSimple, Megaphone, CalendarBlank } from '../icons/phosphor';
 import type { EventSummary, JobBlogPost } from '@sft/api-client';
 import { Text } from '../components/Text';
@@ -48,6 +49,7 @@ type Row =
 export default function NoticesScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const { t } = useTranslation();
   const eventsQuery = useEvents();
   const events = eventsQuery.data ?? [];
   const postsQuery = useJobPosts();
@@ -57,7 +59,7 @@ export default function NoticesScreen() {
     () => [
       {
         key: 'events',
-        title: 'Happening in your society',
+        title: t('notices.sectionLabel.events'),
         data:
           events.length > 0
             ? events.map((event): Row => ({ kind: 'event', event }))
@@ -65,14 +67,14 @@ export default function NoticesScreen() {
       },
       {
         key: 'posts',
-        title: 'Neighbours are hiring',
+        title: t('notices.sectionLabel.posts'),
         data:
           posts.length > 0
             ? posts.map((post): Row => ({ kind: 'post', post }))
             : [{ kind: 'posts-state' } as const],
       },
     ],
-    [events, posts],
+    [events, posts, t],
   );
 
   return (
@@ -97,30 +99,30 @@ export default function NoticesScreen() {
               );
             case 'events-state':
               return eventsQuery.isLoading ? (
-                <ListLoading label="Loading events" />
+                <ListLoading label={t('notices.loadingEvents')} />
               ) : eventsQuery.isError ? (
                 <ListError
                   message={
                     (eventsQuery.error as { message?: string } | null)?.message ??
-                    'Events are unreachable. Check your connection and try again.'
+                    t('notices.errorFallbackEvents')
                   }
                   onRetry={() => eventsQuery.refetch()}
                 />
               ) : eventsQuery.isSuccess && events.length === 0 ? (
                 <ListEmpty
                   Icon={CalendarBlank}
-                  title="Nothing scheduled"
-                  body="Your society's admin hasn't posted any events or activities yet."
+                  title={t('notices.empty.eventsTitle')}
+                  body={t('notices.empty.eventsBody')}
                 />
               ) : null;
             case 'posts-state':
               return postsQuery.isLoading ? (
-                <ListLoading label="Loading posts" />
+                <ListLoading label={t('notices.loadingPosts')} />
               ) : postsQuery.isError ? (
                 <ListError
                   message={
                     (postsQuery.error as { message?: string } | null)?.message ??
-                    'The feed is unreachable. Check your connection and try again.'
+                    t('notices.errorFallbackPosts')
                   }
                   onRetry={() => postsQuery.refetch()}
                 />
@@ -128,8 +130,8 @@ export default function NoticesScreen() {
                 <ListEmpty
                   Icon={Megaphone}
                   illustration="notices"
-                  title="Quiet in the community"
-                  body="Be the first — tap Post to share a job you're hiring for."
+                  title={t('notices.empty.postsTitle')}
+                  body={t('notices.empty.postsBody')}
                 />
               ) : null;
           }
@@ -147,9 +149,9 @@ export default function NoticesScreen() {
         stickySectionHeadersEnabled={false}
         ListHeaderComponent={
           <View style={{ marginBottom: theme.spacing.lg }}>
-            <Text variant="display" weight="semibold">Community</Text>
+            <Text variant="display" weight="semibold">{t('notices.title')}</Text>
             <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
-              Society events to join, and what your neighbours are hiring for.
+              {t('notices.subtitle')}
             </Text>
           </View>
         }

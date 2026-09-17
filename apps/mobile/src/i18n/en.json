@@ -1,0 +1,108 @@
+{
+  "common": {
+    "back": "Back",
+    "cancel": "Cancel",
+    "retry": "Try again",
+    "seeAll": "See all",
+    "loading": "Loading",
+    "couldntLoad": "Couldn't load"
+  },
+  "home": {
+    "greeting": {
+      "morning": "Good morning",
+      "afternoon": "Good afternoon",
+      "evening": "Good evening"
+    },
+    "atAGlance": "At a glance",
+    "neighboursAlsoNeed": "Neighbours also need",
+    "stats": {
+      "openRequests": "Open requests",
+      "upcomingEvents": "Upcoming events",
+      "unreadNotices": "Unread notices",
+      "workInFlat": "Work in your flat"
+    }
+  },
+  "bills": {
+    "title": "Bills",
+    "subtitle": "Every obligation for your flat, with the number that produced it.",
+    "totalDue": "Total due",
+    "acrossRails": "Across every rail. Pay each line on its own tap to keep the audit trail clean.",
+    "allClear": "You are all clear.",
+    "statementHistory": "Statement history",
+    "segment": {
+      "dueNow": "Due now",
+      "all": "All"
+    },
+    "sectionLabel": {
+      "dueNow": "Due now",
+      "everyLine": "Every line"
+    },
+    "loading": "Loading bills",
+    "errorFallback": "Bills are unreachable right now. Check your connection and try again.",
+    "empty": {
+      "dueTitle": "Nothing due",
+      "allTitle": "No bills yet",
+      "dueBody": "You're all caught up. Anything new lands here as soon as it's issued.",
+      "allBody": "Bills appear here as soon as the committee publishes a cycle or a pooled request fires."
+    }
+  },
+  "requests": {
+    "title": "Requests",
+    "subtitle": "Pool with your neighbours. Better price, one visit.",
+    "segment": {
+      "open": "Open",
+      "mine": "Mine"
+    },
+    "sectionLabel": {
+      "open": "Neighbours also need",
+      "mine": "Requests you joined"
+    },
+    "loading": "Loading requests",
+    "errorFallback": "The feed is unreachable. Check your connection and try again.",
+    "empty": {
+      "mineTitle": "Nothing raised yet",
+      "openTitle": "No open requests",
+      "mineBody": "You haven't raised any pooled requests yet. Tap Raise to start one your neighbours can join.",
+      "openBody": "Nothing open right now. Raise the first request — your neighbours will see it here."
+    },
+    "raiseButton": "Raise a request"
+  },
+  "notices": {
+    "title": "Community",
+    "subtitle": "Society events to join, and what your neighbours are hiring for.",
+    "sectionLabel": {
+      "events": "Happening in your society",
+      "posts": "Neighbours are hiring"
+    },
+    "loadingEvents": "Loading events",
+    "loadingPosts": "Loading posts",
+    "errorFallbackEvents": "Events are unreachable. Check your connection and try again.",
+    "errorFallbackPosts": "The feed is unreachable. Check your connection and try again.",
+    "empty": {
+      "eventsTitle": "Nothing scheduled",
+      "eventsBody": "Your society's admin hasn't posted any events or activities yet.",
+      "postsTitle": "Quiet in the community",
+      "postsBody": "Be the first — tap Post to share a job you're hiring for."
+    }
+  },
+  "profile": {
+    "sectionLabel": {
+      "account": "Account",
+      "preferences": "Preferences",
+      "support": "Support",
+      "more": "More"
+    },
+    "signOutConfirm": {
+      "title": "Sign out?",
+      "message": "You will need your phone to sign back in.",
+      "confirm": "Sign out"
+    }
+  },
+  "account": {
+    "language": {
+      "title": "Language",
+      "subtitle": "Pick the language you'd like GateX to use.",
+      "disclaimer": "English is fully translated. Hindi's visible screens are translated too, with more filled in over time; Marathi and Kannada currently fall back to English."
+    }
+  }
+}

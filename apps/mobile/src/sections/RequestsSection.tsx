@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { View, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 import { PlusCircle, Handshake } from '../icons/phosphor';
 import { Text } from '../components/Text';
 import { Button } from '../components/Button';
@@ -31,6 +32,7 @@ type Segment = 'open' | 'mine';
 export default function RequestsScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const { t } = useTranslation();
   const { me } = useAuth();
   const [segment, setSegment] = useState<Segment>('open');
 
@@ -42,10 +44,7 @@ export default function RequestsScreen() {
     return polls.filter((p) => p.status === 'OPEN');
   }, [polls, segment, me]);
 
-  const emptyBody =
-    segment === 'mine'
-      ? "You haven't raised any pooled requests yet. Tap Raise to start one your neighbours can join."
-      : 'Nothing open right now. Raise the first request — your neighbours will see it here.';
+  const emptyBody = segment === 'mine' ? t('requests.empty.mineBody') : t('requests.empty.openBody');
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.colors.bg.primary }}>
@@ -68,9 +67,9 @@ export default function RequestsScreen() {
         ListHeaderComponent={
           <View style={{ gap: theme.spacing.lg }}>
             <View>
-              <Text variant="display" weight="semibold">Requests</Text>
+              <Text variant="display" weight="semibold">{t('requests.title')}</Text>
               <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
-                Pool with your neighbours. Better price, one visit.
+                {t('requests.subtitle')}
               </Text>
             </View>
 
@@ -78,24 +77,24 @@ export default function RequestsScreen() {
               value={segment}
               onChange={setSegment}
               options={[
-                { value: 'open', label: 'Open' },
-                { value: 'mine', label: 'Mine' },
+                { value: 'open', label: t('requests.segment.open') },
+                { value: 'mine', label: t('requests.segment.mine') },
               ]}
             />
 
             <SectionLabel>
-              {segment === 'open' ? 'Neighbours also need' : 'Requests you joined'}
+              {segment === 'open' ? t('requests.sectionLabel.open') : t('requests.sectionLabel.mine')}
             </SectionLabel>
           </View>
         }
         ListEmptyComponent={
           query.isLoading ? (
-            <ListLoading label="Loading requests" />
+            <ListLoading label={t('requests.loading')} />
           ) : query.isError ? (
             <ListError
               message={
                 (query.error as { message?: string } | null)?.message ??
-                'The feed is unreachable. Check your connection and try again.'
+                t('requests.errorFallback')
               }
               onRetry={() => query.refetch()}
             />
@@ -103,11 +102,11 @@ export default function RequestsScreen() {
             <ListEmpty
               Icon={Handshake}
               illustration="requests"
-              title={segment === 'mine' ? 'Nothing raised yet' : 'No open requests'}
+              title={segment === 'mine' ? t('requests.empty.mineTitle') : t('requests.empty.openTitle')}
               body={emptyBody}
               action={
                 <Button
-                  label="Raise a request"
+                  label={t('requests.raiseButton')}
                   variant="secondary"
                   onPress={() => router.push('/requests/new')}
                 />

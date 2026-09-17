@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 import { Handshake, CalendarBlank, Bell, Wrench } from '../icons/phosphor';
 import { Screen } from '../components/Screen';
 import { Text } from '../components/Text';
@@ -35,30 +36,34 @@ function formatDueOn(iso: string): string {
  * (F1) and the dues + stats + joinable-request cards render preview data
  * shaped like the aggregate will be.
  */
-function greeting(): string {
+type GreetingKey = 'home.greeting.morning' | 'home.greeting.afternoon' | 'home.greeting.evening';
+
+function greetingKey(): GreetingKey {
   const hour = new Date().getHours();
-  if (hour < 12) return 'Good morning';
-  if (hour < 17) return 'Good afternoon';
-  return 'Good evening';
+  if (hour < 12) return 'home.greeting.morning';
+  if (hour < 17) return 'home.greeting.afternoon';
+  return 'home.greeting.evening';
 }
 
 /**
- * Live greeting: recomputes on a one-minute tick so the phrase actually
+ * Live greeting key: recomputes on a one-minute tick so the phrase actually
  * switches (morning → afternoon → evening) while the app stays open across a
  * boundary, instead of freezing at whatever it was when Home first mounted.
+ * Translating the key (rather than caching the translated phrase) is what
+ * makes the greeting also flip live when the app language changes.
  */
-function useGreeting(): string {
-  const [phrase, setPhrase] = useState(greeting);
+function useGreetingKey(): GreetingKey {
+  const [key, setKey] = useState(greetingKey);
   useEffect(() => {
     const id = setInterval(() => {
-      setPhrase((prev) => {
-        const next = greeting();
+      setKey((prev) => {
+        const next = greetingKey();
         return next === prev ? prev : next;
       });
     }, 60_000);
     return () => clearInterval(id);
   }, []);
-  return phrase;
+  return key;
 }
 
 const preview = {
@@ -81,10 +86,11 @@ const preview = {
 export default function HomeScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const { t } = useTranslation();
   const { me } = useAuth();
   const { goTo } = useTabs();
   const bills = useBillsHub();
-  const hello = useGreeting();
+  const hello = t(useGreetingKey());
 
   const firstName = me?.name?.trim().split(/\s+/)[0];
 
@@ -121,19 +127,19 @@ export default function HomeScreen() {
       />
 
       <View>
-        <SectionLabel>At a glance</SectionLabel>
+        <SectionLabel>{t('home.atAGlance')}</SectionLabel>
         <View style={{ flexDirection: 'row', gap: theme.spacing.sm }}>
           <StatTile
             Icon={Handshake}
             value={preview.stats.openRequests}
-            label="Open requests"
+            label={t('home.stats.openRequests')}
             tone="accent"
             onPress={() => goTo('requests')}
           />
           <StatTile
             Icon={CalendarBlank}
             value={preview.stats.upcomingEvents}
-            label="Upcoming events"
+            label={t('home.stats.upcomingEvents')}
             tone="info"
             onPress={() => router.push('/events')}
           />
@@ -142,14 +148,14 @@ export default function HomeScreen() {
           <StatTile
             Icon={Bell}
             value={preview.stats.unreadNotices}
-            label="Unread notices"
+            label={t('home.stats.unreadNotices')}
             tone="warning"
             onPress={() => goTo('notices')}
           />
           <StatTile
             Icon={Wrench}
             value={preview.stats.workInFlat}
-            label="Work in your flat"
+            label={t('home.stats.workInFlat')}
             tone="success"
           />
         </View>
@@ -164,11 +170,11 @@ export default function HomeScreen() {
               tone="accent"
               onPress={() => goTo('requests')}
             >
-              See all
+              {t('common.seeAll')}
             </Text>
           }
         >
-          Neighbours also need
+          {t('home.neighboursAlsoNeed')}
         </SectionLabel>
         <View style={{ gap: theme.spacing.sm }}>
           {preview.joinable.map((r) => (

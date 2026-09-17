@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, ActivityIndicator } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import type { IconProps } from '../icons/phosphor';
 import { Warning, TrayArrowDown } from '../icons/phosphor';
 import { Text } from './Text';
@@ -7,8 +8,10 @@ import { Button } from './Button';
 import { SpotIllustration, type SpotIllustrationName } from './illustrations/SpotIllustration';
 import { useTheme } from '../theme/ThemeProvider';
 
-export function ListLoading({ label = 'Loading' }: { label?: string }) {
+export function ListLoading({ label }: { label?: string }) {
   const theme = useTheme();
+  const { t } = useTranslation();
+  const resolvedLabel = label ?? t('common.loading');
   return (
     <View
       style={{
@@ -18,7 +21,7 @@ export function ListLoading({ label = 'Loading' }: { label?: string }) {
       }}
     >
       <ActivityIndicator color={theme.colors.accent[700]} />
-      <Text variant="caption" tone="muted">{label}</Text>
+      <Text variant="caption" tone="muted">{resolvedLabel}</Text>
     </View>
   );
 }
@@ -31,6 +34,7 @@ export function ListError({
   onRetry?: () => void;
 }) {
   const theme = useTheme();
+  const { t } = useTranslation();
   return (
     <View
       style={{
@@ -43,11 +47,11 @@ export function ListError({
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Warning size={20} color={theme.colors.feedback.danger} weight="regular" />
         <Text variant="body" weight="semibold" tone="danger">
-          Couldn't load
+          {t('common.couldntLoad')}
         </Text>
       </View>
       <Text variant="caption" tone="secondary">{message}</Text>
-      {onRetry ? <Button label="Try again" variant="secondary" onPress={onRetry} /> : null}
+      {onRetry ? <Button label={t('common.retry')} variant="secondary" onPress={onRetry} /> : null}
     </View>
   );
 }

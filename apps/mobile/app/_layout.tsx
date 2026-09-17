@@ -1,10 +1,12 @@
 import 'react-native-gesture-handler';
+import i18n from '../src/i18n';
 import React, { useEffect } from 'react';
 import { View, Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { I18nextProvider } from 'react-i18next';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { useFonts, Sora_400Regular, Sora_600SemiBold } from '@expo-google-fonts/sora';
@@ -40,35 +42,37 @@ export default function RootLayout() {
   if (!fontsSettled && Platform.OS !== 'web') return null;
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <PersistQueryClientProvider
-          client={queryClient}
-          persistOptions={{ persister: queryPersister, maxAge: 24 * 60 * 60 * 1000 }}
-          // Mutations paused offline in a *previous* session are restored
-          // alongside the query cache but don't resume themselves — kick
-          // them once the restore completes. Mutations paused offline in
-          // the *current* session already auto-resume via onlineManager
-          // (see src/lib/query.ts); this covers the cold-start case.
-          onSuccess={() => {
-            queryClient.resumePausedMutations().catch(() => undefined);
-          }}
-        >
-          <ThemeProvider>
-            <ErrorBoundary>
-              <AuthProvider>
-                <RealtimeProvider>
-                  <ThemedStatusBar />
-                  <AuthGate>
-                    <ThemedStack />
-                  </AuthGate>
-                </RealtimeProvider>
-              </AuthProvider>
-            </ErrorBoundary>
-          </ThemeProvider>
-        </PersistQueryClientProvider>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+    <I18nextProvider i18n={i18n}>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaProvider>
+          <PersistQueryClientProvider
+            client={queryClient}
+            persistOptions={{ persister: queryPersister, maxAge: 24 * 60 * 60 * 1000 }}
+            // Mutations paused offline in a *previous* session are restored
+            // alongside the query cache but don't resume themselves — kick
+            // them once the restore completes. Mutations paused offline in
+            // the *current* session already auto-resume via onlineManager
+            // (see src/lib/query.ts); this covers the cold-start case.
+            onSuccess={() => {
+              queryClient.resumePausedMutations().catch(() => undefined);
+            }}
+          >
+            <ThemeProvider>
+              <ErrorBoundary>
+                <AuthProvider>
+                  <RealtimeProvider>
+                    <ThemedStatusBar />
+                    <AuthGate>
+                      <ThemedStack />
+                    </AuthGate>
+                  </RealtimeProvider>
+                </AuthProvider>
+              </ErrorBoundary>
+            </ThemeProvider>
+          </PersistQueryClientProvider>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    </I18nextProvider>
   );
 }
 

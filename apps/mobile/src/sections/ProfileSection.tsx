@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Alert, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 import {
   PaintBrush,
   SignOut,
@@ -42,6 +43,7 @@ function initialsFor(name?: string | null): string {
 export default function ProfileScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const { t } = useTranslation();
   const { me, signOut } = useAuth();
   const isCommittee = useIsCommittee();
   const approvals = useApprovals();
@@ -49,11 +51,11 @@ export default function ProfileScreen() {
 
   const confirmSignOut = () => {
     Alert.alert(
-      'Sign out?',
-      'You will need your phone to sign back in.',
+      t('profile.signOutConfirm.title'),
+      t('profile.signOutConfirm.message'),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Sign out', style: 'destructive', onPress: () => signOut() },
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('profile.signOutConfirm.confirm'), style: 'destructive', onPress: () => signOut() },
       ],
     );
   };
@@ -130,7 +132,7 @@ export default function ProfileScreen() {
       ) : null}
 
       <View>
-        <SectionLabel>Account</SectionLabel>
+        <SectionLabel>{t('profile.sectionLabel.account')}</SectionLabel>
         <Card>
           <Row
             icon={<IdentificationCard size={18} color={accent} weight="duotone" />}
@@ -153,7 +155,7 @@ export default function ProfileScreen() {
       </View>
 
       <View>
-        <SectionLabel>Preferences</SectionLabel>
+        <SectionLabel>{t('profile.sectionLabel.preferences')}</SectionLabel>
         <Card>
           <Row
             icon={<ShieldCheck size={18} color={accent} weight="duotone" />}
@@ -165,7 +167,7 @@ export default function ProfileScreen() {
       </View>
 
       <View>
-        <SectionLabel>Support</SectionLabel>
+        <SectionLabel>{t('profile.sectionLabel.support')}</SectionLabel>
         <Card>
           <Row
             icon={<Question size={18} color={accent} weight="duotone" />}
@@ -186,7 +188,7 @@ export default function ProfileScreen() {
       </View>
 
       <View>
-        <SectionLabel>More</SectionLabel>
+        <SectionLabel>{t('profile.sectionLabel.more')}</SectionLabel>
         <Card>
           <Row
             icon={<PaintBrush size={18} color={accent} weight="duotone" />}
