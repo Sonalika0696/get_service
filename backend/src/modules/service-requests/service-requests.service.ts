@@ -4,6 +4,7 @@ import { Clock } from '../../infra/clock/clock.service.js';
 import { AuditService, type AppendAuditLogInput } from '../audit/audit.service.js';
 import { BulkBuyService } from '../bulk-buy/bulk-buy.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { RealtimeService, type DomainEventType } from '../realtime/realtime.service.js';
 import { Prisma } from '../../generated/prisma/client.js';
 import {
   JobCardTier,
@@ -39,6 +40,15 @@ interface PendingServiceRequestNotification {
   title: string;
   kind: ServiceRequestNotificationKind;
   recipientEmails: string[];
+}
+
+/** Lean, non-sensitive real-time push payload — clients refetch full detail via REST; no money/contribution fields ride along here. */
+interface ServiceRequestRealtimePayload {
+  id: string;
+  type: string;
+  title: string;
+  status: string;
+  societyId: string;
 }
 
 /**
@@ -113,6 +123,7 @@ export class ServiceRequestsService {
     private readonly bulkBuy: BulkBuyService,
     private readonly auditService: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   // -------------------------------------------------------------------
@@ -170,6 +181,11 @@ export class ServiceRequestsService {
         threshold,
       },
     });
+
+    // Post-commit, best-effort (see pushRealtime's doc comment) — the row
+    // is already durably created above; this is a live-push convenience on
+    // top of it, never a precondition for the create to have succeeded.
+    await this.pushRealtime('service_request.created', created);
 
     return this.toDetail(created, creatorId);
   }
@@ -276,6 +292,11 @@ export class ServiceRequestsService {
     }
     if (pooledNotification) {
       await this.dispatchNotifications(pooledNotification);
+      // Reuses the exact same "did this transition actually happen" signal
+      // as the notification dispatch above (both are only set once the tx
+      // flipped status to POOLED) — post-commit, best-effort, right
+      // alongside it.
+      await this.pushRealtime('service_request.pooled', { id, pollType: sr.pollType, title: sr.title, status: ServiceRequestStatus.POOLED, societyId });
     }
 
     return this.get(societyId, id, residentId);
@@ -347,6 +368,7 @@ export class ServiceRequestsService {
     });
     if (assignedNotification) {
       await this.dispatchNotifications(assignedNotification);
+      await this.pushRealtime('service_request.assigned', { id, pollType: sr.pollType, title: sr.title, status: ServiceRequestStatus.ASSIGNED, societyId });
     }
 
     return this.get(societyId, id, actorId);
@@ -381,6 +403,13 @@ export class ServiceRequestsService {
   async confirm(societyId: string, id: string, actorId: string, dto: ConfirmServiceRequestDto): Promise<ServiceRequestDetail> {
     let executedAudit: AppendAuditLogInput | null = null;
     let confirmedNotification: PendingServiceRequestNotification | null = null;
+    // Captured alongside confirmedNotification, as its own primitive,
+    // purely so the post-tx realtime push below doesn't need to dereference
+    // a property off a variable TS can't keep narrowed past the
+    // dispatchNotifications await (it's reassigned inside the $transaction
+    // closure above) — see PollsService.pushRealtime's callers for the same
+    // shape.
+    let confirmedTitle: string | null = null;
 
     const detail = await this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SERVICE_REQUEST_LOCK_NAMESPACE}, hashtext(${id}))`;
@@ -422,6 +451,7 @@ export class ServiceRequestsService {
         kind: 'confirmed',
         recipientEmails: participations.map((p) => p.resident.email),
       };
+      confirmedTitle = sr.title;
 
       const contribution = new Decimal(dto.contribution).toDecimalPlaces(2);
       const now = this.clock.now();
@@ -480,6 +510,19 @@ export class ServiceRequestsService {
     }
     if (confirmedNotification) {
       await this.dispatchNotifications(confirmedNotification);
+    }
+    if (confirmedTitle) {
+      // Escrow/booking/commitments are already committed by this point
+      // (the transaction above returned) — this push is a pure convenience
+      // on top of that, never a precondition of it. pollType is always
+      // SERVICE_REQUEST here (checked inside the tx above).
+      await this.pushRealtime('service_request.confirmed', {
+        id,
+        pollType: ServiceRequestType.SERVICE_REQUEST,
+        title: confirmedTitle,
+        status: ServiceRequestStatus.CONFIRMED,
+        societyId,
+      });
     }
 
     return detail;
@@ -601,6 +644,29 @@ export class ServiceRequestsService {
           error instanceof Error ? error.stack : String(error),
         );
       }
+    }
+  }
+
+  /**
+   * Post-commit, best-effort real-time push — called from the exact same
+   * spots as dispatchNotifications, right alongside it. RealtimeService's
+   * own emitToSociety already never throws (see its doc comment), but this
+   * wraps the call again anyway: a live-push failure — of ANY kind,
+   * including a misbehaving RealtimeService — must never be able to make
+   * an already-committed create/pool/assign/confirm look like it failed to
+   * the caller.
+   */
+  private async pushRealtime(type: DomainEventType, sr: { id: string; pollType: string; title: string; status: string; societyId: string }): Promise<void> {
+    try {
+      await this.realtime.emitToSociety(sr.societyId, type, {
+        id: sr.id,
+        type: sr.pollType,
+        title: sr.title,
+        status: sr.status,
+        societyId: sr.societyId,
+      } satisfies ServiceRequestRealtimePayload);
+    } catch (error) {
+      this.logger.error(`Post-commit realtime push "${type}" failed for request ${sr.id} (state change already committed)`, error instanceof Error ? error.stack : String(error));
     }
   }
 

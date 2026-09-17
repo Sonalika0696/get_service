@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { PrismaService } from '../../infra/prisma/prisma.service.js';
 import { Clock } from '../../infra/clock/clock.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { RealtimeService, type DomainEventType } from '../realtime/realtime.service.js';
 import { Prisma } from '../../generated/prisma/client.js';
 import { ServiceRequestStatus, ServiceRequestType } from '../../generated/prisma/enums.js';
 import type { ServiceRequestModel } from '../../generated/prisma/models.js';
@@ -27,6 +28,15 @@ interface PendingNotification {
   title: string;
   kind: NotificationKind;
   recipientEmails: string[];
+}
+
+/** Lean, non-sensitive real-time push payload — clients refetch full detail via REST. */
+interface PollRealtimePayload {
+  id: string;
+  type: string;
+  title: string;
+  status: string;
+  societyId: string;
 }
 
 /**
@@ -67,6 +77,7 @@ export class PollsService {
     private readonly prisma: PrismaService,
     private readonly clock: Clock,
     private readonly notifications: NotificationsService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   async create(societyId: string, creatorId: string, dto: CreatePollDto): Promise<PollDetail> {
@@ -102,6 +113,14 @@ export class PollsService {
         closesAt,
       },
     });
+
+    // Post-commit, best-effort real-time push — the poll row above is
+    // already durably created; this is a live-push convenience on top of
+    // it, never a precondition of the create having succeeded. This is the
+    // headline real-time event for EVENT polls (BACKEND_PLAN.md's
+    // real-time push layer) — fire/expire below push too, but creation is
+    // the one apps most need pushed within ~1s.
+    await this.pushRealtime('event.created', poll);
 
     return this.toDetail(poll, null);
   }
@@ -173,6 +192,7 @@ export class PollsService {
 
     if (pending) {
       await this.dispatchNotifications(pending);
+      await this.pushRealtime('event.fired', { id, pollType: poll.pollType, title: poll.title, status: ServiceRequestStatus.FIRED, societyId });
     }
 
     return this.get(societyId, id, callerId);
@@ -215,6 +235,7 @@ export class PollsService {
         return this.collectRecipients(tx, poll.id, poll.title, 'expired');
       });
       await this.dispatchNotifications(pending);
+      await this.pushRealtime('event.expired', { id: poll.id, pollType: poll.pollType, title: poll.title, status: ServiceRequestStatus.EXPIRED, societyId });
     }
 
     return { resolved: expired.length };
@@ -250,6 +271,27 @@ export class PollsService {
           error instanceof Error ? error.stack : String(error),
         );
       }
+    }
+  }
+
+  /**
+   * Post-commit, best-effort real-time push — same placement as
+   * dispatchNotifications. RealtimeService.emitToSociety already never
+   * throws, but this wraps it again anyway so a live-push failure of ANY
+   * kind can never make an already-committed create/fire/expire look like
+   * it failed to the caller — mirrors ServiceRequestsService.pushRealtime.
+   */
+  private async pushRealtime(type: DomainEventType, poll: { id: string; pollType: string; title: string; status: string; societyId: string }): Promise<void> {
+    try {
+      await this.realtime.emitToSociety(poll.societyId, type, {
+        id: poll.id,
+        type: poll.pollType,
+        title: poll.title,
+        status: poll.status,
+        societyId: poll.societyId,
+      } satisfies PollRealtimePayload);
+    } catch (error) {
+      this.logger.error(`Post-commit realtime push "${type}" failed for poll ${poll.id} (state change already committed)`, error instanceof Error ? error.stack : String(error));
     }
   }
 
