@@ -1,0 +1,23 @@
+[project]
+name = "sim"
+version = "0.1.0"
+description = "SocietyFinTech Phase 13 offline economic simulation harness (dissertation evaluation only, not production code)."
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["sim", "sim.synthetic", "sim.engine", "sim.analysis"]
