@@ -1,4 +1,5 @@
-import { QueryClient, onlineManager } from '@tanstack/react-query';
+import { QueryClient, onlineManager, focusManager } from '@tanstack/react-query';
+import { AppState, type AppStateStatus } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import { mmkvAsyncStorage } from './storage';
@@ -14,6 +15,23 @@ import { mmkvAsyncStorage } from './storage';
 onlineManager.setEventListener((setOnline) =>
   NetInfo.addEventListener((state) => setOnline(Boolean(state.isConnected && state.isInternetReachable !== false))),
 );
+
+/**
+ * Wire React Query's "focus" signal to the RN app lifecycle. On the web
+ * "focus" is the browser window regaining focus; RN has no such event, so
+ * without this `refetchOnWindowFocus` never fires. Mapping it to AppState
+ * means every screen's stale queries auto-refetch the moment the user
+ * brings the app back to the foreground — so data an admin changed while
+ * the app was backgrounded is up to date the instant they return, with no
+ * manual pull-to-refresh. This complements realtime pushes (which update a
+ * foregrounded app live) and covers the cases realtime doesn't emit for yet.
+ */
+focusManager.setEventListener((handleFocus) => {
+  const sub = AppState.addEventListener('change', (status: AppStateStatus) => {
+    handleFocus(status === 'active');
+  });
+  return () => sub.remove();
+});
 
 /**
  * A network/connection failure (backend not up yet, phone off Wi-Fi) has no
@@ -40,7 +58,10 @@ export const queryClient = new QueryClient({
       },
       retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 15_000),
       refetchOnReconnect: true,
-      refetchOnWindowFocus: false,
+      // Auto-refetch stale queries when the app returns to the foreground
+      // (wired to AppState via focusManager above) and on mount, so lists
+      // stay current without the user pulling to refresh.
+      refetchOnWindowFocus: true,
     },
     mutations: {
       // Optimistic mutations are configured per-hook; global retry stays off
