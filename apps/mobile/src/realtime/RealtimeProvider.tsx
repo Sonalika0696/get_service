@@ -1,10 +1,30 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { QueryClient } from '@tanstack/react-query';
 import { useQueryClient } from '@tanstack/react-query';
 import { io, type Socket } from 'socket.io-client';
 import { useAuth } from '../auth/AuthProvider';
 import { apiOrigin, getAuthToken } from '../lib/api';
 import { RealtimeToast, type RealtimeToastState } from '../components/RealtimeToast';
+
+type CommunityUnreadValue = { unread: boolean; markSeen: () => void };
+
+/**
+ * Whether a society-event update (`event.*`) has arrived since the user last
+ * looked at the Community tab. The provider only ever flips this to `true`;
+ * clearing it is the consumer's job (the tab host calls `markSeen()` while
+ * Community is the active tab), so a badge never lingers once it's been seen
+ * and never shows at all if the user was already looking at the tab when the
+ * update landed.
+ */
+const CommunityUnreadContext = createContext<CommunityUnreadValue>({
+  unread: false,
+  markSeen: () => undefined,
+});
+
+/** Safe even if called outside `RealtimeProvider` — defaults to no badge. */
+export function useCommunityUnread(): CommunityUnreadValue {
+  return useContext(CommunityUnreadContext);
+}
 
 /** Envelope every domain event arrives in, per realtime.gateway.ts. */
 type DomainEvent = { type: string; payload: unknown; at: string };
@@ -89,6 +109,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
   const [toast, setToast] = useState<RealtimeToastState | null>(null);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [communityUnread, setCommunityUnread] = useState(false);
+  const markCommunitySeen = useCallback(() => setCommunityUnread(false), []);
 
   const showToast = useCallback((message: string) => {
     if (dismissTimer.current) clearTimeout(dismissTimer.current);
@@ -130,6 +152,11 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
           if (!domain) return; // unrecognised type: no-op, never crash
           invalidateForDomain(queryClient, domain);
           showToast(EVENT_MESSAGES[raw.type] ?? DOMAIN_FALLBACK_MESSAGE[domain]);
+          // Society-event updates surface as a Community tab badge too. The
+          // provider only sets it; it's cleared by whoever is watching the
+          // active tab (see useCommunityUnread's consumer), so an update
+          // that lands while Community is already open never shows a badge.
+          if (raw.type.startsWith('event.')) setCommunityUnread(true);
         });
 
         // Connection/auth failures are expected in dev (backend down, no
@@ -155,9 +182,9 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   }, [isSignedIn, queryClient, showToast]);
 
   return (
-    <>
+    <CommunityUnreadContext.Provider value={{ unread: communityUnread, markSeen: markCommunitySeen }}>
       {children}
       <RealtimeToast toast={toast} />
-    </>
+    </CommunityUnreadContext.Provider>
   );
 }

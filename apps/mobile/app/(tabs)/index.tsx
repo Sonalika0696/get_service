@@ -7,6 +7,7 @@ import { Text } from '../../src/components/Text';
 import { TabsContext, TAB_NAMES, type TabName } from '../../src/sections/TabsContext';
 import { TabsPager } from '../../src/sections/TabsPager';
 import { TAB_ICONS } from '../../src/components/icons/TabIcons';
+import { useCommunityUnread } from '../../src/realtime/RealtimeProvider';
 import HomeSection from '../../src/sections/HomeSection';
 import BillsSection from '../../src/sections/BillsSection';
 import RequestsSection from '../../src/sections/RequestsSection';
@@ -21,6 +22,7 @@ const PAGES = [HomeSection, BillsSection, RequestsSection, NoticesSection, Profi
   (P) => React.memo(P),
 );
 const LABELS = ['Home', 'Bills', 'Requests', 'Community', 'Profile'];
+const COMMUNITY_INDEX = TAB_NAMES.indexOf('notices');
 
 /**
  * The five sections hosted in a single PagerView, so swipe is drag-follow
@@ -33,6 +35,7 @@ const LABELS = ['Home', 'Bills', 'Requests', 'Community', 'Profile'];
 export default function TabsHost() {
   const [index, setIndex] = useState(0);
   const params = useLocalSearchParams<{ tab?: string }>();
+  const { unread: communityUnread, markSeen: markCommunitySeen } = useCommunityUnread();
 
   useEffect(() => {
     if (typeof params.tab === 'string') {
@@ -40,6 +43,14 @@ export default function TabsHost() {
       if (i >= 0) setIndex(i);
     }
   }, [params.tab]);
+
+  // Clears the Community badge whenever that tab is the one on screen —
+  // whether the user just switched to it or was already there when an
+  // update arrived (RealtimeProvider always sets `unread`; this is the only
+  // place it gets cleared).
+  useEffect(() => {
+    if (index === COMMUNITY_INDEX) markCommunitySeen();
+  }, [index, markCommunitySeen]);
 
   const goTo = useCallback((name: TabName) => {
     const i = TAB_NAMES.indexOf(name);
@@ -61,7 +72,7 @@ export default function TabsHost() {
           pageCount={PAGES.length}
           renderPage={renderPage}
         />
-        <BottomBar index={index} onSelect={setIndex} />
+        <BottomBar index={index} onSelect={setIndex} communityUnread={communityUnread} />
       </View>
     </TabsContext.Provider>
   );
@@ -70,9 +81,20 @@ export default function TabsHost() {
 /**
  * Floating, elevated nav bar: a rounded pill detached from the screen edges
  * with a soft shadow, and an accent-tinted pill behind the active tab so the
- * selection reads at a glance (reference-inspired).
+ * selection reads at a glance (reference-inspired). Also shows a small dot
+ * badge on the Community icon when a society-event update hasn't been seen
+ * yet — suppressed while that tab is the active one, since opening it (or
+ * already being on it) clears the unread state.
  */
-function BottomBar({ index, onSelect }: { index: number; onSelect: (i: number) => void }) {
+function BottomBar({
+  index,
+  onSelect,
+  communityUnread,
+}: {
+  index: number;
+  onSelect: (i: number) => void;
+  communityUnread: boolean;
+}) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   return (
@@ -99,11 +121,14 @@ function BottomBar({ index, onSelect }: { index: number; onSelect: (i: number) =
         {TAB_ICONS.map((Icon, i) => {
           const active = i === index;
           const color = active ? theme.colors.accent[700] : theme.colors.ink[40];
+          // Only badge the Community tab, and only while it isn't the one
+          // on screen — being on it already implies "seen".
+          const showBadge = i === COMMUNITY_INDEX && communityUnread && !active;
           return (
             <Pressable
               key={i}
               accessibilityRole="button"
-              accessibilityLabel={`${LABELS[i]} tab`}
+              accessibilityLabel={showBadge ? `${LABELS[i]}, new updates` : `${LABELS[i]} tab`}
               accessibilityState={{ selected: active }}
               onPress={() => onSelect(i)}
               style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
@@ -126,7 +151,24 @@ function BottomBar({ index, onSelect }: { index: number; onSelect: (i: number) =
                   backgroundColor: active ? theme.colors.accent.tint : 'transparent',
                 }}
               >
-                <Icon size={23} color={color} active={active} />
+                <View style={{ position: 'relative' }}>
+                  <Icon size={23} color={color} active={active} />
+                  {showBadge && (
+                    <View
+                      style={{
+                        position: 'absolute',
+                        top: -2,
+                        right: -3,
+                        width: 9,
+                        height: 9,
+                        borderRadius: 5,
+                        backgroundColor: theme.colors.feedback.danger,
+                        borderWidth: 1,
+                        borderColor: theme.colors.bg.elevated,
+                      }}
+                    />
+                  )}
+                </View>
                 <Text
                   weight="semibold"
                   numberOfLines={1}
