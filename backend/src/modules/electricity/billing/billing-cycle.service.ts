@@ -5,7 +5,7 @@ import { AuditService } from '../../audit/audit.service.js';
 import { RealtimeService } from '../../realtime/realtime.service.js';
 import { Prisma } from '../../../generated/prisma/client.js';
 import { AccountKind, BillBasis, BillingCycleStatus, BillingStage, FlatBillStatus, MeterKind, MeterStatus, RatificationStatus, Utility } from '../../../generated/prisma/enums.js';
-import type { BillingCycleModel, FlatBillModel, PaymentModel } from '../../../generated/prisma/models.js';
+import type { BillingCycleModel, PaymentModel } from '../../../generated/prisma/models.js';
 import type { PaymentPostCommitAction } from '../../payments/payments.service.js';
 import { TariffScheduleService } from '../tariff-schedule.service.js';
 import { parseTariffConfig } from '../tariff/tariff-config.parser.js';
