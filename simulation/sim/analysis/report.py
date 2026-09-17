@@ -96,10 +96,26 @@ def _write_report_md(scenario: str, params: SimParams, payload: dict, functional
     if payload.get("kind") in ("monte_carlo", "monte_carlo_plus_sensitivity"):
         lines.append(f"## Headline metrics ({payload.get('iterations_run')} Monte Carlo iterations)")
         lines.append("")
-        lines.append("| Metric | Mean | 95% CI low | 95% CI high | n |")
-        lines.append("|---|---|---|---|---|")
+        lines.append(
+            "Two distinct intervals are reported for every metric. The **95% CI of "
+            "the mean** is how precisely this run has pinned down the *average* "
+            "outcome across iterations — it narrows as more iterations run. The "
+            "**2.5th-97.5th percentile interval** is the spread a *single* "
+            "12-month run (i.e. a single society, in a single year) would actually "
+            "see — it does NOT narrow with more iterations, because it is a "
+            "property of the underlying model, not of measurement precision. "
+            "Quoting only the first kind of interval reads as near-certainty; the "
+            "second kind is the one that matters for \"how much could this vary "
+            "for us\"."
+        )
+        lines.append("")
+        lines.append("| Metric | Mean | 95% CI of mean (low) | 95% CI of mean (high) | P2.5 (per-run) | P97.5 (per-run) | n |")
+        lines.append("|---|---|---|---|---|---|---|")
         for name, summary in sorted(payload.get("metrics", {}).items()):
-            lines.append(f"| {name} | {summary['mean']:.2f} | {summary['ci95_low']:.2f} | {summary['ci95_high']:.2f} | {summary['n']} |")
+            lines.append(
+                f"| {name} | {summary['mean']:.2f} | {summary['ci95_mean_low']:.2f} | {summary['ci95_mean_high']:.2f} "
+                f"| {summary['p2_5']:.2f} | {summary['p97_5']:.2f} | {summary['n']} |"
+            )
         lines.append("")
 
     for key, rows in payload.items():
@@ -169,13 +185,31 @@ def _write_plots(scenario: str, payload: dict, raw_samples: dict | None, out_dir
             fig.savefig(out_dir / f"sweep_{key}_{y_key}.png", dpi=120)
             plt.close(fig)
 
-    if scenario == "corpus_sweep" and raw_samples and "shortfall_count" in raw_samples:
-        fig, ax = plt.subplots(figsize=(6, 4))
-        values = raw_samples["shortfall_count"]
-        bins = range(0, int(max(values)) + 2)
-        ax.hist(values, bins=bins, color="#7a4fa3", align="left", rwidth=0.8)
-        ax.set_title("FD-ladder shortfall frequency (seasonal cash calls missed)")
-        ax.set_xlabel("Shortfall count per 12-month run")
-        ax.set_ylabel("iterations")
-        fig.savefig(out_dir / "fd_ladder_shortfall_frequency.png", dpi=120)
-        plt.close(fig)
+    if scenario == "corpus_sweep" and raw_samples:
+        strategy_names = sorted({k[: -len("_shortfall_count")] for k in raw_samples if k.endswith("_shortfall_count")})
+        colors = {"all_liquid": "#c0562d", "single_maturity": "#3b6fa0", "laddered": "#7a4fa3"}
+        for strategy in strategy_names:
+            values = raw_samples.get(f"{strategy}_shortfall_count")
+            if not values:
+                continue
+            fig, ax = plt.subplots(figsize=(6, 4))
+            bins = range(0, int(max(values)) + 2)
+            ax.hist(values, bins=bins, color=colors.get(strategy, "#7a4fa3"), align="left", rwidth=0.8)
+            ax.set_title(f"{strategy}: shortfall frequency (seasonal cash calls missed)")
+            ax.set_xlabel("Shortfall count per 12-month run")
+            ax.set_ylabel("iterations")
+            fig.savefig(out_dir / f"fd_shortfall_frequency_{strategy}.png", dpi=120)
+            plt.close(fig)
+
+        interest_keys = [f"{s}_total_interest_earned_rs" for s in strategy_names if f"{s}_total_interest_earned_rs" in raw_samples]
+        if interest_keys:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            data = [raw_samples[k] for k in interest_keys]
+            names = [k[: -len("_total_interest_earned_rs")] for k in interest_keys]
+            ax.boxplot(data)
+            ax.set_xticks(range(1, len(names) + 1))
+            ax.set_xticklabels(names)
+            ax.set_title("Interest earned by strategy (same random draws)")
+            ax.set_ylabel("Interest earned (Rs)")
+            fig.savefig(out_dir / "fd_strategy_interest_comparison.png", dpi=120)
+            plt.close(fig)

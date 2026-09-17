@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sim.analysis.access_control import MATRIX, ROLES, effective_capability
+from sim.analysis.access_control import MATRIX, REMOVED_CAPABILITIES, ROLES, effective_status
 from sim.config import LT_TARIFF
 from sim.engine.electricity import apportion_by_area, compute_tariff
 from sim.engine.ledger import JournalEntry, Ledger
@@ -125,10 +125,14 @@ def check_pricing_card_binding() -> CheckResult:
 
 def check_access_control_matrix() -> CheckResult:
     """Exhaustive table check over every (capability, role, delegated) combination:
-    - every grant matches the encoded matrix (tautological given the same table,
-      but exercises `effective_capability`'s logic path for every cell), and
+    - resolving a non-"yes_if_delegated" cell never changes with `delegated`,
+    - resolving a "yes_if_delegated" cell for a tenant tracks `delegated` exactly, and
     - no financial or voting capability is EVER reachable via delegation to a tenant
-      beyond the tenant's own base (non-delegated) right.
+      beyond the tenant's own base (non-delegated) status — checked by requiring
+      that no financial/voting row's tenant cell is ever "yes_if_delegated" in
+      the first place (the only mechanism by which delegation could change
+      anything), so the exclusion holds structurally, not just for the
+      specific rows currently in the table.
     """
 
     violations = []
@@ -137,20 +141,39 @@ def check_access_control_matrix() -> CheckResult:
         for role in ROLES:
             for delegated in (False, True):
                 cells_checked += 1
-                eff = effective_capability(row, role, delegated_from_absentee=delegated)
-                if role == "tenant" and delegated and (row.is_financial or row.is_voting):
-                    tenant_base = row.grants["tenant"]
-                    if eff != tenant_base:
-                        violations.append(f"{row.capability} / tenant / delegated={delegated}: got {eff}, tenant's own base right is {tenant_base}")
-                if role != "tenant" or not delegated:
-                    if eff != row.grants[role]:
-                        violations.append(f"{row.capability} / {role} / delegated={delegated}: got {eff}, expected {row.grants[role]}")
+                eff = effective_status(row, role, delegated_from_absentee=delegated)
+                base = row.grants[role]
+                if role == "tenant" and base == "yes_if_delegated":
+                    expected = "yes" if delegated else "no"
+                    if eff != expected:
+                        violations.append(f"{row.capability} / tenant / delegated={delegated}: got {eff!r}, expected {expected!r}")
+                else:
+                    if eff != base:
+                        violations.append(f"{row.capability} / {role} / delegated={delegated}: got {eff!r}, expected unchanged {base!r}")
 
-    # Additional structural invariant: no financial or voting row is ever marked delegatable at all.
-    structurally_excluded = all(not row.delegatable for row in MATRIX if row.is_financial or row.is_voting)
+    # Structural invariant: no financial or voting row's tenant cell is ever
+    # "yes_if_delegated" — the only mechanism by which delegation could grant
+    # anything — so delegation can never confer a financial or voting
+    # capability on a tenant, for any row that could ever be added to this
+    # table under the same rule, not merely the rows present today.
+    financial_or_voting_rows = [row for row in MATRIX if row.is_financial or row.is_voting]
+    structurally_excluded = all(row.grants["tenant"] != "yes_if_delegated" for row in financial_or_voting_rows)
 
-    passed = (len(violations) == 0) and structurally_excluded
-    detail = f"cells_checked={cells_checked} violations={len(violations)} financial_or_voting_never_delegatable={structurally_excluded}"
+    # Every financial/approval/corpus row's tenant EFFECTIVE status, under delegation, must equal its own non-delegated status.
+    for row in financial_or_voting_rows:
+        undelegated = effective_status(row, "tenant", delegated_from_absentee=False)
+        delegated_eff = effective_status(row, "tenant", delegated_from_absentee=True)
+        if delegated_eff != undelegated:
+            structurally_excluded = False
+            violations.append(f"{row.capability}: delegation changed tenant's financial/voting status from {undelegated!r} to {delegated_eff!r}")
+
+    removed_absent = all(name not in {r.capability for r in MATRIX} for name in REMOVED_CAPABILITIES)
+
+    passed = (len(violations) == 0) and structurally_excluded and removed_absent
+    detail = (
+        f"cells_checked={cells_checked} violations={len(violations)} "
+        f"financial_or_voting_never_delegatable={structurally_excluded} removed_capabilities_absent={removed_absent}"
+    )
     if violations:
         detail += " | " + "; ".join(violations[:5])
     return CheckResult("access_control_matrix", passed, detail)

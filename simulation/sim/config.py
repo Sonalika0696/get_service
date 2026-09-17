@@ -286,12 +286,63 @@ CORPUS_STARTING_MONTHS_OF_DUES = 6.0  # illustrative assumption: corpus sized as
 
 # Seasonal cash calls: (month_index[0-11], multiple_of_monthly_dues). Illustrative
 # assumption: property tax, AMC renewal and festival advance create lumpy
-# seasonal outflows on top of routine opex.
+# seasonal outflows on top of routine opex. Each configured call is itself
+# STOCHASTIC at run time (see SEASONAL_CASH_CALL_SIZE_SIGMA / CASH_CALL_MONTH_JITTER
+# below) — the tuple below gives each call's illustrative EXPECTED month and size.
 SEASONAL_CASH_CALLS = (
     (3, 2.5),   # illustrative assumption: AMC renewal, month 4
     (6, 3.0),   # illustrative assumption: property tax instalment, month 7
     (9, 1.5),   # illustrative assumption: festival advance/bonus payouts, month 10
 )
+
+# Orchestrator review fix: a seasonal cash call's actual size varies year to
+# year (a property-tax instalment or AMC renewal is rarely exactly the
+# budgeted figure). Log-normal multiplicative noise around the configured
+# multiple. Illustrative assumption, not sourced from any real society's
+# accounts.
+SEASONAL_CASH_CALL_SIZE_SIGMA = 0.15
+
+# A cash call can land a month earlier or later than budgeted (e.g. a
+# property-tax due date shifting, an AMC renewal slipping). Illustrative
+# assumption: uniform integer jitter of at most this many months either way.
+CASH_CALL_MONTH_JITTER_MONTHS = 1
+
+# FD rates drift a little at each renewal rather than staying fixed for the
+# whole horizon (a real bank's card rate moves with the repo rate). Modelled
+# as independent-per-month normal noise, in PERCENTAGE POINTS, added to the
+# rung's configured annual_rate_pct at every rollover; the effective rate is
+# floored at 0. Illustrative assumption.
+FD_RATE_DRIFT_SIGMA_PCT_POINTS = 0.10
+
+# Rate earned on money that is NOT locked in an FD (the operating float
+# floor under every strategy, and the entire corpus under ALL_LIQUID).
+# Illustrative assumption: a savings/liquid sweep account rate, materially
+# below any FD tenor's rate — this is what makes "keep everything liquid"
+# a real trade-off rather than a free lunch in the strategy comparison.
+LIQUID_SAVINGS_RATE_PCT = 3.5
+
+# Fraction of the month's RAISED dues that is actually spent on routine
+# opex (maintenance staff, utilities, day-to-day running costs), as
+# distinct from the FULL amount raised (some of which is late-paid,
+# building the float, or represents dues never yet collected in that
+# month). Orchestrator review fix: the previous model subtracted the FULL
+# monthly dues figure regardless of the ~97-98% collection rate, which
+# manufactured a structural ~2%/month float drain and made every
+# "shortfall" an artefact of that mismatch rather than of the ladder
+# itself. Illustrative assumption, swept in the corpus_sweep scenario.
+OPEX_FRACTION_OF_DUES = 0.88
+
+# When a seasonal cash call cannot be met from the liquid float alone, a
+# strategy may prematurely break its soonest-maturing FD rather than
+# default. The bank penalises early withdrawal by cutting the rate for the
+# days actually held, mirroring a standard premature-withdrawal clause
+# (and the RoU's own laddered-placement design, which assumes withdrawal
+# is possible but costly, not free). Expressed in PERCENTAGE POINTS off
+# the rung's annual rate; floored at 0 (never a negative rate). Illustrative
+# assumption.
+PREMATURE_WITHDRAWAL_PENALTY_PCT_POINTS = 1.00
+
+TREASURY_STRATEGIES = ("all_liquid", "single_maturity", "laddered")
 
 
 @dataclass(frozen=True)
@@ -327,6 +378,13 @@ class SimParams:
     operating_float_floor_months: float = OPERATING_FLOAT_FLOOR_MONTHS
     corpus_starting_months_of_dues: float = CORPUS_STARTING_MONTHS_OF_DUES
     seasonal_cash_calls: tuple = SEASONAL_CASH_CALLS
+    seasonal_cash_call_size_sigma: float = SEASONAL_CASH_CALL_SIZE_SIGMA
+    cash_call_month_jitter_months: int = CASH_CALL_MONTH_JITTER_MONTHS
+    fd_rate_drift_sigma_pct_points: float = FD_RATE_DRIFT_SIGMA_PCT_POINTS
+    liquid_savings_rate_pct: float = LIQUID_SAVINGS_RATE_PCT
+    opex_fraction_of_dues: float = OPEX_FRACTION_OF_DUES
+    premature_withdrawal_penalty_pct_points: float = PREMATURE_WITHDRAWAL_PENALTY_PCT_POINTS
+    treasury_strategies: tuple = TREASURY_STRATEGIES
 
     mc_min_iterations: int = MC_MIN_ITERATIONS
     mc_max_iterations: int = MC_MAX_ITERATIONS

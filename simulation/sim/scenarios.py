@@ -12,7 +12,7 @@ from dataclasses import replace
 import numpy as np
 
 from sim.analysis.monte_carlo import run_until_stable
-from sim.analysis.sensitivity import sweep, sweep_2d
+from sim.analysis.sensitivity import metrics_to_row, sweep, sweep_2d
 from sim.config import SimParams
 from sim.engine import collections as collections_engine
 from sim.engine import electricity as electricity_engine
@@ -106,18 +106,39 @@ def sample_water(params: SimParams, rng: np.random.Generator) -> dict:
 
 
 def sample_treasury(params: SimParams, rng: np.random.Generator) -> dict:
-    behaviour_on_time = {b.name: b.on_time_prob for b in params.payment_behaviour_classes}
+    """One Monte Carlo iteration for the corpus-sweep scenario: runs every
+    configured treasury strategy (all_liquid / single_maturity / laddered)
+    on the SAME collection-rate, cash-call and rate-drift draws (common
+    random numbers — see engine/treasury.py), and flattens the per-strategy
+    results into strategy-prefixed scalar metrics.
+    """
+
+    # Expected fraction of a month's dues EVENTUALLY collected (not merely
+    # paid on time): per sim.engine.collections, a flat's dues are collected
+    # in full unless that flat defaults outright for the month, regardless
+    # of how late the (still fully due) payment arrives — so the right
+    # center for the monthly collection-rate proxy is 1 - P(default),
+    # weighted across behaviour classes, NOT the on-time probability (which
+    # would wrongly treat "paid a month late" as "not collected" and
+    # manufacture a structural deficit that has nothing to do with the
+    # treasury strategy). Orchestrator review fix, alongside the
+    # opex_fraction_of_dues change in engine/treasury.py.
+    behaviour_default = {b.name: b.default_prob for b in params.payment_behaviour_classes}
     behaviour_weight = {b.name: b.weight for b in params.payment_behaviour_classes}
-    avg_on_time = sum(behaviour_on_time[n] * w for n, w in behaviour_weight.items())
-    monthly_collection_rate = rng.normal(avg_on_time, 0.04, size=params.horizon_months).clip(0.4, 1.0)
+    expected_collection_fraction = sum((1 - behaviour_default[n]) * w for n, w in behaviour_weight.items())
+    monthly_collection_rate = rng.normal(expected_collection_fraction, 0.02, size=params.horizon_months).clip(0.4, 1.0)
 
     result = treasury_engine.simulate_treasury(params, monthly_collection_rate, rng)
-    return {
-        "total_interest_earned_rs": result.total_interest_earned,
-        "shortfall_count": result.shortfall_count,
-        "shortfall_rate_pct": (result.shortfall_count / max(1, len(params.seasonal_cash_calls))) * 100,
-        "ending_liquid_float_rs": result.ending_liquid_float,
-    }
+
+    out = {"structural_monthly_surplus_deficit_rs": result.structural_monthly_surplus_deficit_rs}
+    for name, strategy_result in result.strategies.items():
+        out[f"{name}_total_interest_earned_rs"] = strategy_result.total_interest_earned
+        out[f"{name}_shortfall_count"] = strategy_result.shortfall_count
+        out[f"{name}_met_via_premature_break_count"] = strategy_result.met_via_premature_break_count
+        out[f"{name}_shortfall_rate_pct"] = strategy_result.shortfall_rate_pct
+        out[f"{name}_prob_any_shortfall"] = strategy_result.any_shortfall
+        out[f"{name}_ending_liquid_float_rs"] = strategy_result.ending_liquid_float
+    return out
 
 
 def sample_baseline(params: SimParams, rng: np.random.Generator) -> dict:
@@ -165,17 +186,17 @@ def scenario_electricity_sensitivity(params: SimParams) -> dict:
         scaled_tariff = replace(params.ht_tariff, slabs=scaled_slabs)
         p = replace(params, ht_tariff=scaled_tariff, mc_max_iterations=iterations_cap, mc_min_iterations=min(params.mc_min_iterations, iterations_cap))
         result = run_until_stable(p, sample_ht_vs_lt)
-        diff_points.append({"ht_rate_multiplier": mult, "iterations": result.iterations_run, **{f"{k}_mean": v.mean for k, v in result.metrics.items()}})
+        diff_points.append({"ht_rate_multiplier": mult, "iterations": result.iterations_run, **metrics_to_row(result.metrics)})
 
     load_fractions = [0.05, 0.10, 0.14, 0.20, 0.30]
     load_points = sweep(params, "common_area_load_fraction", load_fractions, sample_ht_vs_lt, iterations_cap=iterations_cap)
     load_rows = [{"common_area_load_fraction": pt.param_value, "iterations": pt.result.iterations_run,
-                  **{f"{k}_mean": v.mean for k, v in pt.result.metrics.items()}} for pt in load_points]
+                  **metrics_to_row(pt.result.metrics)} for pt in load_points]
 
     margin_caps = [0.0, 0.01, 0.02, 0.03, 0.05, 0.08]
     margin_points = sweep(params, "regulatory_margin_cap_fraction", margin_caps, sample_ht_vs_lt, iterations_cap=iterations_cap)
     margin_rows = [{"regulatory_margin_cap_fraction": pt.param_value, "iterations": pt.result.iterations_run,
-                    **{f"{k}_mean": v.mean for k, v in pt.result.metrics.items()}} for pt in margin_points]
+                    **metrics_to_row(pt.result.metrics)} for pt in margin_points]
 
     return {
         "kind": "sensitivity",
@@ -190,12 +211,18 @@ def scenario_pooling_aggregation(params: SimParams) -> dict:
     participation_rates = [0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1.0]
     participation_points = sweep(params, "participation_rate", participation_rates, sample_pooling, iterations_cap=iterations_cap)
     participation_rows = [{"participation_rate": pt.param_value, "iterations": pt.result.iterations_run,
-                           **{f"{k}_mean": v.mean for k, v in pt.result.metrics.items()}} for pt in participation_points]
+                           **metrics_to_row(pt.result.metrics)} for pt in participation_points]
 
     # Category-threshold sensitivity: vary the bulk_grocery category's threshold explicitly (it is not a top-level
     # SimParams field, so this loop constructs the modified service_categories tuple by hand rather than using sweep()).
+    # Orchestrator review fix: the original threshold grid (5-40) never
+    # exceeded typical participation (~49.5 of 90 flats at the default 0.55
+    # participation rate), so every pool always cleared and the threshold
+    # dimension was untested (proceeded stayed at ~1.0 throughout). This
+    # grid extends well past the typical participant count so the pool
+    # visibly LAPSES (proceeded << 1.0, saving -> 0) at the high end.
     threshold_rows = []
-    thresholds = [5, 10, 15, 25, 40]
+    thresholds = [5, 10, 15, 25, 40, 55, 65, 80]
     for t in thresholds:
         new_categories = tuple(
             replace(c, threshold=t) if c.name == "bulk_grocery" else c for c in params.service_categories
@@ -203,9 +230,8 @@ def scenario_pooling_aggregation(params: SimParams) -> dict:
         p = replace(params, service_categories=new_categories, mc_max_iterations=iterations_cap, mc_min_iterations=min(params.mc_min_iterations, iterations_cap))
         result = run_until_stable(p, sample_pooling)
         row = {"bulk_grocery_threshold": t, "iterations": result.iterations_run}
-        for k, v in result.metrics.items():
-            if k.startswith("bulk_grocery"):
-                row[f"{k}_mean"] = v.mean
+        bulk_grocery_metrics = {k: v for k, v in result.metrics.items() if k.startswith("bulk_grocery")}
+        row.update(metrics_to_row(bulk_grocery_metrics))
         threshold_rows.append(row)
 
     return {
@@ -226,7 +252,7 @@ def scenario_water_volatility(params: SimParams) -> dict:
     interruption_probs = [0.0, 0.03, 0.06, 0.12, 0.20, 0.35]
     points = sweep(params, "municipal_interruption_prob", interruption_probs, sample_water, iterations_cap=iterations_cap)
     rows = [{"municipal_interruption_prob": pt.param_value, "iterations": pt.result.iterations_run,
-             **{f"{k}_mean": v.mean for k, v in pt.result.metrics.items()}} for pt in points]
+             **metrics_to_row(pt.result.metrics)} for pt in points]
 
     baseline_payload["kind"] = "monte_carlo_plus_sensitivity"
     baseline_payload["interruption_sensitivity"] = rows
@@ -240,12 +266,12 @@ def scenario_corpus_sweep(params: SimParams) -> dict:
     corpus_months = [3.0, 4.5, 6.0, 8.0, 10.0, 12.0]
     corpus_points = sweep(params, "corpus_starting_months_of_dues", corpus_months, sample_treasury, iterations_cap=iterations_cap)
     corpus_rows = [{"corpus_starting_months_of_dues": pt.param_value, "iterations": pt.result.iterations_run,
-                    **{f"{k}_mean": v.mean for k, v in pt.result.metrics.items()}} for pt in corpus_points]
+                    **metrics_to_row(pt.result.metrics)} for pt in corpus_points]
 
     float_floor_months = [0.5, 1.0, 2.0, 3.0, 4.0]
     float_points = sweep(params, "operating_float_floor_months", float_floor_months, sample_treasury, iterations_cap=iterations_cap)
     float_rows = [{"operating_float_floor_months": pt.param_value, "iterations": pt.result.iterations_run,
-                   **{f"{k}_mean": v.mean for k, v in pt.result.metrics.items()}} for pt in float_points]
+                   **metrics_to_row(pt.result.metrics)} for pt in float_points]
 
     baseline_payload["kind"] = "monte_carlo_plus_sensitivity"
     baseline_payload["corpus_size_sensitivity"] = corpus_rows
