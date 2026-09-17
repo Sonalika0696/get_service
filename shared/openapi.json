@@ -1,6 +1,14 @@
 {
   "components": {
     "schemas": {
+      "AccrueLateFeesDto": {
+        "properties": {
+          "asOf": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "AddVendorCategoryDto": {
         "properties": {
           "category": {
@@ -100,6 +108,19 @@
           "occupancyId",
           "delegateUserId",
           "scope"
+        ],
+        "type": "object"
+      },
+      "CreateInstalmentPlanDto": {
+        "properties": {
+          "instalments": {
+            "description": "Number of instalments to split the charge's outstanding balance across; must be at least 2 (1 instalment is just \"pay in full\").",
+            "minimum": 2,
+            "type": "number"
+          }
+        },
+        "required": [
+          "instalments"
         ],
         "type": "object"
       },
@@ -526,6 +547,25 @@
         "required": [
           "minN",
           "pct"
+        ],
+        "type": "object"
+      },
+      "GenerateMaintenanceDto": {
+        "properties": {
+          "dueDay": {
+            "description": "Optional day-of-month (1-28, to stay valid across every month) the charge falls due on, within `period`'s own month.",
+            "maximum": 28,
+            "minimum": 1,
+            "type": "number"
+          },
+          "period": {
+            "description": "Billing period, 'YYYY-MM'.",
+            "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "period"
         ],
         "type": "object"
       },
@@ -2192,6 +2232,138 @@
         ]
       }
     },
+    "/api/v1/maintenance/accrue-late-fees": {
+      "post": {
+        "operationId": "MaintenanceController_accrueLateFees",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccrueLateFeesDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Accrues late fees on every PENDING/PARTIAL charge past its due date.",
+        "tags": [
+          "Maintenance"
+        ]
+      }
+    },
+    "/api/v1/maintenance/charges": {
+      "get": {
+        "operationId": "MaintenanceController_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Committee/treasurer listing, optionally filtered by period/status.",
+        "tags": [
+          "Maintenance"
+        ]
+      }
+    },
+    "/api/v1/maintenance/charges/{id}/instalment-plan": {
+      "post": {
+        "operationId": "MaintenanceController_createInstalmentPlan",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInstalmentPlanDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Resident-self instalment plan on their OWN charge, OR a committee/\ntreasurer officer on any charge in the society — picked over\ncommittee-only because splitting one's own bill into instalments is\nfundamentally a resident self-service action (mirrors how a resident\nsigns off their own JobCard in bulk-buy), with the officer path kept\nfor a committee member setting one up on a resident's behalf.",
+        "tags": [
+          "Maintenance"
+        ]
+      }
+    },
+    "/api/v1/maintenance/generate": {
+      "post": {
+        "operationId": "MaintenanceController_generate",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "idempotency-key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateMaintenanceDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "Generates one MaintenanceCharge per flat for `period` — idempotent, safe to re-run.",
+        "tags": [
+          "Maintenance"
+        ]
+      }
+    },
     "/api/v1/me": {
       "get": {
         "operationId": "UsersController_me",
@@ -2239,6 +2411,46 @@
         },
         "tags": [
           "Users"
+        ]
+      }
+    },
+    "/api/v1/me/bills": {
+      "get": {
+        "operationId": "BillsController_listBills",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Bills"
         ]
       }
     },
@@ -2371,6 +2583,27 @@
         },
         "tags": [
           "Delegation"
+        ]
+      }
+    },
+    "/api/v1/me/home": {
+      "get": {
+        "operationId": "HomeController_home",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "Home"
         ]
       }
     },
