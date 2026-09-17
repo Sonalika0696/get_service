@@ -1,0 +1,17 @@
+# FRONTEND_PLAN §7 — Phase: Community (F5)
+#
+# Opens the Community tab (src/sections/NoticesSection.tsx — the route/
+# translation key is "notices", the visible tab label and screen title are
+# "Community" per src/i18n/en.json notices.title). Asserts both feed
+# section headers ("Happening in your society" for events, "Neighbours are
+# hiring" for hiring posts) and the "Post" FAB, all of which render
+# unconditionally as section/list headers regardless of whether either
+# feed has data yet.
+appId: com.gatex.resident
+---
+- runFlow: sign-in.yaml
+- tapOn: "Community"
+- assertVisible: "Community"
+- assertVisible: "Happening in your society"
+- assertVisible: "Neighbours are hiring"
+- assertVisible: "Post"

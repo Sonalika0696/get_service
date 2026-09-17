@@ -1,0 +1,13 @@
+# FRONTEND_PLAN §7 — Phase: Bills (F3)
+#
+# Opens the Bills tab (src/sections/BillsSection.tsx) and asserts the hub
+# title and segmented control render. "Due now" / "All" come from
+# src/i18n/en.json (bills.segment.dueNow / bills.segment.all) and are
+# always shown regardless of whether the bills query has resolved yet.
+appId: com.gatex.resident
+---
+- runFlow: sign-in.yaml
+- tapOn: "Bills"
+- assertVisible: "Bills"
+- assertVisible: "Due now"
+- assertVisible: "All"

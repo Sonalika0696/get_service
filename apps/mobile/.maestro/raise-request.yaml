@@ -1,0 +1,26 @@
+# FRONTEND_PLAN §7 — Phase: Requests (F4)
+#
+# Opens the Requests tab, taps the "Raise" FAB (src/sections/RequestsSection
+# .tsx), and fills the compose screen (app/requests/new.tsx). Picking a
+# vendor is skipped deliberately: the vendor list for a category is fed by
+# a live backend query and may be empty in a fresh environment, so it isn't
+# a stable selector to assert on. The flow proves the form is reachable and
+# fillable (category chip + title field + primary button all render), then
+# backs out with Cancel instead of submitting, since submission needs a
+# real tagged vendor.
+appId: com.gatex.resident
+---
+- runFlow: sign-in.yaml
+- tapOn: "Requests"
+- assertVisible: "Requests"
+- tapOn: "Raise"
+- assertVisible: "Raise a request"
+- assertVisible: "Category"
+- tapOn: "Plumbing"
+- assertVisible: "Vendor"
+- assertVisible: "Title"
+- tapOn:
+    text: "e.g. Deep-clean tank on the roof"
+- inputText: "Leaking tap in kitchen, block A"
+- assertVisible: "Raise this request"
+- tapOn: "Cancel"

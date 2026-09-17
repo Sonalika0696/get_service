@@ -1,0 +1,25 @@
+# FRONTEND_PLAN §7 — Phase: Auth (F1)
+#
+# Signs in via the "Developer sign-in" dev-bypass button on the sign-in
+# screen (app/auth/sign-in.tsx). That button is only rendered when __DEV__
+# is true, so this flow must run against a debug/dev-client build, never a
+# release build. It skips the OTP flow entirely (auth.devSignIn()), then
+# AuthGate (app/_layout.tsx) redirects to the (tabs) host once the session
+# resolves as signed-in.
+#
+# Other flows in this directory reuse this one via `runFlow: sign-in.yaml`
+# to reach an authenticated state before exercising their own journey.
+appId: com.gatex.resident
+---
+- launchApp
+- assertVisible: "Welcome"
+- assertVisible: "Developer sign-in"
+- tapOn: "Developer sign-in"
+# The bottom tab bar (app/(tabs)/index.tsx, BottomBar) renders these five
+# labels unconditionally, regardless of whether backend-fed data has
+# loaded, so they are a stable signal that sign-in landed on the Home tab.
+- assertVisible: "Home"
+- assertVisible: "Bills"
+- assertVisible: "Requests"
+- assertVisible: "Community"
+- assertVisible: "Profile"

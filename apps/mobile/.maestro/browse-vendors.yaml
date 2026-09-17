@@ -1,0 +1,20 @@
+# FRONTEND_PLAN §7 — Phase: Vendor directory
+#
+# There is currently no in-app nav link into the vendor directory
+# (app/vendors/index.tsx) from any tab — it's only reached today via
+# `router.push('/vendors/${id}')` from a vendor row elsewhere, or by
+# composing a request. So this flow deep-links straight to the route using
+# the app's `scheme` (app.json -> expo.scheme = "sft"), which expo-router
+# resolves to the /vendors screen. Confirm this still matches once a direct
+# entry point exists in the UI.
+appId: com.gatex.resident
+---
+- runFlow: sign-in.yaml
+- openLink: "sft://vendors"
+- assertVisible: "Vendors"
+- assertVisible:
+    text: "Search by name"
+- assertVisible: "All"
+- assertVisible: "Plumbing"
+- tapOn: "Plumbing"
+- assertVisible: "Plumbing"
