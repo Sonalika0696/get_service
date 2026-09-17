@@ -25,5 +25,19 @@ services:
       - "1080:1080" # web UI
       - "1025:1025" # SMTP
 
+  # Phase 10 — Redis backs the BullMQ billing worker tier (billing runs are
+  # long and must be restartable). Only used when a billing cycle is run.
+  redis:
+    image: redis:7-alpine
+    container_name: society_fintech_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   postgres_data:

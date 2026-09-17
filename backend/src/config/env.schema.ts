@@ -77,6 +77,25 @@ export const envSchema = z.object({
    * officer-auth. Accepts "true"/"1" as truthy, anything else is false.
    */
   THROTTLE_ENABLED: z.preprocess((value) => value === 'true' || value === '1', z.boolean()).default(true),
+
+  // --- Phase 10 (electricity/water billing worker tier) ---
+  /**
+   * Redis connection for the BullMQ-backed billing worker tier (billing runs
+   * are long and must be restartable — see BACKEND_PLAN.md Phase 10). Only
+   * touched when a billing cycle is actually run; the rest of the app never
+   * connects to Redis, so dev/test that never trigger a cycle need no Redis.
+   */
+  REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
+  /**
+   * When true (the default, and always in dev/test), the billing-cycle
+   * pipeline stages execute INLINE inside the request/service call rather than
+   * being dispatched to a separate BullMQ worker process — so the e2e suite
+   * and a single-process dev server can run a full cycle end-to-end without a
+   * running worker or Redis. Set BILLING_WORKER_INLINE=false in a deployment
+   * that runs a dedicated `node dist/worker.js` process against Redis. Opt-out:
+   * only the literal "false"/"0" disables it.
+   */
+  BILLING_WORKER_INLINE: z.preprocess((value) => !(value === 'false' || value === '0'), z.boolean()).default(true),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -34,6 +34,8 @@ export class AppConfigService {
       SMS_ENABLED: configService.get('SMS_ENABLED', { infer: true }),
       TOTP_ISSUER: configService.get('TOTP_ISSUER', { infer: true }),
       THROTTLE_ENABLED: configService.get('THROTTLE_ENABLED', { infer: true }),
+      REDIS_URL: configService.get('REDIS_URL', { infer: true }),
+      BILLING_WORKER_INLINE: configService.get('BILLING_WORKER_INLINE', { infer: true }),
     };
   }
 
