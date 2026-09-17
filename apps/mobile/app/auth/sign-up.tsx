@@ -93,7 +93,7 @@ export default function SignUp() {
           keyboardShouldPersistTaps="handled"
         >
           <View style={{ gap: theme.spacing.xs }}>
-            <Text variant="display" weight="semibold">Claim your flat</Text>
+            <Text variant="display" weight="semibold" accessibilityRole="header">Claim your flat</Text>
             <Text variant="body" tone="secondary">
               Your committee handed out a society code and a flat code. Enter them here to join.
             </Text>

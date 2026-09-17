@@ -89,7 +89,7 @@ function VendorBody({ vendor }: { vendor: NonNullable<ReturnType<typeof useVendo
         >
           <Storefront size={32} color={theme.colors.accent[700]} weight="duotone" />
         </View>
-        <Text variant="display" weight="semibold">{vendor.name}</Text>
+        <Text variant="display" weight="semibold" accessibilityRole="header">{vendor.name}</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
           {vendor.categories.map((c) => (
             <View
@@ -197,6 +197,8 @@ function PricingCardLink({ vendorId }: { vendorId: string }) {
     <View>
       <SectionLabel>Pricing card</SectionLabel>
       <View
+        accessible
+        accessibilityRole="button"
         onTouchEnd={() => router.push(`/vendors/${vendorId}/pricing` as never)}
         style={{
           backgroundColor: theme.colors.bg.elevated,

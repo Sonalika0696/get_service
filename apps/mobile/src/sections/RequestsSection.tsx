@@ -67,7 +67,7 @@ export default function RequestsScreen() {
         ListHeaderComponent={
           <View style={{ gap: theme.spacing.lg }}>
             <View>
-              <Text variant="display" weight="semibold">{t('requests.title')}</Text>
+              <Text variant="display" weight="semibold" accessibilityRole="header">{t('requests.title')}</Text>
               <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
                 {t('requests.subtitle')}
               </Text>

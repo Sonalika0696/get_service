@@ -108,7 +108,7 @@ export function PollRow({
               accessibilityRole="button"
               accessibilityLabel="Edit this request"
               onPress={onEdit}
-              hitSlop={8}
+              hitSlop={10}
               style={({ pressed }) => ({
                 marginLeft: 'auto',
                 flexDirection: 'row',

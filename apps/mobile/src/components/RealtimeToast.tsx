@@ -31,6 +31,7 @@ export function RealtimeToast({ toast }: { toast: RealtimeToastState | null }) {
     >
       <View
         accessibilityRole="alert"
+        accessibilityLiveRegion="polite"
         style={[
           {
             flexDirection: 'row',

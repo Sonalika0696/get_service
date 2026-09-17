@@ -107,7 +107,7 @@ function PostBody({ post }: { post: NonNullable<ReturnType<typeof useJobPost>['d
           ) : null}
         </View>
 
-        <Text variant="display" weight="semibold">{post.title}</Text>
+        <Text variant="display" weight="semibold" accessibilityRole="header">{post.title}</Text>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <CalendarBlank size={14} color={theme.colors.ink[60]} weight="duotone" />

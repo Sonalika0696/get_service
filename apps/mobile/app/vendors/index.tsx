@@ -52,7 +52,7 @@ export default function VendorsIndex() {
             onPress={() => router.back()}
           />
         </View>
-        <Text variant="display" weight="semibold">Vendors</Text>
+        <Text variant="display" weight="semibold" accessibilityRole="header">Vendors</Text>
         <Text variant="body" tone="secondary">
           Committee-onboarded for your society. Rate after work; ratings are visible to everyone.
         </Text>
@@ -74,6 +74,7 @@ export default function VendorsIndex() {
             value={q}
             onChangeText={setQ}
             placeholder="Search by name"
+            accessibilityLabel="Search vendors by name"
             placeholderTextColor={theme.colors.ink[40]}
             style={{
               flex: 1,

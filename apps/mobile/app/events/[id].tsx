@@ -119,7 +119,7 @@ function EventBody({
         >
           <CalendarBlank size={28} color={theme.colors.accent[700]} weight="duotone" />
         </View>
-        <Text variant="display" weight="semibold">{event.title}</Text>
+        <Text variant="display" weight="semibold" accessibilityRole="header">{event.title}</Text>
         {event.description ? (
           <Text variant="body" tone="secondary">{event.description}</Text>
         ) : null}

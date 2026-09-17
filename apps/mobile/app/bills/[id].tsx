@@ -68,7 +68,7 @@ export default function BillDetail() {
                   <Text variant="caption" weight="semibold" tone="danger">Overdue</Text>
                 ) : null}
               </View>
-              <Text variant="display" weight="semibold">{line.title}</Text>
+              <Text variant="display" weight="semibold" accessibilityRole="header">{line.title}</Text>
               <Money
                 minor={line.amountMinor}
                 currency={line.currency}
@@ -119,6 +119,8 @@ function TraceLink({ billId, kind }: { billId: string; kind: 'ELECTRICITY' | 'WA
     <View>
       <SectionLabel>Computation trace</SectionLabel>
       <View
+        accessible
+        accessibilityRole="button"
         onTouchEnd={() => router.push(`/bills/${billId}/trace` as never)}
         style={{
           backgroundColor: theme.colors.bg.elevated,
@@ -154,6 +156,8 @@ function EvidenceLink({ evidence }: { evidence: EvidenceRef }) {
     <View>
       <SectionLabel>Evidence</SectionLabel>
       <View
+        accessible={Boolean(href)}
+        accessibilityRole={href ? 'button' : undefined}
         onTouchEnd={href ? () => router.push(href as never) : undefined}
         style={{
           backgroundColor: theme.colors.bg.elevated,

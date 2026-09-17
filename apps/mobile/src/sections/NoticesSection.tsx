@@ -149,7 +149,7 @@ export default function NoticesScreen() {
         stickySectionHeadersEnabled={false}
         ListHeaderComponent={
           <View style={{ marginBottom: theme.spacing.lg }}>
-            <Text variant="display" weight="semibold">{t('notices.title')}</Text>
+            <Text variant="display" weight="semibold" accessibilityRole="header">{t('notices.title')}</Text>
             <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
               {t('notices.subtitle')}
             </Text>

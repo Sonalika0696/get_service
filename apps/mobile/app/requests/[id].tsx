@@ -115,7 +115,7 @@ function PollBody({
           ) : null}
           <StatusPill status={poll.status} />
         </View>
-        <Text variant="display" weight="semibold">{poll.title}</Text>
+        <Text variant="display" weight="semibold" accessibilityRole="header">{poll.title}</Text>
         {poll.description ? (
           <Text variant="body" tone="secondary">{poll.description}</Text>
         ) : null}
@@ -256,6 +256,8 @@ function ChargeSheetLink({ bookingId }: { bookingId: string }) {
     <View>
       <SectionLabel>After the work</SectionLabel>
       <View
+        accessible
+        accessibilityRole="button"
         onTouchEnd={() => router.push(`/bookings/${bookingId}/charge-sheet` as never)}
         style={{
           backgroundColor: theme.colors.bg.elevated,

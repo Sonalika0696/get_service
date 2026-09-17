@@ -113,7 +113,12 @@ export default function HomeScreen() {
         <Text variant="caption" tone="muted" weight="semibold">
           {preview.flat.society} · {preview.flat.label}
         </Text>
-        <Text variant="display" weight="semibold" style={{ marginTop: 4 }}>
+        <Text
+          variant="display"
+          weight="semibold"
+          accessibilityRole="header"
+          style={{ marginTop: 4 }}
+        >
           {hello}{firstName ? `, ${firstName}` : ''}
         </Text>
       </View>
@@ -168,6 +173,7 @@ export default function HomeScreen() {
               variant="body"
               weight="semibold"
               tone="accent"
+              accessibilityRole="button"
               onPress={() => goTo('requests')}
             >
               {t('common.seeAll')}

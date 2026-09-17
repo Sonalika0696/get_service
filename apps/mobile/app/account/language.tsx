@@ -67,7 +67,7 @@ export default function Language() {
         }}
       >
         <View>
-          <Text variant="display" weight="semibold">{t('account.language.title')}</Text>
+          <Text variant="display" weight="semibold" accessibilityRole="header">{t('account.language.title')}</Text>
           <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
             {t('account.language.subtitle')}
           </Text>

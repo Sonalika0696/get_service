@@ -45,6 +45,7 @@ export function OfflineBanner() {
   return (
     <View
       accessibilityRole="alert"
+      accessibilityLiveRegion="polite"
       style={{
         backgroundColor: theme.colors.feedback.warningTint,
         paddingVertical: theme.spacing.xs,

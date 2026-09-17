@@ -75,7 +75,10 @@ export function DuesCard({
         ))}
       </View>
 
-      <View>
+      <View
+        accessible
+        accessibilityLabel={`Amount due ${amountSpokenLabel(amountMinor, currency)}${dueOn ? `, due by ${dueOn}` : ''}`}
+      >
         <Text variant="caption" tone="onAccent" style={{ opacity: 0.72 }}>
           Amount due
         </Text>
@@ -148,4 +151,15 @@ function formatMinor(minor: number, currency: string): string {
     maximumFractionDigits: 0,
   });
   return formatter.format(value);
+}
+
+/**
+ * A screen-reader-friendly reading of the amount — "12,450 rupees" instead
+ * of a screen reader trying (and often failing) to sound out "₹12,450".
+ */
+function amountSpokenLabel(minor: number, currency: string): string {
+  const value = minor / 100;
+  const formatter = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 });
+  const unit = currency === 'INR' ? 'rupees' : currency;
+  return `${formatter.format(value)} ${unit}`;
 }

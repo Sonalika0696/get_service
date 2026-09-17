@@ -23,7 +23,7 @@ export function FilterChip({
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
       onPress={onPress}
-      hitSlop={4}
+      hitSlop={6}
       style={({ pressed }) => ({
         paddingHorizontal: 14,
         paddingVertical: 8,

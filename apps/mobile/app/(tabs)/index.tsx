@@ -103,6 +103,7 @@ function BottomBar({ index, onSelect }: { index: number; onSelect: (i: number) =
             <Pressable
               key={i}
               accessibilityRole="button"
+              accessibilityLabel={`${LABELS[i]} tab`}
               accessibilityState={{ selected: active }}
               onPress={() => onSelect(i)}
               style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}

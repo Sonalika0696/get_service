@@ -92,13 +92,17 @@ export default function Verify() {
           keyboardShouldPersistTaps="handled"
         >
           <View style={{ gap: theme.spacing.xs }}>
-            <Text variant="display" weight="semibold">Enter the code</Text>
+            <Text variant="display" weight="semibold" accessibilityRole="header">Enter the code</Text>
             <Text variant="body" tone="secondary">
               Six digits sent to {maskIdentifier(params.phone, params.email)}.
             </Text>
           </View>
 
-          <Pressable onPress={() => inputRef.current?.focus()}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Verification code entry, ${code.length} of ${CELLS} digits entered`}
+            onPress={() => inputRef.current?.focus()}
+          >
             <View style={{ flexDirection: 'row', gap: 10 }}>
               {cells.map((c, i) => (
                 <Cell key={i} value={c} focused={i === code.length && !busy} />
@@ -134,7 +138,12 @@ export default function Verify() {
             <Text variant="caption" tone="muted">
               Didn't get it?
             </Text>
-            <Pressable disabled={resendIn > 0} onPress={resend}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: resendIn > 0 }}
+              disabled={resendIn > 0}
+              onPress={resend}
+            >
               <Text
                 variant="body"
                 weight="semibold"

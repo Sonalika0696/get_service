@@ -108,7 +108,7 @@ export default function ProfileScreen() {
         </View>
 
         <View style={{ alignItems: 'center', gap: 2 }}>
-          <Text variant="display" weight="semibold" align="center">{me?.name ?? 'You'}</Text>
+          <Text variant="display" weight="semibold" align="center" accessibilityRole="header">{me?.name ?? 'You'}</Text>
           <Text variant="body" tone="muted" align="center">
             {[me?.email, me?.phone].filter(Boolean).join('  ·  ')}
           </Text>

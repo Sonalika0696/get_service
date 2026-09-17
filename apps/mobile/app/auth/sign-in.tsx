@@ -65,7 +65,12 @@ export default function SignIn() {
 
           <View style={{ gap: theme.spacing.xs }}>
             <Wordmark height={30} />
-            <Text variant="display" weight="semibold" style={{ marginTop: theme.spacing.sm }}>
+            <Text
+              variant="display"
+              weight="semibold"
+              accessibilityRole="header"
+              style={{ marginTop: theme.spacing.sm }}
+            >
               Welcome
             </Text>
             <Text variant="body" tone="secondary">

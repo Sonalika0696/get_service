@@ -61,7 +61,7 @@ export default function BillsScreen() {
         ListHeaderComponent={
           <View style={{ gap: theme.spacing.lg }}>
             <View>
-              <Text variant="display" weight="semibold">{t('bills.title')}</Text>
+              <Text variant="display" weight="semibold" accessibilityRole="header">{t('bills.title')}</Text>
               <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
                 {t('bills.subtitle')}
               </Text>
@@ -144,7 +144,10 @@ function HeroDueCard({
         ...theme.shadows.md.native,
       }}
     >
-      <View>
+      <View
+        accessible
+        accessibilityLabel={`${t('bills.totalDue')}: ${amountSpokenLabel(totalMinor)}. ${totalMinor > 0 ? t('bills.acrossRails') : t('bills.allClear')}`}
+      >
         <Text variant="caption" tone="onAccent" style={{ opacity: 0.72 }}>
           {t('bills.totalDue')}
         </Text>
@@ -191,6 +194,18 @@ function HeroDueCard({
       </View>
     </View>
   );
+}
+
+/**
+ * A screen-reader-friendly reading of the total due — "12,450 rupees"
+ * instead of a screen reader trying (and often failing) to sound out
+ * "₹12,450".
+ */
+function amountSpokenLabel(minor: number, currency = 'INR'): string {
+  const value = minor / 100;
+  const formatter = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 });
+  const unit = currency === 'INR' ? 'rupees' : currency;
+  return `${formatter.format(value)} ${unit}`;
 }
 
 function railLabel(rail: PaymentRail): string {
