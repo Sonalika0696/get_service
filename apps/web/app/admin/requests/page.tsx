@@ -16,7 +16,7 @@ import { CreateOfferModal } from '@/components/pooling/create-offer-modal';
 import { VendorConfirmModal } from '@/components/pooling/vendor-confirm-modal';
 import { committee, pooling } from '@/lib/endpoints';
 import { getIdentity } from '@/lib/session';
-import { staggerContainer } from '@/lib/motion';
+import { boundedStagger } from '@/lib/motion';
 import type { ResidentPollDetail } from '@/lib/types';
 
 type Tab = 'requests' | 'offers';
@@ -130,7 +130,7 @@ function PoolGrid({
     return (
       <div className="grid grid-cols-1 gap-md md:grid-cols-2 xl:grid-cols-3">
         {Array.from({ length: 6 }).map((_, i) => (
-          <Card key={i} className="p-lg">
+          <Card key={i} className="p-md">
             <Skeleton className="h-5 w-24" />
             <Skeleton className="mt-md h-5 w-40" />
             <Skeleton className="mt-lg h-2 w-full" />
@@ -145,7 +145,7 @@ function PoolGrid({
   }
   return (
     <motion.div
-      variants={staggerContainer}
+      variants={boundedStagger(count)}
       initial="hidden"
       animate="show"
       className="grid grid-cols-1 gap-md md:grid-cols-2 xl:grid-cols-3"

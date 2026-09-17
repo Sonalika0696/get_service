@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Store, UserCheck, Home, Users, Building2, Layers } from 'lucide-react';
 import { StatCard } from '@/components/ui/stat-card';
+import { PageHeader } from '@/components/ui/page-header';
 import { Card, CardHeader, CardBody } from '@/components/ui/card';
 import { DataTable, type Column } from '@/components/ui/data-table';
 import { Badge } from '@/components/ui/badge';
@@ -58,6 +59,7 @@ function CommitteeDashboard({ identity }: { identity: IdentityHint }) {
 
   return (
     <div className="space-y-lg">
+      <PageHeader title="Dashboard" subtitle="Your society at a glance." />
       <motion.div
         variants={staggerContainer}
         initial="hidden"
@@ -86,6 +88,7 @@ function CommitteeDashboard({ identity }: { identity: IdentityHint }) {
               rows={balances}
               rowKey={(r) => r.kind}
               loading={kpis.isLoading}
+              maxHeight="320px"
               empty={<EmptyState icon={Layers} title="No fund balances yet" description="Balances appear once money starts moving through the society's funds." />}
             />
           </CardBody>
@@ -95,7 +98,7 @@ function CommitteeDashboard({ identity }: { identity: IdentityHint }) {
           <CardHeader title="By fund" />
           <CardBody>
             {balances.length ? (
-              <PocketBars balances={balances} />
+              <PocketBars balances={balances} maxHeight="320px" />
             ) : (
               <EmptyState icon={Layers} title="Nothing to chart" description="Sub-ledger balances will render here." />
             )}
@@ -151,6 +154,7 @@ function OperatorDashboard() {
 
   return (
     <div className="space-y-lg">
+      <PageHeader title="Platform overview" subtitle="Societies, residents and vendors across the platform." />
       <motion.div
         variants={staggerContainer}
         initial="hidden"

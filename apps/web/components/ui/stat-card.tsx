@@ -8,12 +8,14 @@ import { Skeleton } from './skeleton';
 
 type Accent = 'teal' | 'sky' | 'amber' | 'rose' | 'violet';
 
-const ACCENTS: Record<Accent, { chip: string; icon: string; value: string }> = {
-  teal: { chip: 'bg-accent-700', icon: 'text-white', value: 'text-accent-800' },
-  sky: { chip: 'bg-[#0EA5E9]', icon: 'text-white', value: 'text-[#0369A1]' },
-  amber: { chip: 'bg-[#F59E0B]', icon: 'text-white', value: 'text-[#B45309]' },
-  rose: { chip: 'bg-[#F43F5E]', icon: 'text-white', value: 'text-[#BE123C]' },
-  violet: { chip: 'bg-[#8B5CF6]', icon: 'text-white', value: 'text-[#6D28D9]' },
+// The big numbers stay neutral (ink-100) so they read on both light and the
+// near-black dark surface; the accent lives in the coloured icon chip only.
+const ACCENTS: Record<Accent, { chip: string; icon: string }> = {
+  teal: { chip: 'bg-accent-700', icon: 'text-white' },
+  sky: { chip: 'bg-[#0EA5E9]', icon: 'text-white' },
+  amber: { chip: 'bg-[#F59E0B]', icon: 'text-white' },
+  rose: { chip: 'bg-[#F43F5E]', icon: 'text-white' },
+  violet: { chip: 'bg-[#8B5CF6]', icon: 'text-white' },
 };
 
 export function StatCard({
@@ -37,17 +39,17 @@ export function StatCard({
       variants={riseItem}
       whileHover={{ y: -3 }}
       transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-      className="group flex flex-col gap-md rounded-2xl border border-border-subtle bg-bg-elevated p-lg shadow-sm transition-shadow hover:shadow-md"
+      className="group flex flex-col gap-sm rounded-2xl border border-border-subtle bg-bg-elevated p-md shadow-sm transition-shadow hover:shadow-md"
     >
-      <div className={cn('flex h-12 w-12 items-center justify-center rounded-xl', a.chip)}>
-        <Icon className={cn('h-6 w-6', a.icon)} strokeWidth={2} />
+      <div className={cn('flex h-10 w-10 items-center justify-center rounded-lg', a.chip)}>
+        <Icon className={cn('h-[18px] w-[18px]', a.icon)} strokeWidth={2} />
       </div>
       <div>
         <p className="text-overline uppercase text-ink-40">{label}</p>
         {loading ? (
           <Skeleton className="mt-xs h-8 w-20" />
         ) : (
-          <p className={cn('tabular mt-xxs text-display font-semibold leading-none', a.value)}>{value}</p>
+          <p className="tabular mt-xxs text-display font-semibold leading-none text-ink-100">{value}</p>
         )}
         {caption && <p className="mt-xs text-caption text-ink-60">{caption}</p>}
       </div>

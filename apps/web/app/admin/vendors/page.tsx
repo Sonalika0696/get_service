@@ -17,7 +17,7 @@ import { VendorSheet } from '@/components/vendors/vendor-sheet';
 import { committee } from '@/lib/endpoints';
 import { getIdentity } from '@/lib/session';
 import { TIER_META, ratingNumber } from '@/lib/vendor';
-import { staggerContainer, riseItem } from '@/lib/motion';
+import { boundedStagger, riseItem } from '@/lib/motion';
 import { ApiError } from '@/lib/api';
 import type { VendorDetail } from '@/lib/types';
 
@@ -93,7 +93,7 @@ export default function VendorsPage() {
       {vendors.isLoading ? (
         <div className="grid grid-cols-1 gap-md sm:grid-cols-2 xl:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Card key={i} className="p-lg">
+            <Card key={i} className="p-md">
               <Skeleton className="h-10 w-10 rounded-xl" />
               <Skeleton className="mt-md h-5 w-32" />
               <Skeleton className="mt-xs h-4 w-24" />
@@ -110,7 +110,7 @@ export default function VendorsPage() {
           />
         </Card>
       ) : (
-        <motion.div variants={staggerContainer} initial="hidden" animate="show" className="grid grid-cols-1 gap-md sm:grid-cols-2 xl:grid-cols-3">
+        <motion.div variants={boundedStagger(filtered.length)} initial="hidden" animate="show" className="grid grid-cols-1 gap-md sm:grid-cols-2 xl:grid-cols-3">
           {filtered.map((v) => (
             <VendorCard key={v.id} vendor={v} onOpen={() => setSheetId(v.id)} />
           ))}
@@ -140,7 +140,7 @@ function VendorCard({ vendor, onOpen }: { vendor: VendorDetail; onOpen: () => vo
 
   return (
     <motion.div variants={riseItem} whileHover={{ y: -3 }} transition={{ type: 'spring', stiffness: 400, damping: 30 }}>
-      <Card className="flex h-full flex-col gap-md p-lg transition-shadow hover:shadow-md">
+      <Card className="flex h-full flex-col gap-md p-md transition-shadow hover:shadow-md">
         <button onClick={onOpen} className="flex items-start justify-between text-left">
           <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent-700/[0.08] text-body font-semibold text-accent-800">
             {initials}

@@ -15,7 +15,7 @@ export function ComingSoon({
 }) {
   return (
     <Card className="mx-auto max-w-2xl">
-      <div className="flex flex-col items-start gap-md p-2xl">
+      <div className="flex flex-col items-start gap-md p-xl">
         <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-700/[0.08]">
           <Icon className="h-7 w-7 text-accent-700" strokeWidth={1.75} />
         </div>

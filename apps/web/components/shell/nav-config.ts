@@ -10,6 +10,7 @@ import {
   FileText,
   Star,
   Zap,
+  UserCog,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -52,6 +53,10 @@ export const adminNav: NavGroup[] = [
       { label: 'Spending rules', href: '/admin/approvals', icon: ShieldCheck },
       { label: 'Finances', href: '/admin/treasury', icon: Gauge },
     ],
+  },
+  {
+    label: 'Account',
+    items: [{ label: 'Profile', href: '/admin/profile', icon: UserCog }],
   },
 ];
 

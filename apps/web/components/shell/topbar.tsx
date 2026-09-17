@@ -1,16 +1,17 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { LogOut, ChevronDown } from 'lucide-react';
+import { LogOut, ChevronDown, UserCog } from 'lucide-react';
 import { auth } from '@/lib/endpoints';
 import { clearIdentity, type IdentityHint } from '@/lib/session';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/cn';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
 
-export function Topbar({ title, identity }: { title: string; identity: IdentityHint | null }) {
+export function Topbar({ identity }: { identity: IdentityHint | null }) {
   const router = useRouter();
   const toast = useToast();
   const [open, setOpen] = useState(false);
@@ -34,9 +35,7 @@ export function Topbar({ title, identity }: { title: string; identity: IdentityH
     .toUpperCase();
 
   return (
-    <header className="sticky top-0 z-40 flex h-16 items-center justify-between gap-md border-b border-border-subtle bg-bg-primary/80 px-lg backdrop-blur-md">
-      <h1 className="text-heading font-semibold text-ink-100">{title}</h1>
-
+    <header className="sticky top-0 z-40 flex h-16 items-center justify-end gap-md border-b border-border-subtle bg-bg-primary/80 px-lg backdrop-blur-md">
       <div className="flex items-center gap-sm">
         <ThemeToggle />
 
@@ -72,6 +71,14 @@ export function Topbar({ title, identity }: { title: string; identity: IdentityH
                     <p className="text-caption font-semibold text-ink-100">{identity?.name}</p>
                     <p className="truncate text-[11px] text-ink-40">{identity?.email}</p>
                   </div>
+                  <Link
+                    href={`/${identity?.portal ?? 'admin'}/profile`}
+                    onClick={() => setOpen(false)}
+                    className="flex w-full items-center gap-sm border-b border-border-subtle px-md py-sm text-caption text-ink-80 transition-colors hover:bg-bg-secondary"
+                  >
+                    <UserCog className="h-4 w-4 text-ink-40" />
+                    Profile
+                  </Link>
                   <button
                     onClick={onLogout}
                     className="flex w-full items-center gap-sm px-md py-sm text-caption text-feedback-danger transition-colors hover:bg-feedback-dangerTint"

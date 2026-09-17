@@ -105,6 +105,7 @@ export default function TreasuryPage() {
                 rows={balances}
                 rowKey={(r) => r.kind}
                 loading={ledger.isLoading}
+                maxHeight="360px"
                 empty={<EmptyState icon={Layers} title="No sub-ledger balances yet" description="Balances appear once the society posts its first journal entries." />}
               />
             </CardBody>
@@ -114,7 +115,7 @@ export default function TreasuryPage() {
             <Card>
               <CardHeader title="Balance by pocket" />
               <CardBody>
-                <PocketBars balances={balances} />
+                <PocketBars balances={balances} maxHeight="360px" />
               </CardBody>
             </Card>
           )}

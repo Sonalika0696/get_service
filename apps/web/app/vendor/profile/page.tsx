@@ -24,7 +24,7 @@ export default function VendorProfilePage() {
       {profile.isLoading ? (
         <div className="space-y-lg">
           {Array.from({ length: 2 }).map((_, i) => (
-            <Card key={i} className="p-lg">
+            <Card key={i} className="p-md">
               <Skeleton className="h-5 w-40" />
               <Skeleton className="mt-md h-32 w-full" />
             </Card>
@@ -37,7 +37,7 @@ export default function VendorProfilePage() {
           <Categories profile={profile.data} />
         </div>
       ) : (
-        <Card className="p-lg">
+        <Card className="p-md">
           <p className="text-body text-ink-60">Could not load your profile. Sign in again if this persists.</p>
         </Card>
       )}

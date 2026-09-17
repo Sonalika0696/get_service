@@ -40,7 +40,7 @@ export function LadderVisual({
             key={r.rung}
             variants={riseItem}
             className={cn(
-              'relative flex flex-col gap-sm rounded-2xl border p-lg transition-colors',
+              'relative flex flex-col gap-sm rounded-2xl border p-md transition-colors',
               active ? 'border-accent-700 bg-accent-700/[0.06] shadow-md' : 'border-border-subtle bg-bg-elevated shadow-sm',
             )}
           >

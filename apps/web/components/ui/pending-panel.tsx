@@ -16,7 +16,7 @@ export function PendingPanel({
 }) {
   return (
     <Card>
-      <div className="flex flex-col gap-md p-lg">
+      <div className="flex flex-col gap-md p-md">
         <div className="flex items-center gap-sm">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent-700/[0.08]">
             <Icon className="h-5 w-5 text-accent-700" strokeWidth={1.75} />

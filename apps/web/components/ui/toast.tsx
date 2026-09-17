@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { CheckCircle2, AlertTriangle, Info, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
@@ -40,10 +40,18 @@ const TONE = {
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const remove = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  // The stack is newest-at-bottom (closest to the corner it rises from). If
+  // enough fire at once to overflow the capped container, keep the newest
+  // one in view rather than leaving the viewer looking at the oldest.
+  useEffect(() => {
+    containerRef.current?.scrollTo({ top: containerRef.current.scrollHeight });
+  }, [toasts.length]);
 
   const show = useCallback(
     (message: string, kind: ToastKind = 'info') => {
@@ -64,7 +72,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     <ToastContext.Provider value={value}>
       {children}
       <div
-        className="pointer-events-none fixed bottom-6 right-6 z-[1000] flex w-[360px] max-w-[calc(100vw-2rem)] flex-col gap-sm"
+        ref={containerRef}
+        className="pointer-events-none fixed bottom-6 right-6 z-[1000] flex max-h-[calc(100vh-3rem)] w-[360px] max-w-[calc(100vw-2rem)] flex-col gap-sm overflow-y-auto"
         aria-live="polite"
         role="status"
       >

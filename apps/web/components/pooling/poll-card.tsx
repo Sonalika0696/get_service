@@ -41,7 +41,7 @@ export function PollCard({
 
   return (
     <motion.div variants={riseItem}>
-      <Card className="flex h-full flex-col gap-md p-lg">
+      <Card className="flex h-full flex-col gap-md p-md">
         <div className="flex items-start justify-between gap-sm">
           <div className="min-w-0">
             <div className="flex items-center gap-xs">

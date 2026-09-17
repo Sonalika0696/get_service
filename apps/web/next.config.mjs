@@ -10,7 +10,10 @@ const nextConfig = {
     // icons/components it actually imports instead of the whole package.
     // This is the main lever on per-route dev compile time (and prod bundle
     // size): lucide-react alone is ~1k modules if pulled in whole.
-    optimizePackageImports: ['lucide-react', 'recharts', 'framer-motion', '@tanstack/react-query'],
+    // NOTE: framer-motion is deliberately NOT here - barrel-optimising it
+    // breaks its variant/stagger animation orchestration (elements stay
+    // stuck at their `initial` opacity:0). Keep it importing normally.
+    optimizePackageImports: ['lucide-react', 'recharts', '@tanstack/react-query'],
   },
 };
 

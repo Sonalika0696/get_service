@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -65,14 +65,6 @@ export function AppShell({ portal, children }: { portal: Portal; children: React
 
   useEffect(() => setDrawer(false), [pathname]);
 
-  const title = useMemo(() => {
-    const all = groups.flatMap((g) => g.items);
-    const match = [...all]
-      .sort((a, b) => b.href.length - a.href.length)
-      .find((i) => (i.href === `/${portal}` ? pathname === i.href : pathname.startsWith(i.href)));
-    return match?.label ?? label;
-  }, [groups, pathname, portal, label]);
-
   if (!ready) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-bg-primary">
@@ -109,12 +101,14 @@ export function AppShell({ portal, children }: { portal: Portal; children: React
                   <X className="h-5 w-5" />
                 </button>
               </div>
-              <nav className="space-y-lg px-sm py-md">
-                {groups.map((group) => (
-                  <div key={group.label}>
+              <nav className="px-sm py-md">
+                {groups.map((group, gi) => (
+                  <div
+                    key={group.label}
+                    className={gi > 0 ? 'mt-md border-t border-border-subtle pt-md' : ''}
+                  >
                     <p className="px-sm pb-xs text-overline uppercase text-ink-40">{group.label}</p>
                     {group.items.map((item) => {
-                      const Icon = item.icon;
                       const active =
                         item.href === `/${portal}` ? pathname === item.href : pathname.startsWith(item.href);
                       return (
@@ -122,11 +116,10 @@ export function AppShell({ portal, children }: { portal: Portal; children: React
                           key={item.href}
                           href={item.href}
                           className={cn(
-                            'flex items-center gap-sm rounded-md px-sm py-[10px] text-body',
+                            'flex items-center gap-sm rounded-md px-sm py-[9px] text-body',
                             active ? 'bg-accent-700/[0.08] font-semibold text-accent-800' : 'text-ink-60',
                           )}
                         >
-                          <Icon className="h-[18px] w-[18px]" />
                           {item.label}
                         </Link>
                       );
@@ -149,7 +142,7 @@ export function AppShell({ portal, children }: { portal: Portal; children: React
             <Menu className="h-5 w-5" />
           </button>
         </div>
-        <Topbar title={title} identity={identity} />
+        <Topbar identity={identity} />
         <main className="mx-auto w-full max-w-[1360px] flex-1 px-lg py-lg">{children}</main>
       </div>
     </div>

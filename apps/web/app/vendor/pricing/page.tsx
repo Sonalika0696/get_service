@@ -65,7 +65,7 @@ export default function PricingPage() {
       {cards.isLoading ? (
         <div className="space-y-lg">
           {Array.from({ length: 2 }).map((_, i) => (
-            <Card key={i} className="p-lg">
+            <Card key={i} className="p-md">
               <Skeleton className="h-5 w-40" />
               <Skeleton className="mt-md h-24 w-full" />
             </Card>
@@ -209,7 +209,7 @@ function PricingCardView({ card, editable = false }: { card: PricingCardDetail; 
         {card.lines.length === 0 ? (
           <EmptyState icon={Receipt} title="No lines yet" description={editable ? 'Add at least one line before publishing.' : 'This card has no priced lines.'} />
         ) : (
-          <ul className="divide-y divide-border-subtle">
+          <ul className="max-h-[480px] divide-y divide-border-subtle overflow-y-auto pr-xxs">
             {card.lines.map((line) => (
               <li key={line.id} className="flex items-start justify-between gap-sm py-sm first:pt-0">
                 <div className="min-w-0">
