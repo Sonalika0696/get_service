@@ -71,6 +71,17 @@ export function useCreateResidentPoll() {
     mutationFn: (body: CreateResidentPollBody) =>
       api<ResidentPollDetail>('/bulk-buy/polls', { method: 'POST', body }),
     onSuccess: (created) => {
+      // Inject the new poll into the list cache immediately, rather than
+      // relying solely on invalidateQueries' background refetch — the
+      // create flow navigates straight to the detail screen (see
+      // requests/new.tsx), which can unmount the Requests tab before that
+      // refetch resolves, so the "Mine" segment must not depend on timing
+      // to show a request the resident just raised.
+      client.setQueryData<ResidentPollDetail[]>(['resident-polls'], (old) => {
+        if (!old) return old; // no list cached yet — the next fetch already includes it
+        if (old.some((p) => p.id === created.id)) return old;
+        return [created, ...old];
+      });
       client.invalidateQueries({ queryKey: ['resident-polls'] });
       client.setQueryData(['resident-poll', created.id], created);
     },

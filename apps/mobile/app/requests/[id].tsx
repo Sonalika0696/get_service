@@ -25,12 +25,14 @@ import {
   useResidentPoll,
   useJoinResidentPoll,
 } from '../../src/hooks/useResidentPolls';
+import { useAuth } from '../../src/auth/AuthProvider';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
 export default function RequestDetail() {
   const theme = useTheme();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { me } = useAuth();
   const query = useResidentPoll(id);
   const join = useJoinResidentPoll();
   // Sample polls have no real backend row, so joining one can't hit the
@@ -79,6 +81,7 @@ export default function RequestDetail() {
         {poll ? (
           <PollBody
             poll={poll}
+            isOwn={Boolean(me && poll.creatorId === me.id)}
             joining={join.isPending}
             onJoin={() => {
               if (!id) return;
@@ -105,10 +108,15 @@ export default function RequestDetail() {
 
 function PollBody({
   poll,
+  isOwn,
   joining,
   onJoin,
 }: {
   poll: ResidentPollDetail;
+  /** True when the signed-in resident raised this request themselves — they
+   * can't join their own pool, so the CTA area shows an owner badge instead
+   * of "I need this too" regardless of what `hasJoined` reports. */
+  isOwn: boolean;
   joining: boolean;
   onJoin: () => void;
 }) {
@@ -116,7 +124,7 @@ function PollBody({
   const threshold = poll.vendorConfirmedMinimum ?? poll.minCommitments ?? 0;
   const progress = threshold > 0 ? Math.min(1, poll.commitmentCount / threshold) : 0;
   const reached = threshold > 0 && poll.commitmentCount >= threshold;
-  const canJoin = poll.status === 'OPEN' && !poll.hasJoined;
+  const canJoin = poll.status === 'OPEN' && !poll.hasJoined && !isOwn;
 
   return (
     <>
@@ -225,7 +233,22 @@ function PollBody({
 
       {poll.bookingId ? <ChargeSheetLink bookingId={poll.bookingId} /> : null}
 
-      {canJoin ? (
+      {isOwn ? (
+        <View
+          style={{
+            backgroundColor: theme.colors.accent.tint,
+            borderRadius: theme.radius.pill,
+            paddingVertical: 12,
+            alignItems: 'center',
+            flexDirection: 'row',
+            justifyContent: 'center',
+            gap: 6,
+          }}
+        >
+          <Handshake size={18} color={theme.colors.accent[700]} weight="fill" />
+          <Text variant="body" weight="semibold" tone="accent">You raised this request</Text>
+        </View>
+      ) : canJoin ? (
         <Button
           label={joining ? 'Joining' : 'I need this too'}
           onPress={onJoin}
