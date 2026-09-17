@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../infra/prisma/prisma.service.js';
 import { Clock } from '../../infra/clock/clock.service.js';
 import { LedgerService } from '../ledger/ledger.service.js';
@@ -273,7 +273,7 @@ export class PocketTransfersService {
       where: {
         societyId,
         ...(status ? { status } : {}),
-        ...(cursorFilter ?? {}),
+        ...cursorFilter,
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,

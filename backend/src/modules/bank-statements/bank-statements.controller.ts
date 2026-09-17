@@ -8,7 +8,6 @@ import { ResidentOnly } from '../../common/decorators/principal.decorator.js';
 import { Roles } from '../../common/decorators/roles.decorator.js';
 import { SocietyScope } from '../../common/decorators/society-scope.decorator.js';
 import { CurrentResident } from '../../common/decorators/current-user.decorator.js';
-import { AuditLog } from '../../common/decorators/audit-log.decorator.js';
 import type { ResidentPrincipal } from '../../common/types/current-user.js';
 import { RoleKind } from '../../generated/prisma/enums.js';
 import { computeEtag, etagMatches } from '../../common/pagination/etag.util.js';

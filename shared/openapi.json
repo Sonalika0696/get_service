@@ -22,6 +22,30 @@
         ],
         "type": "object"
       },
+      "AllocateBankStatementLineDto": {
+        "properties": {
+          "flatId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "pocketKind": {
+            "enum": [
+              "MAINTENANCE",
+              "ELECTRICITY",
+              "WATER",
+              "EVENTS",
+              "WELFARE",
+              "SINKING",
+              "CORPUS"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "pocketKind"
+        ],
+        "type": "object"
+      },
       "AssignRoleDto": {
         "properties": {
           "kind": {
@@ -582,6 +606,19 @@
         ],
         "type": "object"
       },
+      "IngestBankStatementDto": {
+        "properties": {
+          "csv": {
+            "maxLength": 500000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "csv"
+        ],
+        "type": "object"
+      },
       "MilestoneTemplateRungDto": {
         "properties": {
           "name": {
@@ -828,6 +865,66 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "RequestTransferDto": {
+        "properties": {
+          "amount": {
+            "minimum": 1,
+            "type": "number"
+          },
+          "fromKind": {
+            "enum": [
+              "VENDOR",
+              "SOCIETY_MASTER",
+              "BULK_BUY",
+              "DISPUTE",
+              "EXTERNAL",
+              "RETENTION",
+              "MAINTENANCE",
+              "ELECTRICITY",
+              "WATER",
+              "EVENTS",
+              "WELFARE",
+              "SINKING",
+              "CORPUS"
+            ],
+            "type": "string"
+          },
+          "note": {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "reasonCode": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "toKind": {
+            "enum": [
+              "VENDOR",
+              "SOCIETY_MASTER",
+              "BULK_BUY",
+              "DISPUTE",
+              "EXTERNAL",
+              "RETENTION",
+              "MAINTENANCE",
+              "ELECTRICITY",
+              "WATER",
+              "EVENTS",
+              "WELFARE",
+              "SINKING",
+              "CORPUS"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "fromKind",
+          "toKind",
+          "amount",
+          "reasonCode"
+        ],
         "type": "object"
       },
       "RevisePricingCardDto": {
@@ -1380,6 +1477,175 @@
         "summary": "Phase 6.5: 10 verify attempts/min per IP. Looser than /otp since a\nnormal signup-then-verify flow already spends one call here, but still\nbounded — OtpService's own 5-wrong-attempts-per-code lockout handles\nguessing a single code; this bounds an attacker cycling through many\naccounts/codes from one IP.",
         "tags": [
           "Auth"
+        ]
+      }
+    },
+    "/api/v1/bank-statements/export": {
+      "get": {
+        "operationId": "BankStatementsController_exportCsv",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Sends the CSV body directly via `res.send` (not a `passthrough` return\nvalue) so the `text/csv` Content-Type actually sticks — Nest's default\nresponse handling would otherwise treat a returned string as JSON.",
+        "tags": [
+          "BankStatements"
+        ]
+      }
+    },
+    "/api/v1/bank-statements/ingest": {
+      "post": {
+        "operationId": "BankStatementsController_ingest",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestBankStatementDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "BankStatements"
+        ]
+      }
+    },
+    "/api/v1/bank-statements/lines": {
+      "get": {
+        "operationId": "BankStatementsController_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "BankStatements"
+        ]
+      }
+    },
+    "/api/v1/bank-statements/lines/{id}/allocate": {
+      "post": {
+        "operationId": "BankStatementsController_allocate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AllocateBankStatementLineDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "BankStatements"
+        ]
+      }
+    },
+    "/api/v1/bank-statements/lines/{id}/ignore": {
+      "post": {
+        "operationId": "BankStatementsController_ignore",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "BankStatements"
         ]
       }
     },
@@ -3227,6 +3493,166 @@
         "summary": "Treasurer-only: initiates a Razorpay refund. Does not itself change\nPayment.status or post to the ledger — see PaymentsService.refund's doc\ncomment. In stub mode (RAZORPAY_ENABLED=false) there is no real\nRazorpay to deliver the follow-up webhook, so completing the flow in\ndev/tests means POSTing a signed `refund.processed` webhook yourself\n(see test/payments.e2e-spec.ts).",
         "tags": [
           "Payments"
+        ]
+      }
+    },
+    "/api/v1/pocket-transfers": {
+      "get": {
+        "operationId": "PocketTransfersController_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {}
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "summary": "ETag: computed over the exact page body (`{ items, nextCursor }`) — same contract as GET /me/bills.",
+        "tags": [
+          "PocketTransfers"
+        ]
+      },
+      "post": {
+        "operationId": "PocketTransfersController_request",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestTransferDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "PocketTransfers"
+        ]
+      }
+    },
+    "/api/v1/pocket-transfers/{id}": {
+      "get": {
+        "operationId": "PocketTransfersController_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "PocketTransfers"
+        ]
+      }
+    },
+    "/api/v1/pocket-transfers/{id}/authorise": {
+      "post": {
+        "operationId": "PocketTransfersController_authorise",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "PocketTransfers"
+        ]
+      }
+    },
+    "/api/v1/pocket-transfers/{id}/cancel": {
+      "post": {
+        "operationId": "PocketTransfersController_cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "PocketTransfers"
         ]
       }
     },
