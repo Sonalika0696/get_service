@@ -8,6 +8,7 @@ import { PrismaModule } from './infra/prisma/prisma.module.js';
 import { MailerModule } from './infra/mailer/mailer.module.js';
 import { GstinApiModule } from './infra/gstinapi/gstinapi.module.js';
 import { RazorpayModule } from './infra/razorpay/razorpay.module.js';
+import { BbpsModule } from './infra/bbps/bbps.module.js';
 import { SmsModule } from './infra/sms/sms.module.js';
 import { SecurityModule } from './infra/security/security.module.js';
 import { HealthModule } from './modules/health/health.module.js';
@@ -59,6 +60,7 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     MailerModule,
     GstinApiModule,
     RazorpayModule,
+    BbpsModule,
     SmsModule,
     SecurityModule,
     AuditModule,
