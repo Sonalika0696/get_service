@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, ScrollView, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Phone, ArrowRight } from 'phosphor-react-native';
+import { Phone, ArrowRight } from '../../src/icons/phosphor';
 import { Text } from '../../src/components/Text';
 import { Button } from '../../src/components/Button';
 import { Logo } from '../../src/components/brand/Logo';

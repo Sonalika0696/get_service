@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, ActivityIndicator } from 'react-native';
-import type { IconProps } from 'phosphor-react-native';
-import { Warning, TrayArrowDown } from 'phosphor-react-native';
+import type { IconProps } from '../icons/phosphor';
+import { Warning, TrayArrowDown } from '../icons/phosphor';
 import { Text } from './Text';
 import { Button } from './Button';
 import { SpotIllustration, type SpotIllustrationName } from './illustrations/SpotIllustration';

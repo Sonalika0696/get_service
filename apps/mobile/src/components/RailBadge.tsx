@@ -1,7 +1,7 @@
 import React from 'react';
 import { View } from 'react-native';
 import type { PaymentRail } from '@sft/api-client';
-import { Buildings, Vault, Storefront } from 'phosphor-react-native';
+import { Buildings, Vault, Storefront } from '../icons/phosphor';
 import { Text } from './Text';
 import { useTheme } from '../theme/ThemeProvider';
 

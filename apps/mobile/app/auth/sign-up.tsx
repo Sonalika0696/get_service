@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, ScrollView, TextInput, KeyboardAvoidingView, Platform, Pressable, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, ArrowRight, House, Buildings, Key } from 'phosphor-react-native';
+import { ArrowLeft, ArrowRight, House, Buildings, Key } from '../../src/icons/phosphor';
 import type { OccupancyRole } from '@sft/api-client';
 import { Text } from '../../src/components/Text';
 import { Button } from '../../src/components/Button';

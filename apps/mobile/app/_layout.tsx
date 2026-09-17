@@ -1,6 +1,6 @@
 import 'react-native-gesture-handler';
 import React, { useEffect } from 'react';
-import { View, ActivityIndicator, Platform } from 'react-native';
+import { View, Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -13,6 +13,7 @@ import { ThemeProvider, useTheme, useThemeControls } from '../src/theme/ThemePro
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { queryClient, queryPersister } from '../src/lib/query';
 import { AuthProvider, useAuth } from '../src/auth/AuthProvider';
+import { BrandLoader } from '../src/components/brand/BrandLoader';
 import { lightTheme } from '../src/theme/theme';
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
@@ -125,7 +126,7 @@ function SplashPlaceholder() {
         justifyContent: 'center',
       }}
     >
-      <ActivityIndicator color={lightTheme.colors.accent[700]} />
+      <BrandLoader height={56} />
     </View>
   );
 }

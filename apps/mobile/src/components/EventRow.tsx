@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Pressable } from 'react-native';
-import { CalendarBlank, Users, CaretRight, CheckCircle, Hourglass } from 'phosphor-react-native';
+import { CalendarBlank, Users, CaretRight, CheckCircle, Hourglass } from '../icons/phosphor';
 import type { EventSummary, EventOptIn } from '@sft/api-client';
 import { Text } from './Text';
 import { Money } from './Money';

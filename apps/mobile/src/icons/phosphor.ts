@@ -1,0 +1,74 @@
+// GENERATED barrel — re-exports ONLY the Phosphor icons this app uses,
+// each from its own compiled module path so Metro bundles ~66 icon
+// modules instead of the full 1500+ barrel. Same components, identical visuals.
+// Types come through as erasable 'export type' (no runtime barrel pull).
+// Icon module paths are typed by src/icons/phosphor-modules.d.ts.
+// Regenerate with scratchpad/migrate-phosphor.mjs if icon usage changes.
+export type { IconProps } from 'phosphor-react-native';
+
+export { default as ArrowClockwise } from 'phosphor-react-native/lib/commonjs/icons/ArrowClockwise';
+export { default as ArrowLeft } from 'phosphor-react-native/lib/commonjs/icons/ArrowLeft';
+export { default as ArrowRight } from 'phosphor-react-native/lib/commonjs/icons/ArrowRight';
+export { default as ArrowSquareOut } from 'phosphor-react-native/lib/commonjs/icons/ArrowSquareOut';
+export { default as Bell } from 'phosphor-react-native/lib/commonjs/icons/Bell';
+export { default as Briefcase } from 'phosphor-react-native/lib/commonjs/icons/Briefcase';
+export { default as Buildings } from 'phosphor-react-native/lib/commonjs/icons/Buildings';
+export { default as CalendarBlank } from 'phosphor-react-native/lib/commonjs/icons/CalendarBlank';
+export { default as CaretDown } from 'phosphor-react-native/lib/commonjs/icons/CaretDown';
+export { default as CaretRight } from 'phosphor-react-native/lib/commonjs/icons/CaretRight';
+export { default as ChatCircle } from 'phosphor-react-native/lib/commonjs/icons/ChatCircle';
+export { default as ChatCircleDots } from 'phosphor-react-native/lib/commonjs/icons/ChatCircleDots';
+export { default as Check } from 'phosphor-react-native/lib/commonjs/icons/Check';
+export { default as CheckCircle } from 'phosphor-react-native/lib/commonjs/icons/CheckCircle';
+export { default as Circle } from 'phosphor-react-native/lib/commonjs/icons/Circle';
+export { default as ClipboardText } from 'phosphor-react-native/lib/commonjs/icons/ClipboardText';
+export { default as Clock } from 'phosphor-react-native/lib/commonjs/icons/Clock';
+export { default as ClockCounterClockwise } from 'phosphor-react-native/lib/commonjs/icons/ClockCounterClockwise';
+export { default as Coins } from 'phosphor-react-native/lib/commonjs/icons/Coins';
+export { default as Drop } from 'phosphor-react-native/lib/commonjs/icons/Drop';
+export { default as EnvelopeSimple } from 'phosphor-react-native/lib/commonjs/icons/EnvelopeSimple';
+export { default as FileText } from 'phosphor-react-native/lib/commonjs/icons/FileText';
+export { default as Handshake } from 'phosphor-react-native/lib/commonjs/icons/Handshake';
+export { default as Hourglass } from 'phosphor-react-native/lib/commonjs/icons/Hourglass';
+export { default as House } from 'phosphor-react-native/lib/commonjs/icons/House';
+export { default as IdentificationCard } from 'phosphor-react-native/lib/commonjs/icons/IdentificationCard';
+export { default as Info } from 'phosphor-react-native/lib/commonjs/icons/Info';
+export { default as Key } from 'phosphor-react-native/lib/commonjs/icons/Key';
+export { default as Lightning } from 'phosphor-react-native/lib/commonjs/icons/Lightning';
+export { default as LinkSimple } from 'phosphor-react-native/lib/commonjs/icons/LinkSimple';
+export { default as Lock } from 'phosphor-react-native/lib/commonjs/icons/Lock';
+export { default as MagnifyingGlass } from 'phosphor-react-native/lib/commonjs/icons/MagnifyingGlass';
+export { default as MapPin } from 'phosphor-react-native/lib/commonjs/icons/MapPin';
+export { default as Megaphone } from 'phosphor-react-native/lib/commonjs/icons/Megaphone';
+export { default as Monitor } from 'phosphor-react-native/lib/commonjs/icons/Monitor';
+export { default as Moon } from 'phosphor-react-native/lib/commonjs/icons/Moon';
+export { default as Package } from 'phosphor-react-native/lib/commonjs/icons/Package';
+export { default as PaintBrush } from 'phosphor-react-native/lib/commonjs/icons/PaintBrush';
+export { default as PencilSimple } from 'phosphor-react-native/lib/commonjs/icons/PencilSimple';
+export { default as Phone } from 'phosphor-react-native/lib/commonjs/icons/Phone';
+export { default as PlusCircle } from 'phosphor-react-native/lib/commonjs/icons/PlusCircle';
+export { default as Question } from 'phosphor-react-native/lib/commonjs/icons/Question';
+export { default as QuestionMark } from 'phosphor-react-native/lib/commonjs/icons/QuestionMark';
+export { default as Receipt } from 'phosphor-react-native/lib/commonjs/icons/Receipt';
+export { default as ReceiptX } from 'phosphor-react-native/lib/commonjs/icons/ReceiptX';
+export { default as Ruler } from 'phosphor-react-native/lib/commonjs/icons/Ruler';
+export { default as ScanSmiley } from 'phosphor-react-native/lib/commonjs/icons/ScanSmiley';
+export { default as SealCheck } from 'phosphor-react-native/lib/commonjs/icons/SealCheck';
+export { default as ShieldCheck } from 'phosphor-react-native/lib/commonjs/icons/ShieldCheck';
+export { default as SignOut } from 'phosphor-react-native/lib/commonjs/icons/SignOut';
+export { default as Snowflake } from 'phosphor-react-native/lib/commonjs/icons/Snowflake';
+export { default as Sparkle } from 'phosphor-react-native/lib/commonjs/icons/Sparkle';
+export { default as Star } from 'phosphor-react-native/lib/commonjs/icons/Star';
+export { default as Storefront } from 'phosphor-react-native/lib/commonjs/icons/Storefront';
+export { default as Sun } from 'phosphor-react-native/lib/commonjs/icons/Sun';
+export { default as Tag } from 'phosphor-react-native/lib/commonjs/icons/Tag';
+export { default as Translate } from 'phosphor-react-native/lib/commonjs/icons/Translate';
+export { default as TrayArrowDown } from 'phosphor-react-native/lib/commonjs/icons/TrayArrowDown';
+export { default as User } from 'phosphor-react-native/lib/commonjs/icons/User';
+export { default as Users } from 'phosphor-react-native/lib/commonjs/icons/Users';
+export { default as Vault } from 'phosphor-react-native/lib/commonjs/icons/Vault';
+export { default as Warning } from 'phosphor-react-native/lib/commonjs/icons/Warning';
+export { default as WarningCircle } from 'phosphor-react-native/lib/commonjs/icons/WarningCircle';
+export { default as WarningDiamond } from 'phosphor-react-native/lib/commonjs/icons/WarningDiamond';
+export { default as WifiSlash } from 'phosphor-react-native/lib/commonjs/icons/WifiSlash';
+export { default as Wrench } from 'phosphor-react-native/lib/commonjs/icons/Wrench';

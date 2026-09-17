@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Pressable } from 'react-native';
-import { Users, CaretRight } from 'phosphor-react-native';
+import { Users, CaretRight } from '../icons/phosphor';
 import { Text } from './Text';
 import { useTheme } from '../theme/ThemeProvider';
 

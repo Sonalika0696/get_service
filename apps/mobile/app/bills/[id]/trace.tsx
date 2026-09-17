@@ -11,7 +11,7 @@ import {
   Buildings,
   ScanSmiley,
   Ruler,
-} from 'phosphor-react-native';
+} from '../../../src/icons/phosphor';
 import type {
   UtilityBillTrace,
   SlabRow,

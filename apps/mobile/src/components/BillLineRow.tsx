@@ -10,7 +10,7 @@ import {
   Receipt,
   CaretRight,
   type IconProps,
-} from 'phosphor-react-native';
+} from '../icons/phosphor';
 import { Text } from './Text';
 import { Money } from './Money';
 import { RailBadge } from './RailBadge';

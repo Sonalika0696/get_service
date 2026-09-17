@@ -8,7 +8,7 @@ import {
   Warning,
   CheckCircle,
   Info,
-} from 'phosphor-react-native';
+} from '../../../src/icons/phosphor';
 import { Text } from '../../../src/components/Text';
 import { Button } from '../../../src/components/Button';
 import { Card } from '../../../src/components/Card';

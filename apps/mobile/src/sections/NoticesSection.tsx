@@ -2,9 +2,8 @@ import React from 'react';
 import { View, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { PencilSimple, Megaphone, CalendarBlank } from 'phosphor-react-native';
+import { PencilSimple, Megaphone, CalendarBlank } from '../icons/phosphor';
 import { Text } from '../components/Text';
-import { Button } from '../components/Button';
 import { Fab } from '../components/Fab';
 import { SectionLabel } from '../components/SectionLabel';
 import { JobPostRow } from '../components/JobPostRow';
@@ -103,14 +102,7 @@ export default function NoticesScreen() {
               Icon={Megaphone}
               illustration="notices"
               title="Quiet in the community"
-              body="Be the first: post a job you're hiring for."
-              action={
-                <Button
-                  label="Write a post"
-                  variant="secondary"
-                  onPress={() => router.push('/notices/new')}
-                />
-              }
+              body="Be the first — tap Post to share a job you're hiring for."
             />
           ) : null}
 

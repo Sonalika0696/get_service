@@ -9,7 +9,7 @@ import {
   WarningDiamond,
   CheckCircle,
   ChatCircleDots,
-} from 'phosphor-react-native';
+} from '../../../src/icons/phosphor';
 import type { ChargeSheet, ChargeSheetLine } from '@sft/api-client';
 import { Text } from '../../../src/components/Text';
 import { Button } from '../../../src/components/Button';

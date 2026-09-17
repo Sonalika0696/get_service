@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, ScrollView, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
-import { ArrowLeft, Bell, EnvelopeSimple, Receipt } from 'phosphor-react-native';
+import { ArrowLeft, Bell, EnvelopeSimple, Receipt } from '../../src/icons/phosphor';
 import { Text } from '../../src/components/Text';
 import { Button } from '../../src/components/Button';
 import { Card } from '../../src/components/Card';

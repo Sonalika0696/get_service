@@ -10,7 +10,7 @@ import {
   Circle,
   CaretRight,
   type IconProps,
-} from 'phosphor-react-native';
+} from '../icons/phosphor';
 import type { ApprovalItem, ApprovalKind } from '@sft/api-client';
 import { Text } from './Text';
 import { Money } from './Money';

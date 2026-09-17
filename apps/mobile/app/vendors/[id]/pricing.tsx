@@ -14,7 +14,7 @@ import {
   Ruler,
   Clock,
   QuestionMark,
-} from 'phosphor-react-native';
+} from '../../../src/icons/phosphor';
 import type {
   VendorPricingCard,
   PricingLine,

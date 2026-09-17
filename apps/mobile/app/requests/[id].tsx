@@ -12,7 +12,7 @@ import {
   SealCheck,
   Receipt,
   CaretRight,
-} from 'phosphor-react-native';
+} from '../../src/icons/phosphor';
 import type { ResidentPollDetail } from '@sft/api-client';
 import { Text } from '../../src/components/Text';
 import { Button } from '../../src/components/Button';

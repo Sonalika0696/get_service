@@ -41,6 +41,31 @@ export function useCreateResidentPoll() {
   });
 }
 
+/** Fields the creator can amend on a still-open poll. */
+export type UpdateResidentPollBody = {
+  title?: string;
+  description?: string | null;
+  closesAt?: string; // ISO-8601
+};
+
+/**
+ * Edit a poll the current resident created. Targets PATCH
+ * /bulk-buy/polls/:id — see BACKEND gap note in useResidentPolls: the route
+ * is not shipped yet, so a save currently returns an error until the backend
+ * lands it. The client is ready the moment it does.
+ */
+export function useUpdateResidentPoll(id: string | undefined) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UpdateResidentPollBody) =>
+      api<ResidentPollDetail>(`/bulk-buy/polls/${id}`, { method: 'PATCH', body }),
+    onSuccess: (updated) => {
+      client.invalidateQueries({ queryKey: ['resident-polls'] });
+      client.setQueryData(['resident-poll', updated.id], updated);
+    },
+  });
+}
+
 /**
  * Optimistic join. On tap we bump commitmentCount + set hasJoined=true so the
  * progress bar advances immediately; on error we roll back exactly what we

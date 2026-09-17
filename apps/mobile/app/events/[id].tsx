@@ -11,7 +11,7 @@ import {
   Tag,
   CheckCircle,
   Hourglass,
-} from 'phosphor-react-native';
+} from '../../src/icons/phosphor';
 import type { EventDetail } from '@sft/api-client';
 import { Text } from '../../src/components/Text';
 import { Button } from '../../src/components/Button';

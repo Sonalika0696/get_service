@@ -17,7 +17,7 @@ import {
   Question,
   ChatCircle,
   PencilSimple,
-} from 'phosphor-react-native';
+} from '../icons/phosphor';
 import { Screen } from '../components/Screen';
 import { Text } from '../components/Text';
 import { SectionLabel } from '../components/SectionLabel';

@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Pressable } from 'react-native';
-import { Star, ShieldCheck, Storefront, CaretRight } from 'phosphor-react-native';
+import { Star, ShieldCheck, Storefront, CaretRight } from '../icons/phosphor';
 import type { VendorDetail } from '@sft/api-client';
 import { Text } from './Text';
 import { useTheme } from '../theme/ThemeProvider';

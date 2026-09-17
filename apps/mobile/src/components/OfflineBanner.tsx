@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
-import { WifiSlash } from 'phosphor-react-native';
+import { WifiSlash } from '../icons/phosphor';
 import { Text } from './Text';
 import { useTheme } from '../theme/ThemeProvider';
 

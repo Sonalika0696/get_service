@@ -2,7 +2,7 @@ import React from 'react';
 import { View, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, CaretRight, FileText, Info } from 'phosphor-react-native';
+import { ArrowLeft, CaretRight, FileText, Info } from '../../src/icons/phosphor';
 import type { EvidenceRef } from '@sft/api-client';
 import { Text } from '../../src/components/Text';
 import { Button } from '../../src/components/Button';

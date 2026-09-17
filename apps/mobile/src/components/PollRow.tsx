@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Pressable } from 'react-native';
-import { CaretRight, CheckCircle, Clock } from 'phosphor-react-native';
+import { CaretRight, CheckCircle, Clock, PencilSimple } from '../icons/phosphor';
 import type { ResidentPollDetail } from '@sft/api-client';
 import { Text } from './Text';
 import { StatusPill } from './StatusPill';
@@ -15,9 +15,12 @@ import { useTheme } from '../theme/ThemeProvider';
 export function PollRow({
   poll,
   onPress,
+  onEdit,
 }: {
   poll: ResidentPollDetail;
   onPress: () => void;
+  /** When set, an inline "Edit" control appears (used in the "Mine" segment). */
+  onEdit?: () => void;
 }) {
   const theme = useTheme();
   const threshold = poll.vendorConfirmedMinimum ?? poll.minCommitments ?? 0;
@@ -100,6 +103,28 @@ export function PollRow({
           <Text variant="caption" tone="muted">
             {formatCloses(poll.closesAt)}
           </Text>
+          {onEdit ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Edit this request"
+              onPress={onEdit}
+              hitSlop={8}
+              style={({ pressed }) => ({
+                marginLeft: 'auto',
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
+                paddingHorizontal: 10,
+                paddingVertical: 4,
+                borderRadius: theme.radius.pill,
+                backgroundColor: theme.colors.accent.tint,
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <PencilSimple size={12} color={theme.colors.accent[700]} weight="bold" />
+              <Text variant="caption" weight="semibold" tone="accent">Edit</Text>
+            </Pressable>
+          ) : null}
         </View>
 
         {poll.hasJoined ? (

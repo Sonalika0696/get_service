@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Pressable } from 'react-native';
-import { Briefcase, SealCheck, CaretRight, LinkSimple } from 'phosphor-react-native';
+import { Briefcase, SealCheck, CaretRight, LinkSimple } from '../icons/phosphor';
 import type { JobBlogPost } from '@sft/api-client';
 import { Text } from './Text';
 import { useTheme } from '../theme/ThemeProvider';

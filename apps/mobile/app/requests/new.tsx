@@ -15,11 +15,10 @@ import {
   CaretDown,
   Storefront,
   CheckCircle,
-} from 'phosphor-react-native';
+} from '../../src/icons/phosphor';
 import type { VendorDetail } from '@sft/api-client';
 import { Text } from '../../src/components/Text';
 import { Button } from '../../src/components/Button';
-import { Card } from '../../src/components/Card';
 import { SectionLabel } from '../../src/components/SectionLabel';
 import { FilterChip } from '../../src/components/FilterChip';
 import { VENDOR_CATEGORIES } from '../../src/lib/categories';
@@ -219,20 +218,30 @@ function VendorPicker({
   onSelect: (v: VendorDetail) => void;
 }) {
   const theme = useTheme();
+  // Attached-dropdown geometry: the open panel is bounded to ~4 rows and
+  // scrolls the rest inside the same card, instead of floating a separate
+  // card. This is the pattern for every in-form list picker in the app.
+  const ROW_HEIGHT = 48;
+  const VISIBLE_ROWS = 4;
 
   return (
-    <View style={{ gap: theme.spacing.sm }}>
+    <View
+      style={{
+        backgroundColor: theme.colors.bg.elevated,
+        borderRadius: theme.radius.lg,
+        borderWidth: 1,
+        borderColor: theme.colors.border.subtle,
+        overflow: 'hidden',
+      }}
+    >
       <Pressable
         accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
         onPress={onToggle}
         style={({ pressed }) => ({
           flexDirection: 'row',
           alignItems: 'center',
           gap: 10,
-          backgroundColor: theme.colors.bg.elevated,
-          borderRadius: theme.radius.lg,
-          borderWidth: 1,
-          borderColor: theme.colors.border.subtle,
           padding: theme.spacing.md,
           opacity: pressed ? 0.94 : 1,
         })}
@@ -255,39 +264,47 @@ function VendorPicker({
       </Pressable>
 
       {open ? (
-        <Card padded={theme.spacing.sm}>
+        <View style={{ borderTopWidth: 1, borderTopColor: theme.colors.border.subtle }}>
           {loading ? (
-            <Text variant="caption" tone="muted" style={{ padding: 12 }}>Loading vendors…</Text>
+            <Text variant="caption" tone="muted" style={{ padding: 14 }}>Loading vendors…</Text>
           ) : vendors.length === 0 ? (
-            <Text variant="caption" tone="muted" style={{ padding: 12 }}>
+            <Text variant="caption" tone="muted" style={{ padding: 14 }}>
               No vendors onboarded {category ? `under ${category}` : ''} yet. Ping your committee.
             </Text>
           ) : (
-            vendors.map((v, i) => (
-              <Pressable
-                key={v.id}
-                onPress={() => onSelect(v)}
-                style={({ pressed }) => ({
-                  paddingVertical: 10,
-                  paddingHorizontal: 6,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 8,
-                  opacity: pressed ? 0.7 : 1,
-                  borderTopWidth: i === 0 ? 0 : 1,
-                  borderTopColor: theme.colors.border.subtle,
-                })}
-              >
-                <Text variant="body" weight="semibold" style={{ flex: 1 }} numberOfLines={1}>
-                  {v.name}
-                </Text>
-                {vendor?.id === v.id ? (
-                  <CheckCircle size={16} color={theme.colors.accent[700]} weight="fill" />
-                ) : null}
-              </Pressable>
-            ))
+            <ScrollView
+              style={{ maxHeight: ROW_HEIGHT * VISIBLE_ROWS }}
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={vendors.length > VISIBLE_ROWS}
+            >
+              {vendors.map((v, i) => (
+                <Pressable
+                  key={v.id}
+                  onPress={() => onSelect(v)}
+                  style={({ pressed }) => ({
+                    height: ROW_HEIGHT,
+                    paddingHorizontal: theme.spacing.md,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                    backgroundColor: vendor?.id === v.id ? theme.colors.accent.tint : 'transparent',
+                    opacity: pressed ? 0.7 : 1,
+                    borderTopWidth: i === 0 ? 0 : 1,
+                    borderTopColor: theme.colors.border.subtle,
+                  })}
+                >
+                  <Text variant="body" weight="semibold" style={{ flex: 1 }} numberOfLines={1}>
+                    {v.name}
+                  </Text>
+                  {vendor?.id === v.id ? (
+                    <CheckCircle size={16} color={theme.colors.accent[700]} weight="fill" />
+                  ) : null}
+                </Pressable>
+              ))}
+            </ScrollView>
           )}
-        </Card>
+        </View>
       ) : null}
     </View>
   );

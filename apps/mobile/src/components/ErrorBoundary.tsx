@@ -1,6 +1,6 @@
 import React from 'react';
 import { View } from 'react-native';
-import { Warning } from 'phosphor-react-native';
+import { Warning } from '../icons/phosphor';
 import { Text } from './Text';
 import { Button } from './Button';
 import { lightTheme } from '../theme/theme';

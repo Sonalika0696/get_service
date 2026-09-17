@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { View, ScrollView, TextInput } from 'react-native';
+import { View, ScrollView, TextInput, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
-import { ArrowLeft, MagnifyingGlass, Storefront } from 'phosphor-react-native';
+import { ArrowLeft, MagnifyingGlass, Storefront } from '../../src/icons/phosphor';
 import { Text } from '../../src/components/Text';
 import { Button } from '../../src/components/Button';
 import { FilterChip } from '../../src/components/FilterChip';
@@ -108,40 +108,49 @@ export default function VendorsIndex() {
         ))}
       </ScrollView>
 
-      <ScrollView
+      {/* Virtualised: the directory can grow to hundreds in a large society,
+          so only on-screen rows mount. Visuals are identical to before. */}
+      <FlatList
+        data={vendors}
+        keyExtractor={(v) => v.id}
+        renderItem={({ item }) => (
+          <VendorRow vendor={item} onPress={() => router.push(`/vendors/${item.id}`)} />
+        )}
         contentContainerStyle={{
           paddingHorizontal: theme.screenPadding,
           paddingBottom: theme.spacing.xxxl,
           gap: theme.spacing.sm,
         }}
         showsVerticalScrollIndicator={false}
-      >
-        {query.isLoading ? <ListLoading label="Loading vendors" /> : null}
-        {query.isError ? (
-          <ListError
-            message={
-              (query.error as { message?: string } | null)?.message ??
-              'Vendors aren\'t reachable right now. Check your connection and try again.'
-            }
-            onRetry={() => query.refetch()}
-          />
-        ) : null}
-        {empty ? (
-          <ListEmpty
-            Icon={Storefront}
-            illustration="vendors"
-            title="No vendors here yet"
-            body={
-              category
-                ? `No one onboarded under ${category} yet. Try another category, or ask your committee.`
-                : 'Your committee hasn\'t onboarded anyone yet. Ping them from the notices tab.'
-            }
-          />
-        ) : null}
-        {vendors.map((v) => (
-          <VendorRow key={v.id} vendor={v} onPress={() => router.push(`/vendors/${v.id}`)} />
-        ))}
-      </ScrollView>
+        keyboardShouldPersistTaps="handled"
+        initialNumToRender={10}
+        windowSize={11}
+        removeClippedSubviews
+        ListEmptyComponent={
+          query.isLoading ? (
+            <ListLoading label="Loading vendors" />
+          ) : query.isError ? (
+            <ListError
+              message={
+                (query.error as { message?: string } | null)?.message ??
+                'Vendors aren\'t reachable right now. Check your connection and try again.'
+              }
+              onRetry={() => query.refetch()}
+            />
+          ) : empty ? (
+            <ListEmpty
+              Icon={Storefront}
+              illustration="vendors"
+              title="No vendors here yet"
+              body={
+                category
+                  ? `No one onboarded under ${category} yet. Try another category, or ask your committee.`
+                  : 'Your committee hasn\'t onboarded anyone yet. Ping them from the notices tab.'
+              }
+            />
+          ) : null
+        }
+      />
     </SafeAreaView>
   );
 }

@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { View, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { PlusCircle, Handshake } from 'phosphor-react-native';
+import { PlusCircle, Handshake } from '../icons/phosphor';
 import { Text } from '../components/Text';
 import { Button } from '../components/Button';
 import { Fab } from '../components/Fab';
@@ -12,31 +12,33 @@ import { PollRow } from '../components/PollRow';
 import { ListLoading, ListError, ListEmpty } from '../components/ListState';
 import { OfflineBanner } from '../components/OfflineBanner';
 import { useResidentPolls } from '../hooks/useResidentPolls';
+import { useAuth } from '../auth/AuthProvider';
 import { useTheme } from '../theme/ThemeProvider';
 
 type Segment = 'open' | 'mine';
 
 /**
  * Requests tab — the core F4 loop. Two segments (Open / Mine) derived from
- * one list request; the "Mine" segment reads `hasJoined` off each poll
- * without a second round trip.
+ * one list request. "Mine" shows the pools this resident *created* (matched
+ * on creatorId), and each still-open one carries an inline Edit affordance.
  */
 export default function RequestsScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const { me } = useAuth();
   const [segment, setSegment] = useState<Segment>('open');
 
   const query = useResidentPolls();
   const polls = query.data ?? [];
 
   const visible = useMemo(() => {
-    if (segment === 'mine') return polls.filter((p) => p.hasJoined);
+    if (segment === 'mine') return polls.filter((p) => me && p.creatorId === me.id);
     return polls.filter((p) => p.status === 'OPEN');
-  }, [polls, segment]);
+  }, [polls, segment, me]);
 
   const emptyBody =
     segment === 'mine'
-      ? "You haven't joined any pooled requests yet. Open one from the Open tab."
+      ? "You haven't raised any pooled requests yet. Tap Raise to start one your neighbours can join."
       : 'Nothing open right now. Raise the first request — your neighbours will see it here.';
 
   return (
@@ -88,29 +90,30 @@ export default function RequestsScreen() {
             <ListEmpty
               Icon={Handshake}
               illustration="requests"
-              title={segment === 'mine' ? 'Nothing joined yet' : 'No open requests'}
+              title={segment === 'mine' ? 'Nothing raised yet' : 'No open requests'}
               body={emptyBody}
               action={
-                segment === 'open' ? (
-                  <Button
-                    label="Raise a request"
-                    variant="secondary"
-                    onPress={() => router.push('/requests/new')}
-                  />
-                ) : (
-                  <Button
-                    label="Browse open requests"
-                    variant="secondary"
-                    onPress={() => setSegment('open')}
-                  />
-                )
+                <Button
+                  label="Raise a request"
+                  variant="secondary"
+                  onPress={() => router.push('/requests/new')}
+                />
               }
             />
           ) : null}
 
           <View style={{ gap: theme.spacing.sm }}>
             {visible.map((p) => (
-              <PollRow key={p.id} poll={p} onPress={() => router.push(`/requests/${p.id}`)} />
+              <PollRow
+                key={p.id}
+                poll={p}
+                onPress={() => router.push(`/requests/${p.id}`)}
+                onEdit={
+                  segment === 'mine' && p.status === 'OPEN'
+                    ? () => router.push(`/requests/edit/${p.id}`)
+                    : undefined
+                }
+              />
             ))}
           </View>
         </View>

@@ -7,7 +7,7 @@ import {
   type PressableProps,
   type ViewStyle,
 } from 'react-native';
-import { Check } from 'phosphor-react-native';
+import { Check } from '../icons/phosphor';
 import { Text } from './Text';
 import { useTheme } from '../theme/ThemeProvider';
 

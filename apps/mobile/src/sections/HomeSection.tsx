@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Handshake, CalendarBlank, Bell, Wrench } from 'phosphor-react-native';
+import { Handshake, CalendarBlank, Bell, Wrench } from '../icons/phosphor';
 import { Screen } from '../components/Screen';
 import { Text } from '../components/Text';
 import { SectionLabel } from '../components/SectionLabel';
@@ -42,6 +42,25 @@ function greeting(): string {
   return 'Good evening';
 }
 
+/**
+ * Live greeting: recomputes on a one-minute tick so the phrase actually
+ * switches (morning → afternoon → evening) while the app stays open across a
+ * boundary, instead of freezing at whatever it was when Home first mounted.
+ */
+function useGreeting(): string {
+  const [phrase, setPhrase] = useState(greeting);
+  useEffect(() => {
+    const id = setInterval(() => {
+      setPhrase((prev) => {
+        const next = greeting();
+        return next === prev ? prev : next;
+      });
+    }, 60_000);
+    return () => clearInterval(id);
+  }, []);
+  return phrase;
+}
+
 const preview = {
   flat: { label: 'A-1204', society: 'Willow Grove' },
   amountMinor: 1245000,
@@ -65,6 +84,7 @@ export default function HomeScreen() {
   const { me } = useAuth();
   const { goTo } = useTabs();
   const bills = useBillsHub();
+  const hello = useGreeting();
 
   const firstName = me?.name?.trim().split(/\s+/)[0];
 
@@ -88,7 +108,7 @@ export default function HomeScreen() {
           {preview.flat.society} · {preview.flat.label}
         </Text>
         <Text variant="display" weight="semibold" style={{ marginTop: 4 }}>
-          {greeting()}{firstName ? `, ${firstName}` : ''}
+          {hello}{firstName ? `, ${firstName}` : ''}
         </Text>
       </View>
 

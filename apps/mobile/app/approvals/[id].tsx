@@ -10,7 +10,7 @@ import {
   User as UserIcon,
   CalendarBlank,
   ShieldCheck,
-} from 'phosphor-react-native';
+} from '../../src/icons/phosphor';
 import type { ApprovalItem } from '@sft/api-client';
 import { Text } from '../../src/components/Text';
 import { Button } from '../../src/components/Button';

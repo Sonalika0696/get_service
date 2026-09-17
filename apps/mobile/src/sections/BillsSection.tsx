@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { View, ScrollView } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Receipt, ClockCounterClockwise } from 'phosphor-react-native';
+import { Receipt, ClockCounterClockwise } from '../icons/phosphor';
 import type { PaymentRail } from '@sft/api-client';
 import { Text } from '../components/Text';
 import { Button } from '../components/Button';

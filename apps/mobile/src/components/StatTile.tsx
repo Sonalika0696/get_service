@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, View } from 'react-native';
-import type { IconProps } from 'phosphor-react-native';
+import type { IconProps } from '../icons/phosphor';
 import { Text } from './Text';
 import { useTheme } from '../theme/ThemeProvider';
 
