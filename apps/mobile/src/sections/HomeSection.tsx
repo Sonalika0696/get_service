@@ -1,7 +1,7 @@
 import React from 'react';
 import { View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Handshake, CalendarBlank, Bell, Wrench, Storefront } from 'phosphor-react-native';
+import { Handshake, CalendarBlank, Bell, Wrench } from 'phosphor-react-native';
 import { Screen } from '../components/Screen';
 import { Text } from '../components/Text';
 import { SectionLabel } from '../components/SectionLabel';
@@ -102,30 +102,6 @@ export default function HomeScreen() {
             tone="success"
           />
         </View>
-      </View>
-
-      <View>
-        <SectionLabel
-          trailing={
-            <Text
-              variant="body"
-              weight="semibold"
-              tone="accent"
-              onPress={() => router.push('/vendors')}
-            >
-              Vendor directory
-            </Text>
-          }
-        >
-          Trusted vendors
-        </SectionLabel>
-        <StatTile
-          Icon={Storefront}
-          value="Browse"
-          label="See all vendors your committee onboarded"
-          tone="accent"
-          onPress={() => router.push('/vendors')}
-        />
       </View>
 
       <View>

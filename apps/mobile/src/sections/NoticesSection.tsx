@@ -2,28 +2,33 @@ import React from 'react';
 import { View, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { PencilSimple, Megaphone } from 'phosphor-react-native';
+import { PencilSimple, Megaphone, CalendarBlank } from 'phosphor-react-native';
 import { Text } from '../components/Text';
 import { Button } from '../components/Button';
 import { Fab } from '../components/Fab';
 import { SectionLabel } from '../components/SectionLabel';
 import { JobPostRow } from '../components/JobPostRow';
+import { EventRow } from '../components/EventRow';
 import { ListLoading, ListError, ListEmpty } from '../components/ListState';
 import { OfflineBanner } from '../components/OfflineBanner';
 import { useJobPosts } from '../hooks/useJobPosts';
+import { useEvents } from '../hooks/useEvents';
 import { useTheme } from '../theme/ThemeProvider';
 
 /**
- * The community feed tab. Wired to GET /jobs (the shipped job-blog module,
- * the closest surface to a notice board that has shipped). A dedicated
- * general-announcement endpoint doesn't exist yet on the backend; when it
- * does, this screen composes both streams under one section header.
+ * The community feed tab. Two streams live here:
+ *  A) admin-posted society events/activities (GET /events via useEvents) —
+ *     residents show interest / participate on the event detail screen.
+ *  B) resident hiring posts (GET /jobs via useJobPosts, filtered to
+ *     kind === 'HIRING' — the old "seeking" concept is retired).
  */
 export default function NoticesScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const query = useJobPosts();
-  const posts = query.data ?? [];
+  const eventsQuery = useEvents();
+  const events = eventsQuery.data ?? [];
+  const postsQuery = useJobPosts();
+  const posts = postsQuery.data ?? [];
 
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.colors.bg.primary }}>
@@ -40,31 +45,65 @@ export default function NoticesScreen() {
         <View>
           <Text variant="display" weight="semibold">Community</Text>
           <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
-            What your neighbours are hiring for, and what they're looking to do.
+            Society events to join, and what your neighbours are hiring for.
           </Text>
         </View>
 
         <View>
-          <SectionLabel>Recent posts</SectionLabel>
+          <SectionLabel>Happening in your society</SectionLabel>
 
-          {query.isLoading ? <ListLoading label="Loading posts" /> : null}
+          {eventsQuery.isLoading ? <ListLoading label="Loading events" /> : null}
 
-          {query.isError ? (
+          {eventsQuery.isError ? (
             <ListError
               message={
-                (query.error as { message?: string } | null)?.message ??
-                'The feed is unreachable. Check your connection and try again.'
+                (eventsQuery.error as { message?: string } | null)?.message ??
+                'Events are unreachable. Check your connection and try again.'
               }
-              onRetry={() => query.refetch()}
+              onRetry={() => eventsQuery.refetch()}
             />
           ) : null}
 
-          {query.isSuccess && posts.length === 0 ? (
+          {eventsQuery.isSuccess && events.length === 0 ? (
+            <ListEmpty
+              Icon={CalendarBlank}
+              title="Nothing scheduled"
+              body="Your society's admin hasn't posted any events or activities yet."
+            />
+          ) : null}
+
+          <View style={{ gap: theme.spacing.sm }}>
+            {events.map((event) => (
+              <EventRow
+                key={event.id}
+                event={event}
+                onPress={() => router.push(`/events/${event.id}`)}
+              />
+            ))}
+          </View>
+        </View>
+
+        <View>
+          <SectionLabel>Neighbours are hiring</SectionLabel>
+
+          {postsQuery.isLoading ? <ListLoading label="Loading posts" /> : null}
+
+          {postsQuery.isError ? (
+            <ListError
+              message={
+                (postsQuery.error as { message?: string } | null)?.message ??
+                'The feed is unreachable. Check your connection and try again.'
+              }
+              onRetry={() => postsQuery.refetch()}
+            />
+          ) : null}
+
+          {postsQuery.isSuccess && posts.length === 0 ? (
             <ListEmpty
               Icon={Megaphone}
               illustration="notices"
               title="Quiet in the community"
-              body="Be the first: post a job you're hiring for, or one you're looking to take on."
+              body="Be the first: post a job you're hiring for."
               action={
                 <Button
                   label="Write a post"

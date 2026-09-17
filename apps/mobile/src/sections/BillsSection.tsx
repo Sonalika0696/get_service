@@ -104,7 +104,7 @@ export default function BillsScreen() {
             />
           ) : null}
 
-          <View style={{ gap: theme.spacing.sm }}>
+          <View style={{ gap: theme.spacing.md }}>
             {visible.map((l) => (
               <BillLineRow key={l.id} line={l} onPress={() => router.push(`/bills/${l.id}`)} />
             ))}

@@ -2,11 +2,11 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { View, Pressable } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { House, Receipt, Handshake, Megaphone, User, type IconProps } from 'phosphor-react-native';
 import { useTheme } from '../../src/theme/ThemeProvider';
 import { Text } from '../../src/components/Text';
 import { TabsContext, TAB_NAMES, type TabName } from '../../src/sections/TabsContext';
 import { TabsPager } from '../../src/sections/TabsPager';
+import { TAB_ICONS } from '../../src/components/icons/TabIcons';
 import HomeSection from '../../src/sections/HomeSection';
 import BillsSection from '../../src/sections/BillsSection';
 import RequestsSection from '../../src/sections/RequestsSection';
@@ -14,8 +14,7 @@ import NoticesSection from '../../src/sections/NoticesSection';
 import ProfileSection from '../../src/sections/ProfileSection';
 
 const PAGES = [HomeSection, BillsSection, RequestsSection, NoticesSection, ProfileSection];
-const ICONS: React.ComponentType<IconProps>[] = [House, Receipt, Handshake, Megaphone, User];
-const LABELS = ['Home', 'Bills', 'Requests', 'Notices', 'Profile'];
+const LABELS = ['Home', 'Bills', 'Requests', 'Community', 'Profile'];
 
 /**
  * The five sections hosted in a single PagerView, so swipe is drag-follow
@@ -75,7 +74,7 @@ function BottomBar({ index, onSelect }: { index: number; onSelect: (i: number) =
         paddingBottom: insets.bottom > 0 ? insets.bottom : 10,
       }}
     >
-      {ICONS.map((Icon, i) => {
+      {TAB_ICONS.map((Icon, i) => {
         const active = i === index;
         const color = active ? theme.colors.accent[700] : theme.colors.ink[40];
         return (
@@ -84,9 +83,9 @@ function BottomBar({ index, onSelect }: { index: number; onSelect: (i: number) =
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
             onPress={() => onSelect(i)}
-            style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3, minHeight: 48 }}
+            style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4, minHeight: 48 }}
           >
-            <Icon size={24} color={color} weight={active ? 'fill' : 'regular'} />
+            <Icon size={24} color={color} active={active} />
             <Text weight="semibold" style={{ fontSize: 11, lineHeight: 14, color }}>
               {LABELS[i]}
             </Text>

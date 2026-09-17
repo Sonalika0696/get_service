@@ -1,14 +1,27 @@
 import React from 'react';
 import { View, Pressable } from 'react-native';
-import { Briefcase, MagnifyingGlass, SealCheck, CaretRight } from 'phosphor-react-native';
+import { Briefcase, SealCheck, CaretRight, LinkSimple } from 'phosphor-react-native';
 import type { JobBlogPost } from '@sft/api-client';
 import { Text } from './Text';
 import { useTheme } from '../theme/ThemeProvider';
 
+/** Matches the trailing "Apply: <url>" line the compose screen appends to a
+ * post's body when the poster attaches an apply link. Kept in sync with the
+ * same pattern in app/notices/new.tsx and app/notices/[id].tsx. */
+const APPLY_LINK_PATTERN = /\n\nApply:\s*(\S+)\s*$/;
+
+function hasApplyLink(body: string): boolean {
+  return APPLY_LINK_PATTERN.test(body);
+}
+
+function previewBody(body: string): string {
+  return body.replace(APPLY_LINK_PATTERN, '').trim();
+}
+
 /**
- * A community feed row. HIRING posts wear a briefcase and a "verified employer"
- * mark once the company-email round-trip lands; SEEKING posts get a search
- * glass and skip the verification step (nobody to impersonate).
+ * A community feed row. The Community tab only carries HIRING posts (the
+ * SEEKING kind is retired), so every row wears the briefcase and, once the
+ * company-email round-trip lands, a "verified employer" mark.
  */
 export function JobPostRow({
   post,
@@ -18,8 +31,7 @@ export function JobPostRow({
   onPress: () => void;
 }) {
   const theme = useTheme();
-  const isHiring = post.kind === 'HIRING';
-  const Icon = isHiring ? Briefcase : MagnifyingGlass;
+  const applyLinkAttached = hasApplyLink(post.body);
 
   return (
     <Pressable
@@ -42,24 +54,20 @@ export function JobPostRow({
           width: 44,
           height: 44,
           borderRadius: theme.radius.md,
-          backgroundColor: isHiring ? theme.colors.feedback.infoTint : theme.colors.accent.tint,
+          backgroundColor: theme.colors.feedback.infoTint,
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
-        <Icon
-          size={22}
-          color={isHiring ? theme.colors.feedback.info : theme.colors.accent[700]}
-          weight="duotone"
-        />
+        <Briefcase size={22} color={theme.colors.feedback.info} weight="duotone" />
       </View>
 
       <View style={{ flex: 1, gap: 4 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Text variant="overline" weight="semibold" tone="muted">
-            {isHiring ? 'Hiring' : 'Seeking'}
+            Hiring
           </Text>
-          {isHiring && post.companyEmailVerifiedAt ? (
+          {post.companyEmailVerifiedAt ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
               <SealCheck size={12} color={theme.colors.feedback.info} weight="fill" />
               <Text variant="caption" weight="semibold" tone="secondary">Verified</Text>
@@ -70,8 +78,14 @@ export function JobPostRow({
           {post.title}
         </Text>
         <Text variant="caption" tone="secondary" numberOfLines={2}>
-          {post.body}
+          {previewBody(post.body)}
         </Text>
+        {applyLinkAttached ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+            <LinkSimple size={12} color={theme.colors.accent[700]} weight="bold" />
+            <Text variant="caption" weight="semibold" tone="accent">Apply link attached</Text>
+          </View>
+        ) : null}
       </View>
 
       <CaretRight size={18} color={theme.colors.ink[40]} weight="bold" />

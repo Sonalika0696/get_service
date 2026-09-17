@@ -135,21 +135,19 @@ export default function ProfileScreen() {
           <Row
             icon={<IdentificationCard size={18} color={accent} weight="duotone" />}
             title="Edit profile information"
-            onPress={() => undefined}
+            onPress={() => router.push('/account/edit-profile')}
           />
-          <Divider />
           <Row
             icon={<Bell size={18} color={accent} weight="duotone" />}
             title="Notifications"
             rightValue="On"
-            onPress={() => undefined}
+            onPress={() => router.push('/account/notifications')}
           />
-          <Divider />
           <Row
             icon={<Translate size={18} color={accent} weight="duotone" />}
             title="Language"
             rightValue="English"
-            onPress={() => undefined}
+            onPress={() => router.push('/account/language')}
           />
         </Card>
       </View>
@@ -160,9 +158,8 @@ export default function ProfileScreen() {
           <Row
             icon={<ShieldCheck size={18} color={accent} weight="duotone" />}
             title="Security"
-            onPress={() => undefined}
+            onPress={() => router.push('/account/security')}
           />
-          <Divider />
           <ThemeRow />
         </Card>
       </View>
@@ -173,19 +170,17 @@ export default function ProfileScreen() {
           <Row
             icon={<Question size={18} color={accent} weight="duotone" />}
             title="Help & support"
-            onPress={() => undefined}
+            onPress={() => router.push('/account/help')}
           />
-          <Divider />
           <Row
             icon={<ChatCircle size={18} color={accent} weight="duotone" />}
             title="Contact us"
-            onPress={() => undefined}
+            onPress={() => router.push('/account/contact')}
           />
-          <Divider />
           <Row
             icon={<Lock size={18} color={accent} weight="duotone" />}
             title="Privacy policy"
-            onPress={() => undefined}
+            onPress={() => router.push('/account/privacy')}
           />
         </Card>
       </View>
@@ -199,7 +194,6 @@ export default function ProfileScreen() {
             subtitle="Preview shared components"
             onPress={() => router.push('/dev/ui')}
           />
-          <Divider />
           <Row
             icon={<SignOut size={18} color={theme.colors.feedback.danger} weight="bold" />}
             title="Sign out"

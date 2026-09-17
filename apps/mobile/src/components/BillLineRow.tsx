@@ -45,6 +45,7 @@ export function BillLineRow({
         borderWidth: 1,
         borderColor: theme.colors.border.subtle,
         gap: theme.spacing.sm,
+        ...theme.shadows.sm.native,
       })}
     >
       <View style={{ flexDirection: 'row', gap: theme.spacing.sm }}>

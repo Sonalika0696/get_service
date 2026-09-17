@@ -2,54 +2,59 @@ import React, { useState } from 'react';
 import { View, ScrollView, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
-import { ArrowLeft, Briefcase, MagnifyingGlass } from 'phosphor-react-native';
+import { ArrowLeft, LinkSimple } from 'phosphor-react-native';
 import { Text } from '../../src/components/Text';
 import { Button } from '../../src/components/Button';
 import { SectionLabel } from '../../src/components/SectionLabel';
 import { useCreateJobPost } from '../../src/hooks/useJobPosts';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
-type Kind = 'SEEKING' | 'HIRING';
+/** Loose "looks like a URL" check for the optional apply link. Doesn't need
+ * to be exhaustive — it's a nudge, not a validator; the backend never sees
+ * this field structured, it's folded into the free-text body. */
+const URL_LIKE = /^https?:\/\/[^\s]+\.[^\s]+$/i;
 
 export default function ComposeNotice() {
   const theme = useTheme();
   const router = useRouter();
-  const [kind, setKind] = useState<Kind>('SEEKING');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [companyEmail, setCompanyEmail] = useState('');
+  const [applyLink, setApplyLink] = useState('');
 
   const mutation = useCreateJobPost();
+
+  const applyLinkTrimmed = applyLink.trim();
+  const applyLinkValid = applyLinkTrimmed.length === 0 || URL_LIKE.test(applyLinkTrimmed);
 
   const canSubmit =
     title.trim().length >= 3 &&
     body.trim().length >= 1 &&
-    (kind === 'SEEKING' || /^\S+@\S+\.\S+$/.test(companyEmail.trim()));
+    /^\S+@\S+\.\S+$/.test(companyEmail.trim()) &&
+    applyLinkValid;
 
   const submit = () => {
     if (!canSubmit) return;
-    const payload =
-      kind === 'HIRING'
-        ? { kind, title: title.trim(), body: body.trim(), companyEmail: companyEmail.trim() }
-        : { kind, title: title.trim(), body: body.trim() };
-    mutation.mutate(payload as never, {
-      onSuccess: () => {
-        if (kind === 'HIRING') {
+    const bodyWithLink =
+      applyLinkTrimmed.length > 0 ? `${body.trim()}\n\nApply: ${applyLinkTrimmed}` : body.trim();
+
+    mutation.mutate(
+      { kind: 'HIRING', title: title.trim(), body: bodyWithLink, companyEmail: companyEmail.trim() },
+      {
+        onSuccess: () => {
           Alert.alert(
             'Verify company email',
             'We sent a verification link to your work email. Your post appears once you click it.',
             [{ text: 'Got it', onPress: () => router.back() }],
           );
-        } else {
-          router.back();
-        }
+        },
+        onError: (err: unknown) => {
+          const message =
+            (err as { message?: string } | null)?.message ?? 'Could not post. Please try again.';
+          Alert.alert('Could not post', message);
+        },
       },
-      onError: (err: unknown) => {
-        const message =
-          (err as { message?: string } | null)?.message ?? 'Could not post. Please try again.';
-        Alert.alert('Could not post', message);
-      },
-    });
+    );
   };
 
   return (
@@ -77,30 +82,10 @@ export default function ComposeNotice() {
           keyboardShouldPersistTaps="handled"
         >
           <View>
-            <Text variant="display" weight="semibold">New post</Text>
+            <Text variant="display" weight="semibold">New hiring post</Text>
             <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
-              One post per resident per month by default. Committee moderation applies.
+              One hiring post per resident per month by default. Committee moderation applies.
             </Text>
-          </View>
-
-          <View>
-            <SectionLabel>Kind</SectionLabel>
-            <View style={{ flexDirection: 'row', gap: theme.spacing.sm }}>
-              <KindOption
-                label="Seeking"
-                caption="I want to do work"
-                active={kind === 'SEEKING'}
-                onPress={() => setKind('SEEKING')}
-                Icon={MagnifyingGlass}
-              />
-              <KindOption
-                label="Hiring"
-                caption="I need to hire someone"
-                active={kind === 'HIRING'}
-                onPress={() => setKind('HIRING')}
-                Icon={Briefcase}
-              />
-            </View>
           </View>
 
           <View>
@@ -125,21 +110,41 @@ export default function ComposeNotice() {
             />
           </View>
 
-          {kind === 'HIRING' ? (
-            <View>
-              <SectionLabel>Company email</SectionLabel>
-              <FieldInput
-                value={companyEmail}
-                onChangeText={setCompanyEmail}
-                placeholder="you@company.com"
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-              <Text variant="caption" tone="muted" style={{ marginTop: 6 }}>
-                We send a verification link. Your post appears after you click it.
+          <View>
+            <SectionLabel>Company email</SectionLabel>
+            <FieldInput
+              value={companyEmail}
+              onChangeText={setCompanyEmail}
+              placeholder="you@company.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+            <Text variant="caption" tone="muted" style={{ marginTop: 6 }}>
+              We send a verification link. Your post appears after you click it.
+            </Text>
+          </View>
+
+          <View>
+            <SectionLabel trailing={<Text variant="caption" tone="muted">Optional</Text>}>
+              Apply link
+            </SectionLabel>
+            <FieldInput
+              value={applyLink}
+              onChangeText={setApplyLink}
+              placeholder="https://your-company.com/careers/role"
+              keyboardType="url"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 }}>
+              <LinkSimple size={12} color={theme.colors.ink[60]} weight="bold" />
+              <Text variant="caption" tone={applyLinkValid ? 'muted' : 'danger'}>
+                {applyLinkValid
+                  ? 'A form or careers page link neighbours can tap to apply.'
+                  : 'Enter a full link starting with http:// or https://'}
               </Text>
             </View>
-          ) : null}
+          </View>
 
           <Button
             label={mutation.isPending ? 'Posting' : 'Publish'}
@@ -151,40 +156,6 @@ export default function ComposeNotice() {
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
-  );
-}
-
-function KindOption({
-  label,
-  caption,
-  active,
-  onPress,
-  Icon,
-}: {
-  label: string;
-  caption: string;
-  active: boolean;
-  onPress: () => void;
-  Icon: React.ComponentType<{ size?: number; color?: string; weight?: 'regular' | 'duotone' | 'fill' | 'bold' }>;
-}) {
-  const theme = useTheme();
-  return (
-    <View
-      style={{
-        flex: 1,
-        backgroundColor: active ? theme.colors.accent.tint : theme.colors.bg.elevated,
-        borderRadius: theme.radius.xl,
-        padding: theme.spacing.md,
-        borderWidth: 1,
-        borderColor: active ? theme.colors.accent[700] : theme.colors.border.subtle,
-        gap: 6,
-      }}
-      onTouchEnd={onPress}
-    >
-      <Icon size={20} color={active ? theme.colors.accent[700] : theme.colors.ink[80]} weight="duotone" />
-      <Text variant="body" weight="semibold" tone={active ? 'accent' : 'primary'}>{label}</Text>
-      <Text variant="caption" tone="muted">{caption}</Text>
-    </View>
   );
 }
 
