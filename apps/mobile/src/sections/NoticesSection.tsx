@@ -1,8 +1,9 @@
-import React from 'react';
-import { View, ScrollView } from 'react-native';
+import React, { useMemo } from 'react';
+import { View, SectionList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { PencilSimple, Megaphone, CalendarBlank } from '../icons/phosphor';
+import type { EventSummary, JobBlogPost } from '@sft/api-client';
 import { Text } from '../components/Text';
 import { Fab } from '../components/Fab';
 import { SectionLabel } from '../components/SectionLabel';
@@ -14,12 +15,35 @@ import { useJobPosts } from '../hooks/useJobPosts';
 import { useEvents } from '../hooks/useEvents';
 import { useTheme } from '../theme/ThemeProvider';
 
+/** One row in the merged SectionList. Real rows carry their data; a state
+ * row stands in for that section's loading/error/empty presentation so each
+ * feed keeps its own independent state exactly as before. */
+type Row =
+  | { kind: 'event'; event: EventSummary }
+  | { kind: 'post'; post: JobBlogPost }
+  | { kind: 'events-state' }
+  | { kind: 'posts-state' };
+
 /**
  * The community feed tab. Two streams live here:
  *  A) admin-posted society events/activities (GET /events via useEvents) —
  *     residents show interest / participate on the event detail screen.
  *  B) resident hiring posts (GET /jobs via useJobPosts, filtered to
  *     kind === 'HIRING' — the old "seeking" concept is retired).
+ *
+ * Virtualised via SectionList (two sections, one per feed) instead of a
+ * ScrollView + two `.map()`s. Each section always carries at least one row —
+ * either its real data or a single state-row standing in for loading/error/
+ * empty — so per-section state renders exactly like the old inline ternary.
+ * The second section's header carries an explicit marginTop (on top of
+ * SectionLabel's own intrinsic marginTop) to recreate the old top-level
+ * `gap` between the two feed blocks — deliberately not
+ * SectionSeparatorComponent, whose "renders at top and bottom of each
+ * section" semantics would also fire before the very first section and
+ * double up against the header's own bottom margin. ItemSeparatorComponent
+ * recreates the old rows-container gap within a feed. Sticky headers are
+ * switched off — the original was a plain in-flow SectionLabel, not a
+ * pinned one.
  */
 export default function NoticesScreen() {
   const theme = useTheme();
@@ -29,90 +53,117 @@ export default function NoticesScreen() {
   const postsQuery = useJobPosts();
   const posts = postsQuery.data ?? [];
 
+  const sections = useMemo(
+    () => [
+      {
+        key: 'events',
+        title: 'Happening in your society',
+        data:
+          events.length > 0
+            ? events.map((event): Row => ({ kind: 'event', event }))
+            : [{ kind: 'events-state' } as const],
+      },
+      {
+        key: 'posts',
+        title: 'Neighbours are hiring',
+        data:
+          posts.length > 0
+            ? posts.map((post): Row => ({ kind: 'post', post }))
+            : [{ kind: 'posts-state' } as const],
+      },
+    ],
+    [events, posts],
+  );
+
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.colors.bg.primary }}>
       <OfflineBanner />
-      <ScrollView
+      <SectionList
+        sections={sections}
+        keyExtractor={(item, index) => {
+          if (item.kind === 'event') return item.event.id;
+          if (item.kind === 'post') return item.post.id;
+          return `${item.kind}-${index}`;
+        }}
+        renderItem={({ item }) => {
+          switch (item.kind) {
+            case 'event':
+              return (
+                <EventRow event={item.event} onPress={() => router.push(`/events/${item.event.id}`)} />
+              );
+            case 'post':
+              return (
+                <JobPostRow post={item.post} onPress={() => router.push(`/notices/${item.post.id}`)} />
+              );
+            case 'events-state':
+              return eventsQuery.isLoading ? (
+                <ListLoading label="Loading events" />
+              ) : eventsQuery.isError ? (
+                <ListError
+                  message={
+                    (eventsQuery.error as { message?: string } | null)?.message ??
+                    'Events are unreachable. Check your connection and try again.'
+                  }
+                  onRetry={() => eventsQuery.refetch()}
+                />
+              ) : eventsQuery.isSuccess && events.length === 0 ? (
+                <ListEmpty
+                  Icon={CalendarBlank}
+                  title="Nothing scheduled"
+                  body="Your society's admin hasn't posted any events or activities yet."
+                />
+              ) : null;
+            case 'posts-state':
+              return postsQuery.isLoading ? (
+                <ListLoading label="Loading posts" />
+              ) : postsQuery.isError ? (
+                <ListError
+                  message={
+                    (postsQuery.error as { message?: string } | null)?.message ??
+                    'The feed is unreachable. Check your connection and try again.'
+                  }
+                  onRetry={() => postsQuery.refetch()}
+                />
+              ) : postsQuery.isSuccess && posts.length === 0 ? (
+                <ListEmpty
+                  Icon={Megaphone}
+                  illustration="notices"
+                  title="Quiet in the community"
+                  body="Be the first — tap Post to share a job you're hiring for."
+                />
+              ) : null;
+          }
+        }}
+        renderSectionHeader={({ section }) =>
+          section.key === 'posts' ? (
+            <View style={{ marginTop: theme.spacing.lg }}>
+              <SectionLabel>{section.title}</SectionLabel>
+            </View>
+          ) : (
+            <SectionLabel>{section.title}</SectionLabel>
+          )
+        }
+        ItemSeparatorComponent={() => <View style={{ height: theme.spacing.sm }} />}
+        stickySectionHeadersEnabled={false}
+        ListHeaderComponent={
+          <View style={{ marginBottom: theme.spacing.lg }}>
+            <Text variant="display" weight="semibold">Community</Text>
+            <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
+              Society events to join, and what your neighbours are hiring for.
+            </Text>
+          </View>
+        }
         contentContainerStyle={{
           paddingHorizontal: theme.screenPadding,
           paddingBottom: theme.spacing.hero + theme.spacing.md,
           paddingTop: theme.spacing.md,
-          gap: theme.spacing.lg,
         }}
         showsVerticalScrollIndicator={false}
-      >
-        <View>
-          <Text variant="display" weight="semibold">Community</Text>
-          <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
-            Society events to join, and what your neighbours are hiring for.
-          </Text>
-        </View>
-
-        <View>
-          <SectionLabel>Happening in your society</SectionLabel>
-
-          {eventsQuery.isLoading ? <ListLoading label="Loading events" /> : null}
-
-          {eventsQuery.isError ? (
-            <ListError
-              message={
-                (eventsQuery.error as { message?: string } | null)?.message ??
-                'Events are unreachable. Check your connection and try again.'
-              }
-              onRetry={() => eventsQuery.refetch()}
-            />
-          ) : null}
-
-          {eventsQuery.isSuccess && events.length === 0 ? (
-            <ListEmpty
-              Icon={CalendarBlank}
-              title="Nothing scheduled"
-              body="Your society's admin hasn't posted any events or activities yet."
-            />
-          ) : null}
-
-          <View style={{ gap: theme.spacing.sm }}>
-            {events.map((event) => (
-              <EventRow
-                key={event.id}
-                event={event}
-                onPress={() => router.push(`/events/${event.id}`)}
-              />
-            ))}
-          </View>
-        </View>
-
-        <View>
-          <SectionLabel>Neighbours are hiring</SectionLabel>
-
-          {postsQuery.isLoading ? <ListLoading label="Loading posts" /> : null}
-
-          {postsQuery.isError ? (
-            <ListError
-              message={
-                (postsQuery.error as { message?: string } | null)?.message ??
-                'The feed is unreachable. Check your connection and try again.'
-              }
-              onRetry={() => postsQuery.refetch()}
-            />
-          ) : null}
-
-          {postsQuery.isSuccess && posts.length === 0 ? (
-            <ListEmpty
-              Icon={Megaphone}
-              illustration="notices"
-              title="Quiet in the community"
-              body="Be the first — tap Post to share a job you're hiring for."
-            />
-          ) : null}
-
-          <View style={{ gap: theme.spacing.sm }}>
-            {posts.map((p) => (
-              <JobPostRow key={p.id} post={p} onPress={() => router.push(`/notices/${p.id}`)} />
-            ))}
-          </View>
-        </View>
-      </ScrollView>
+        keyboardShouldPersistTaps="handled"
+        initialNumToRender={8}
+        windowSize={11}
+        removeClippedSubviews
+      />
       <Fab
         label="Post"
         icon={<PencilSimple size={20} color={theme.colors.ink.onAccent} weight="bold" />}

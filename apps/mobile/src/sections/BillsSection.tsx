@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, ScrollView } from 'react-native';
+import { View, FlatList } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Receipt, ClockCounterClockwise } from '../icons/phosphor';
@@ -20,6 +20,12 @@ type Segment = 'due' | 'all';
 /**
  * Bills hub. Hero card at the top shows total due; segmented filter switches
  * between "Due now" and "All". Sorted by due date within each group.
+ *
+ * Virtualised via FlatList: the hero card, Segmented and SectionLabel scroll
+ * with the list as ListHeaderComponent, bill-line rows only mount on-screen.
+ * (The railBreakdown badges inside HeroDueCard stay a plain `.map()` — that
+ * list is bounded to the handful of payment rails and lives inside the
+ * header, not the growing feed.)
  */
 export default function BillsScreen() {
   const theme = useTheme();
@@ -43,45 +49,46 @@ export default function BillsScreen() {
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.colors.bg.primary }}>
       <OfflineBanner />
-      <ScrollView
-        contentContainerStyle={{
-          paddingHorizontal: theme.screenPadding,
-          paddingBottom: insets.bottom + theme.spacing.xxl,
-          paddingTop: theme.spacing.md,
-          gap: theme.spacing.lg,
-        }}
-        showsVerticalScrollIndicator={false}
-      >
-        <View>
-          <Text variant="display" weight="semibold">Bills</Text>
-          <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
-            Every obligation for your flat, with the number that produced it.
-          </Text>
-        </View>
+      <FlatList
+        data={visible}
+        keyExtractor={(l) => l.id}
+        renderItem={({ item }) => (
+          <BillLineRow line={item} onPress={() => router.push(`/bills/${item.id}`)} />
+        )}
+        ItemSeparatorComponent={() => <View style={{ height: theme.spacing.md }} />}
+        ListHeaderComponent={
+          <View style={{ gap: theme.spacing.lg }}>
+            <View>
+              <Text variant="display" weight="semibold">Bills</Text>
+              <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
+                Every obligation for your flat, with the number that produced it.
+              </Text>
+            </View>
 
-        <HeroDueCard
-          totalMinor={totalDue}
-          railBreakdown={railBreakdown}
-          onPressHistory={() => router.push('/bills/history')}
-        />
+            <HeroDueCard
+              totalMinor={totalDue}
+              railBreakdown={railBreakdown}
+              onPressHistory={() => router.push('/bills/history')}
+            />
 
-        <Segmented<Segment>
-          value={segment}
-          onChange={setSegment}
-          options={[
-            { value: 'due', label: 'Due now' },
-            { value: 'all', label: 'All' },
-          ]}
-        />
+            <Segmented<Segment>
+              value={segment}
+              onChange={setSegment}
+              options={[
+                { value: 'due', label: 'Due now' },
+                { value: 'all', label: 'All' },
+              ]}
+            />
 
-        <View>
-          <SectionLabel>
-            {segment === 'due' ? 'Due now' : 'Every line'}
-          </SectionLabel>
-
-          {hub.isLoading ? <ListLoading label="Loading bills" /> : null}
-
-          {hub.isError ? (
+            <SectionLabel>
+              {segment === 'due' ? 'Due now' : 'Every line'}
+            </SectionLabel>
+          </View>
+        }
+        ListEmptyComponent={
+          hub.isLoading ? (
+            <ListLoading label="Loading bills" />
+          ) : hub.isError ? (
             <ListError
               message={
                 (hub.error as { message?: string } | null)?.message ??
@@ -89,9 +96,7 @@ export default function BillsScreen() {
               }
               onRetry={() => hub.refetch()}
             />
-          ) : null}
-
-          {hub.isSuccess && visible.length === 0 ? (
+          ) : hub.isSuccess && visible.length === 0 ? (
             <ListEmpty
               Icon={Receipt}
               illustration="bills"
@@ -102,15 +107,19 @@ export default function BillsScreen() {
                   : 'Bills appear here as soon as the committee publishes a cycle or a pooled request fires.'
               }
             />
-          ) : null}
-
-          <View style={{ gap: theme.spacing.md }}>
-            {visible.map((l) => (
-              <BillLineRow key={l.id} line={l} onPress={() => router.push(`/bills/${l.id}`)} />
-            ))}
-          </View>
-        </View>
-      </ScrollView>
+          ) : null
+        }
+        contentContainerStyle={{
+          paddingHorizontal: theme.screenPadding,
+          paddingBottom: insets.bottom + theme.spacing.xxl,
+          paddingTop: theme.spacing.md,
+        }}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        initialNumToRender={8}
+        windowSize={11}
+        removeClippedSubviews
+      />
     </SafeAreaView>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, ScrollView } from 'react-native';
+import { View, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { PlusCircle, Handshake } from '../icons/phosphor';
@@ -21,6 +21,12 @@ type Segment = 'open' | 'mine';
  * Requests tab — the core F4 loop. Two segments (Open / Mine) derived from
  * one list request. "Mine" shows the pools this resident *created* (matched
  * on creatorId), and each still-open one carries an inline Edit affordance.
+ *
+ * Virtualised via FlatList: the header (title, Segmented, SectionLabel)
+ * scrolls with the list as ListHeaderComponent, rows only mount on-screen,
+ * and an ItemSeparatorComponent recreates the old rows-container `gap` —
+ * SectionLabel's own marginBottom already supplies the header-to-first-row
+ * spacing, so contentContainerStyle carries no extra gap.
  */
 export default function RequestsScreen() {
   const theme = useTheme();
@@ -44,39 +50,48 @@ export default function RequestsScreen() {
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.colors.bg.primary }}>
       <OfflineBanner />
-      <ScrollView
-        contentContainerStyle={{
-          paddingHorizontal: theme.screenPadding,
-          paddingBottom: theme.spacing.hero + theme.spacing.md,
-          paddingTop: theme.spacing.md,
-          gap: theme.spacing.lg,
-        }}
-        showsVerticalScrollIndicator={false}
-      >
-        <View>
-          <Text variant="display" weight="semibold">Requests</Text>
-          <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
-            Pool with your neighbours. Better price, one visit.
-          </Text>
-        </View>
+      <FlatList
+        data={visible}
+        keyExtractor={(p) => p.id}
+        renderItem={({ item }) => (
+          <PollRow
+            poll={item}
+            onPress={() => router.push(`/requests/${item.id}`)}
+            onEdit={
+              segment === 'mine' && item.status === 'OPEN'
+                ? () => router.push(`/requests/edit/${item.id}`)
+                : undefined
+            }
+          />
+        )}
+        ItemSeparatorComponent={() => <View style={{ height: theme.spacing.sm }} />}
+        ListHeaderComponent={
+          <View style={{ gap: theme.spacing.lg }}>
+            <View>
+              <Text variant="display" weight="semibold">Requests</Text>
+              <Text variant="body" tone="secondary" style={{ marginTop: 4 }}>
+                Pool with your neighbours. Better price, one visit.
+              </Text>
+            </View>
 
-        <Segmented<Segment>
-          value={segment}
-          onChange={setSegment}
-          options={[
-            { value: 'open', label: 'Open' },
-            { value: 'mine', label: 'Mine' },
-          ]}
-        />
+            <Segmented<Segment>
+              value={segment}
+              onChange={setSegment}
+              options={[
+                { value: 'open', label: 'Open' },
+                { value: 'mine', label: 'Mine' },
+              ]}
+            />
 
-        <View>
-          <SectionLabel>
-            {segment === 'open' ? 'Neighbours also need' : 'Requests you joined'}
-          </SectionLabel>
-
-          {query.isLoading ? <ListLoading label="Loading requests" /> : null}
-
-          {query.isError ? (
+            <SectionLabel>
+              {segment === 'open' ? 'Neighbours also need' : 'Requests you joined'}
+            </SectionLabel>
+          </View>
+        }
+        ListEmptyComponent={
+          query.isLoading ? (
+            <ListLoading label="Loading requests" />
+          ) : query.isError ? (
             <ListError
               message={
                 (query.error as { message?: string } | null)?.message ??
@@ -84,9 +99,7 @@ export default function RequestsScreen() {
               }
               onRetry={() => query.refetch()}
             />
-          ) : null}
-
-          {query.isSuccess && visible.length === 0 ? (
+          ) : query.isSuccess && visible.length === 0 ? (
             <ListEmpty
               Icon={Handshake}
               illustration="requests"
@@ -100,24 +113,19 @@ export default function RequestsScreen() {
                 />
               }
             />
-          ) : null}
-
-          <View style={{ gap: theme.spacing.sm }}>
-            {visible.map((p) => (
-              <PollRow
-                key={p.id}
-                poll={p}
-                onPress={() => router.push(`/requests/${p.id}`)}
-                onEdit={
-                  segment === 'mine' && p.status === 'OPEN'
-                    ? () => router.push(`/requests/edit/${p.id}`)
-                    : undefined
-                }
-              />
-            ))}
-          </View>
-        </View>
-      </ScrollView>
+          ) : null
+        }
+        contentContainerStyle={{
+          paddingHorizontal: theme.screenPadding,
+          paddingBottom: theme.spacing.hero + theme.spacing.md,
+          paddingTop: theme.spacing.md,
+        }}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        initialNumToRender={8}
+        windowSize={11}
+        removeClippedSubviews
+      />
       <Fab
         label="Raise"
         icon={<PlusCircle size={20} color={theme.colors.ink.onAccent} weight="bold" />}
