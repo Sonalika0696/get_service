@@ -39,6 +39,8 @@ import { HomeModule } from './modules/home/home.module.js';
 import { TariffModule } from './modules/electricity/tariff.module.js';
 import { WaterModule } from './modules/water/water.module.js';
 import { RealtimeModule } from './modules/realtime/realtime.module.js';
+import { MetersModule } from './modules/electricity/meters/meters.module.js';
+import { ReadingsModule } from './modules/electricity/readings/readings.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor.js';
 
@@ -92,6 +94,8 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     TariffModule,
     WaterModule,
     RealtimeModule,
+    MetersModule,
+    ReadingsModule,
     HealthModule,
   ],
   providers: [
