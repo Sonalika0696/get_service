@@ -101,7 +101,7 @@ export class ApprovalsService {
       ...this.buildFixedDepositItems(fixedDeposits, callerId),
       ...this.buildEventSettlementItems(eventSettlements, callerId, approvalConfig, rosterSize),
       ...this.buildWelfareDisbursementItems(welfareDisbursements, callerId, approvalConfig, rosterSize),
-      ...this.buildRatificationItems(ratifications),
+      ...this.buildRatificationItems(ratifications, societyId),
       ...this.buildDisputeItems(disputes, callerId),
     ];
 
@@ -226,8 +226,17 @@ export class ApprovalsService {
   // -------------------------------------------------------------------
   // MILESTONE — next unpaid milestone (lowest sequence) of COMPLETED LARGE bookings.
   // -------------------------------------------------------------------
-  private loadMilestoneCandidates(societyId: string) {
-    return this.prisma.booking.findMany({
+  /**
+   * Loads LARGE-booking milestone candidates plus the retention percentage of
+   * each booking's source Offer, in ONE extra batched query (not one per
+   * booking). The retention percentage matters until retention has been set
+   * aside at the first milestone authorisation: without it the first
+   * milestone's amount would be shown pre-retention, i.e. higher than what
+   * authoriseMilestone will actually pay, on the screen an officer reads
+   * before approving.
+   */
+  private async loadMilestoneCandidates(societyId: string) {
+    const bookings = await this.prisma.booking.findMany({
       where: { societyId, tier: JobCardTier.LARGE, status: BookingStatus.COMPLETED },
       include: {
         jobCards: { include: { commitment: true } },
@@ -235,6 +244,12 @@ export class ApprovalsService {
       },
       orderBy: { createdAt: 'asc' },
     });
+
+    const offerIds = [...new Set(bookings.filter((b) => b.sourceType === 'OFFER' && !b.retentionSetAside).map((b) => b.sourceId))];
+    const offers = offerIds.length > 0 ? await this.prisma.offer.findMany({ where: { id: { in: offerIds } }, select: { id: true, retentionPct: true } }) : [];
+    const retentionPctByOfferId = new Map(offers.map((o) => [o.id, o.retentionPct]));
+
+    return bookings.map((booking) => ({ ...booking, offerRetentionPct: retentionPctByOfferId.get(booking.sourceId) ?? new Decimal(0) }));
   }
 
   private buildMilestoneItems(
@@ -260,26 +275,18 @@ export class ApprovalsService {
       const alreadyPaidTotal = booking.milestones.filter((m) => m.status === PayoutStatus.PAID).reduce((sum, m) => sum.plus(new Decimal(m.amount ?? 0)), new Decimal(0));
       const jobCardsTotal = booking.jobCards.reduce((sum, jc) => sum.plus(new Decimal(jc.unitPrice)), new Decimal(0));
 
-      // offerRetentionPct is only needed when retention hasn't been set
-      // aside yet; skip the extra Offer lookup once it has (matches
-      // authoriseMilestone's own short-circuit).
+      // offerRetentionPct is only consulted while retention hasn't been set
+      // aside yet (matches authoriseMilestone's own short-circuit); it is
+      // batch-loaded in loadMilestoneCandidates.
       const amount = computeMilestoneAmount({
         jobCardsTotal,
         retentionSetAside: booking.retentionSetAside,
         retentionAmount: booking.retentionAmount,
-        offerRetentionPct: 0,
+        offerRetentionPct: booking.offerRetentionPct,
         milestonePct: nextUnpaid.pct,
         isLastMilestone,
         alreadyPaidTotal,
       });
-      // NOTE (documented gap — see report): when retentionSetAside is still
-      // false, the true amount also depends on Offer.retentionPct, which
-      // would need one more lookup per booking (`Offer.findUnique` on
-      // booking.sourceId) that this read-model intentionally skips to keep
-      // this endpoint N+1-free; the figure shown for a FIRST milestone is
-      // therefore the pre-retention vendorPayable share and can read
-      // slightly high until the officer opens the booking's own detail
-      // view (which already loads the Offer) to confirm the exact amount.
 
       const required = requiredApprovers(Number(amount), config, rosterSize);
 
@@ -311,14 +318,11 @@ export class ApprovalsService {
   }
 
   /**
-   * DUPLICATED business rule — re-derive at integration. The fixed-deposit
-   * write-side service does not exist in this worktree yet (see this
-   * lane's brief). "2 distinct officers" for both PLACE and WITHDRAW comes
-   * straight from the schema's own doc comment on the M12 section header
-   * ("Placement, renewal and premature withdrawal each need two distinct
-   * officer identities") — it is NOT run through approval-ladder.util.ts,
-   * because the schema comment states a fixed number, not an
-   * amount-driven ladder.
+   * Reconciled with TreasuryService at integration: placement and premature
+   * withdrawal each need exactly 2 distinct officers (dual authorisation,
+   * SDD I7), not the amount-driven ladder. TreasuryService records the
+   * initiator as the first PLACE authorisation at propose time, so a
+   * PROPOSED deposit shows 1 of 2 and the initiator can never be the second.
    */
   private buildFixedDepositItems(rows: Awaited<ReturnType<ApprovalsService['loadFixedDeposits']>>, callerId: string): ApprovalItem[] {
     const REQUIRED = 2;
@@ -339,7 +343,7 @@ export class ApprovalsService {
           authorisedCount: placeAuths.length,
           alreadyAuthorisedByMe: false,
           createdAt: fd.createdAt,
-          actionHint: `POST /fixed-deposits/${fd.id}/authorise/place`,
+          actionHint: `POST /treasury/deposits/${fd.id}/authorise-placement`,
         });
       } else if (fd.status === FixedDepositStatus.ACTIVE) {
         const withdrawAuths = fd.authorisations.filter((a) => a.action === FixedDepositAction.WITHDRAW);
@@ -356,7 +360,7 @@ export class ApprovalsService {
           authorisedCount: withdrawAuths.length,
           alreadyAuthorisedByMe: false,
           createdAt: fd.createdAt,
-          actionHint: `POST /fixed-deposits/${fd.id}/authorise/withdraw`,
+          actionHint: `POST /treasury/deposits/${fd.id}/withdraw`,
         });
       }
     }
@@ -399,7 +403,8 @@ export class ApprovalsService {
         authorisedCount: settlement.authorisations.length,
         alreadyAuthorisedByMe: false,
         createdAt: settlement.createdAt,
-        actionHint: `POST /events/settlements/${settlement.id}/authorise`,
+        // The events module authorises a settlement by EVENT id (one settlement per event).
+        actionHint: `POST /events/${settlement.eventId}/settlement/authorise`,
       });
     }
     return items;
@@ -458,7 +463,7 @@ export class ApprovalsService {
     });
   }
 
-  private buildRatificationItems(rows: Awaited<ReturnType<ApprovalsService['loadRatifications']>>): ApprovalItem[] {
+  private buildRatificationItems(rows: Awaited<ReturnType<ApprovalsService['loadRatifications']>>, societyId: string): ApprovalItem[] {
     return rows.map((occupancy) => ({
       kind: 'RATIFICATION' as const,
       id: occupancy.id,
@@ -469,7 +474,7 @@ export class ApprovalsService {
       authorisedCount: null,
       alreadyAuthorisedByMe: false,
       createdAt: occupancy.createdAt,
-      actionHint: `POST /society/ratifications/${occupancy.id}/ratify`,
+      actionHint: `POST /society/${societyId}/ratifications/${occupancy.id}/ratify`,
     }));
   }
 

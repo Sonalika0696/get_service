@@ -38,6 +38,7 @@ interface ApprovalItemBody {
   amount: string | null;
   requiredApprovers: number | null;
   authorisedCount: number | null;
+  actionHint: string;
 }
 
 interface ApprovalsInboxBody {
@@ -225,6 +226,13 @@ describe('Committee approvals inbox — GET /me/approvals (e2e)', () => {
     expect(byKindB.WELFARE_DISBURSEMENT.authorisedCount).toBe(1);
     expect(byKindB.RATIFICATION).toBeDefined();
     expect(byKindB.DISPUTE).toBeDefined();
+
+    // Action hints point at the REAL write-side routes (reconciled at
+    // integration against the treasury, donations and society modules).
+    expect(byKindB.POCKET_TRANSFER.actionHint).toBe(`POST /pocket-transfers/${byKindB.POCKET_TRANSFER.id}/authorise`);
+    expect(byKindB.FIXED_DEPOSIT_PLACEMENT.actionHint).toBe(`POST /treasury/deposits/${byKindB.FIXED_DEPOSIT_PLACEMENT.id}/authorise-placement`);
+    expect(byKindB.WELFARE_DISBURSEMENT.actionHint).toBe(`POST /welfare-disbursements/${byKindB.WELFARE_DISBURSEMENT.id}/authorise`);
+    expect(byKindB.RATIFICATION.actionHint).toBe(`POST /society/${societyId}/ratifications/${byKindB.RATIFICATION.id}/ratify`);
     for (const item of bView.body.items) expect(item).not.toHaveProperty('alreadyAuthorisedByMeTrue');
 
     // --- Officer A: excluded from everything A already-signed or (for fixed
