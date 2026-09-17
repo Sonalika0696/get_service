@@ -177,26 +177,36 @@ model Society {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  flats           Flat[]
-  roles           Role[]
-  auditLogs       AuditLog[]
-  jobBlogPosts    JobBlogPost[]
+  flats              Flat[]
+  roles              Role[]
+  auditLogs          AuditLog[]
+  jobBlogPosts       JobBlogPost[]
   /// Phase 7.1: goes through VendorSocietyLink now, not a direct Vendor.societyId FK — see VendorSocietyLink's doc comment.
-  vendorLinks     VendorSocietyLink[]
-  serviceRequests ServiceRequest[]
-  accounts        Account[]
-  ledgerEntries   LedgerEntry[]
-  payments        Payment[]
-  offers          Offer[]
-  bookings        Booking[]
+  vendorLinks        VendorSocietyLink[]
+  serviceRequests    ServiceRequest[]
+  accounts           Account[]
+  ledgerEntries      LedgerEntry[]
+  payments           Payment[]
+  offers             Offer[]
+  bookings           Booking[]
   /// Phase 9.1 — see VirtualAccount's doc comment.
-  virtualAccounts VirtualAccount[]
+  virtualAccounts    VirtualAccount[]
   /// Phase 9.2 — derived maintenance obligations (one per flat per period).
-  maintenanceCharges  MaintenanceCharge[]
+  maintenanceCharges MaintenanceCharge[]
   /// Phase 9.5 — ingested bank-statement credit lines awaiting treasurer allocation.
-  bankStatementLines  BankStatementLine[]
+  bankStatementLines BankStatementLine[]
   /// Phase 9.6 — dual-authorised cross-pocket journal transfers.
-  pocketTransfers     PocketTransfer[]
+  pocketTransfers    PocketTransfer[]
+  /// Phase 10 — utility meters (flat sub-meters, common-area and bulk-supply).
+  meters             Meter[]
+  /// Phase 10 — versioned tariff schedules (electricity/water), by effective date.
+  tariffSchedules    TariffSchedule[]
+  /// Phase 10 — utility billing cycles (one per utility per period).
+  billingCycles      BillingCycle[]
+  /// Phase 10 — published per-flat utility bills.
+  flatBills          FlatBill[]
+  /// Phase 10 — per-cycle water source cost pool (municipal/tanker/borewell).
+  waterSources       WaterSource[]
 
   @@map("societies")
 }
@@ -206,10 +216,15 @@ model Flat {
   societyId         String
   unitNo            String
   maintenanceAmount Decimal  @db.Decimal(10, 2)
+  /// Phase 10 — carpet area used as the apportionment weight when spreading
+  /// common-area utility consumption across flats (area factor). Nullable and
+  /// backfillable; the apportionment step falls back to equal shares for any
+  /// flat whose area is null (basis recorded per bill).
+  carpetAreaSqft    Decimal? @db.Decimal(10, 2)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  society               Society          @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  society               Society             @relation(fields: [societyId], references: [id], onDelete: Cascade)
   occupancies           Occupancy[]
   bulkBuyCommitments    Commitment[]
   jobCards              JobCard[]
@@ -222,6 +237,10 @@ model Flat {
   maintenanceCharges    MaintenanceCharge[]
   /// Phase 9.5 — bank-statement lines whose narration substring-matched this flat's VirtualAccount.code.
   bankStatementLines    BankStatementLine[]
+  /// Phase 10 — this flat's utility meters (sub-meters; one per utility typically).
+  meters                Meter[]
+  /// Phase 10 — this flat's published utility bills (one per billing cycle).
+  flatBills             FlatBill[]
 
   @@unique([societyId, unitNo])
   @@map("flats")
@@ -1769,4 +1788,297 @@ model PocketTransferAuthorisation {
 
   @@unique([transferId, authoriserId])
   @@map("pocket_transfer_authorisations")
+}
+
+// =====================================================================
+// Phase 10 — Electricity & water billing (BACKEND_PLAN.md Phase 10, M5/M6;
+// SOFTWARE_DESIGN.md §"electricity/water", DESIGN.md §4.3). Metered utility
+// recovery reconciled against the bulk invoice, run on the Redis worker tier
+// as an idempotent, resumable pipeline: ingest -> validate -> compute ->
+// apportion -> reconcile -> publish. All models below are ADDITIVE (frozen
+// as one migration); readings are append-only (corrections post a reversing
+// reading), and published FlatBills carry a full computationTrace so any
+// charge traces back to a reading and a tariff.
+// =====================================================================
+
+/// Which utility a meter / tariff / cycle concerns.
+enum Utility {
+  ELECTRICITY
+  WATER
+}
+
+/// A meter's scope. FLAT = a flat sub-meter; COMMON = a common-area meter
+/// (lifts, lighting, pumps); BULK = the society's single incoming supply
+/// meter, against which sub-meters reconcile (common area = bulk - Σ subs).
+enum MeterKind {
+  FLAT
+  COMMON
+  BULK
+}
+
+enum MeterStatus {
+  ACTIVE
+  RETIRED
+  /// A validation anomaly on this meter halted the current cycle; treasurer
+  /// must resolve (correct reading / replace meter) before the cycle resumes.
+  FLAGGED
+}
+
+/// How a reading entered the system. Both are audit-chained at capture.
+enum ReadingSource {
+  MANUAL
+  CSV
+}
+
+/// One-way pipeline stages for a BillingCycle. A cycle only ever moves
+/// forward; each worker stage is idempotent and checks/advances this.
+enum BillingStage {
+  OPEN
+  READINGS_CLOSED
+  VALIDATED
+  COMPUTED
+  APPORTIONED
+  RECONCILED
+  PUBLISHED
+  SETTLED
+}
+
+enum BillingCycleStatus {
+  RUNNING
+  /// A flagged meter (validation anomaly) halts the cycle rather than billing
+  /// a suspect figure — see MeterReadingAnomaly.
+  HALTED
+  COMPLETED
+  CANCELLED
+}
+
+/// Per-flat utility bill settlement status (mirrors MaintenanceChargeStatus).
+enum FlatBillStatus {
+  PENDING
+  PARTIAL
+  PAID
+  WAIVED
+}
+
+/// The basis on which a flat was billed for a cycle. METERED = from its own
+/// sub-meter measurement; FALLBACK = unmetered flat billed on the fallback
+/// basis (partial sub-meter deployment) — recorded per bill, cross-subsidy
+/// reported.
+enum BillBasis {
+  METERED
+  FALLBACK
+}
+
+enum WaterSourceKind {
+  MUNICIPAL
+  TANKER
+  BOREWELL
+}
+
+/// Validation anomaly kinds. Any anomaly flags the meter and halts the cycle.
+enum MeterAnomalyKind {
+  NEGATIVE_CONSUMPTION
+  STALLED
+  ROLLOVER
+  OUT_OF_BOUNDS
+}
+
+/// Phase 10 — a physical meter. A null flatId means a society-level meter
+/// (COMMON or BULK). `multiplier` scales raw dial units to billed units (CT
+/// ratio); `consumerNumber` is set only for individually-metered (Config A)
+/// flats routed through the BBPS adapter rather than apportionment.
+model Meter {
+  id             String      @id @default(cuid())
+  societyId      String
+  /// Null = society-level (COMMON / BULK). Set = a flat sub-meter.
+  flatId         String?
+  utility        Utility
+  kind           MeterKind
+  serial         String
+  /// CT/multiplier applied to raw reading deltas. Default 1.
+  multiplier     Decimal     @default(1) @db.Decimal(10, 4)
+  /// Config A only: the licensee consumer number for BBPS bill presentment.
+  consumerNumber String?
+  status         MeterStatus @default(ACTIVE)
+  installedAt    DateTime    @default(now())
+  retiredAt      DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  society   Society               @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  flat      Flat?                 @relation(fields: [flatId], references: [id], onDelete: Cascade)
+  readings  Reading[]
+  anomalies MeterReadingAnomaly[]
+
+  @@unique([societyId, serial])
+  @@index([societyId, utility])
+  @@index([flatId])
+  @@map("meters")
+}
+
+/// Phase 10 — an immutable meter reading, audit-chained at capture (before
+/// any computation). Corrections never mutate a row: they post a NEW reading
+/// linked via reversesReadingId. `consumption` is derived at the validate
+/// stage (this reading's value minus the prior reading's, times multiplier)
+/// and cached here; null until validated.
+model Reading {
+  id                String        @id @default(cuid())
+  meterId           String
+  /// Raw dial value at capture.
+  value             Decimal       @db.Decimal(14, 3)
+  /// Derived consumption vs the prior reading (cached at validate). Null until
+  /// the cycle's validate stage runs; a reversing reading carries a negating value.
+  consumption       Decimal?      @db.Decimal(14, 3)
+  /// Optional link to the cycle this reading was captured for.
+  billingCycleId    String?
+  capturedAt        DateTime      @default(now())
+  capturedById      String
+  source            ReadingSource @default(MANUAL)
+  /// Set when this row corrects an earlier reading (append-only correction).
+  reversesReadingId String?
+  createdAt         DateTime      @default(now())
+
+  meter        Meter         @relation(fields: [meterId], references: [id], onDelete: Cascade)
+  billingCycle BillingCycle? @relation(fields: [billingCycleId], references: [id], onDelete: SetNull)
+  reverses     Reading?      @relation("ReadingReversal", fields: [reversesReadingId], references: [id], onDelete: SetNull)
+  reversedBy   Reading[]     @relation("ReadingReversal")
+
+  @@index([meterId, capturedAt])
+  @@index([billingCycleId])
+  @@map("readings")
+}
+
+/// Phase 10 — a versioned tariff, effective from a date, stored as JSONB so
+/// historical bills remain reproducible. `slabs` is an ordered array of
+/// { upTo: number|null, rate: number } (null upTo = final open slab);
+/// `fixedCharges` and `dutyCess` carry the fixed component and duty/cess
+/// config. The schedule "in force" for a cycle is the latest effectiveFrom
+/// <= the cycle period, snapshotted onto BillingCycle.tariffScheduleId.
+model TariffSchedule {
+  id            String   @id @default(cuid())
+  societyId     String
+  utility       Utility
+  effectiveFrom DateTime
+  slabs         Json     @default("[]")
+  fixedCharges  Json     @default("{}")
+  dutyCess      Json     @default("{}")
+  note          String?
+  createdAt     DateTime @default(now())
+  createdById   String
+
+  society       Society        @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  billingCycles BillingCycle[]
+
+  @@index([societyId, utility, effectiveFrom])
+  @@map("tariff_schedules")
+}
+
+/// Phase 10 — one billing run for a (society, utility, period). `stage` and
+/// `status` drive the resumable worker pipeline. Reconciliation records the
+/// licensee bulk invoice figures and the published `variance`
+/// (Σ flat bills - bulk invoice), which is published, never absorbed.
+model BillingCycle {
+  id                String             @id @default(cuid())
+  societyId         String
+  utility           Utility
+  /// 'YYYY-MM'.
+  period            String
+  stage             BillingStage       @default(OPEN)
+  status            BillingCycleStatus @default(RUNNING)
+  /// The tariff schedule snapshotted in force for this cycle.
+  tariffScheduleId  String?
+  /// Reconciliation inputs/outputs (licensee bulk invoice).
+  bulkInvoiceAmount Decimal?           @db.Decimal(14, 2)
+  bulkConsumption   Decimal?           @db.Decimal(14, 3)
+  /// Σ(flat bills) - bulkInvoiceAmount, published after reconcile.
+  variance          Decimal?           @db.Decimal(14, 2)
+  /// Set when status = HALTED.
+  haltedReason      String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  society        Society               @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  tariffSchedule TariffSchedule?       @relation(fields: [tariffScheduleId], references: [id], onDelete: SetNull)
+  flatBills      FlatBill[]
+  readings       Reading[]
+  anomalies      MeterReadingAnomaly[]
+  waterSources   WaterSource[]
+
+  @@unique([societyId, utility, period])
+  @@index([societyId, status])
+  @@map("billing_cycles")
+}
+
+/// Phase 10 — a published per-flat utility bill. `computationTrace` is the
+/// JSONB derivation (formula + inputs: slab breakdown, fixed charges, duty,
+/// apportioned common share, blended water rate) so the resident can verify
+/// the charge follows from published readings and the published tariff.
+model FlatBill {
+  id               String         @id @default(cuid())
+  billingCycleId   String
+  flatId           String
+  societyId        String
+  /// Metered consumption billed (null for a FALLBACK-basis flat).
+  consumption      Decimal?       @db.Decimal(14, 3)
+  amount           Decimal        @db.Decimal(12, 2)
+  basis            BillBasis      @default(METERED)
+  computationTrace Json           @default("{}")
+  paidAmount       Decimal        @default(0) @db.Decimal(12, 2)
+  status           FlatBillStatus @default(PENDING)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  billingCycle BillingCycle @relation(fields: [billingCycleId], references: [id], onDelete: Cascade)
+  flat         Flat         @relation(fields: [flatId], references: [id], onDelete: Cascade)
+  society      Society      @relation(fields: [societyId], references: [id], onDelete: Cascade)
+
+  @@unique([billingCycleId, flatId])
+  @@index([societyId, status])
+  @@index([flatId])
+  @@map("flat_bills")
+}
+
+/// Phase 10 (water) — a source contribution to a cycle's cost pool. The
+/// blended per-kilolitre rate = Σ(cost) / Σ(kilolitres) across sources, with
+/// the derivation published on each water FlatBill's computationTrace.
+model WaterSource {
+  id             String          @id @default(cuid())
+  societyId      String
+  billingCycleId String?
+  kind           WaterSourceKind
+  /// Volume supplied by this source in the period (kilolitres).
+  kilolitres     Decimal         @db.Decimal(14, 3)
+  /// Cost of this source's supply in the period.
+  cost           Decimal         @db.Decimal(14, 2)
+  /// 'YYYY-MM'.
+  period         String
+  createdAt      DateTime        @default(now())
+
+  society      Society       @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  billingCycle BillingCycle? @relation(fields: [billingCycleId], references: [id], onDelete: SetNull)
+
+  @@index([societyId, period])
+  @@index([billingCycleId])
+  @@map("water_sources")
+}
+
+/// Phase 10 — a validation anomaly raised against a meter during a cycle's
+/// validate stage. Its existence halts the cycle (status -> HALTED) until a
+/// treasurer resolves it; recorded so the halt is auditable.
+model MeterReadingAnomaly {
+  id             String           @id @default(cuid())
+  billingCycleId String
+  meterId        String
+  kind           MeterAnomalyKind
+  detail         String
+  readingId      String?
+  resolvedAt     DateTime?
+  createdAt      DateTime         @default(now())
+
+  billingCycle BillingCycle @relation(fields: [billingCycleId], references: [id], onDelete: Cascade)
+  meter        Meter        @relation(fields: [meterId], references: [id], onDelete: Cascade)
+
+  @@index([billingCycleId])
+  @@index([meterId])
+  @@map("meter_reading_anomalies")
 }
