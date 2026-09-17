@@ -45,6 +45,14 @@ export default function RootLayout() {
         <PersistQueryClientProvider
           client={queryClient}
           persistOptions={{ persister: queryPersister, maxAge: 24 * 60 * 60 * 1000 }}
+          // Mutations paused offline in a *previous* session are restored
+          // alongside the query cache but don't resume themselves — kick
+          // them once the restore completes. Mutations paused offline in
+          // the *current* session already auto-resume via onlineManager
+          // (see src/lib/query.ts); this covers the cold-start case.
+          onSuccess={() => {
+            queryClient.resumePausedMutations().catch(() => undefined);
+          }}
         >
           <ThemeProvider>
             <ErrorBoundary>

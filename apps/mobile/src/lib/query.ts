@@ -1,6 +1,19 @@
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient, onlineManager } from '@tanstack/react-query';
+import NetInfo from '@react-native-community/netinfo';
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import { mmkvAsyncStorage } from './storage';
+
+/**
+ * Wire React Query's online/offline signal to real device connectivity
+ * (FRONTEND_PLAN §3.3). Without this, `onlineManager` defaults to always
+ * "online", so paused-mutation queuing never kicks in and mutations just
+ * error out the moment a request fails offline. This predicate matches
+ * OfflineBanner's exactly, so the banner and the query client always agree
+ * on whether the device is offline.
+ */
+onlineManager.setEventListener((setOnline) =>
+  NetInfo.addEventListener((state) => setOnline(Boolean(state.isConnected && state.isInternetReachable !== false))),
+);
 
 /**
  * A network/connection failure (backend not up yet, phone off Wi-Fi) has no
@@ -33,6 +46,12 @@ export const queryClient = new QueryClient({
       // Optimistic mutations are configured per-hook; global retry stays off
       // so double-fires never surprise the ledger.
       retry: 0,
+      // Explicit default (matches the library default, but stated here so it
+      // can't drift): 'online' means a mutation fired while offline goes
+      // *paused* instead of erroring, sits in the mutation cache, and fires
+      // for real the moment `onlineManager` flips back online. 'always'
+      // would defeat the offline queue entirely.
+      networkMode: 'online',
     },
   },
 });

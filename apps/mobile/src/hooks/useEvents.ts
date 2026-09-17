@@ -1,6 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { EventSummary, EventDetail } from '@sft/api-client';
 import { api } from '../lib/api';
+import { queryClient as globalQueryClient } from '../lib/query';
+
+/**
+ * Restart-persistence anchor (FRONTEND_PLAN §3.3 stretch) — see the matching
+ * comment in useResidentPolls.ts. `mutationFn` here closes over nothing but
+ * static imports, so it's safe to register for replay after a cold start.
+ */
+const OPT_IN_EVENT_MUTATION_KEY = ['event-opt-in'] as const;
+
+globalQueryClient.setMutationDefaults(OPT_IN_EVENT_MUTATION_KEY, {
+  mutationFn: (id: string) => api<EventDetail>(`/events/${id}/opt-in`, { method: 'POST' }),
+});
 
 /**
  * Events browse. Ideal source is GET /events (Phase 11 backend, M8). That
@@ -50,6 +62,7 @@ export function useEvent(id: string | undefined) {
 export function useOptInEvent() {
   const client = useQueryClient();
   return useMutation({
+    mutationKey: OPT_IN_EVENT_MUTATION_KEY,
     mutationFn: (id: string) => api<EventDetail>(`/events/${id}/opt-in`, { method: 'POST' }),
     onMutate: async (id) => {
       await client.cancelQueries({ queryKey: ['event', id] });

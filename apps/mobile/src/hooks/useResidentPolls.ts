@@ -4,6 +4,27 @@ import type {
   CreateResidentPollBody,
 } from '@sft/api-client';
 import { api } from '../lib/api';
+import { queryClient as globalQueryClient } from '../lib/query';
+
+/**
+ * Mutation keys doubling as restart-persistence anchors (FRONTEND_PLAN
+ * §3.3 stretch): a mutation paused offline loses its `mutationFn` closure
+ * across a cold start, so `resumePausedMutations()` after restart can only
+ * replay it if a `mutationFn` was registered against this exact key via
+ * `setMutationDefaults` below. Only mutations whose `mutationFn` doesn't
+ * close over anything but static imports are safe to register this way —
+ * `useUpdateResidentPoll` closes over its `id` argument, so it's excluded
+ * (see its doc comment) and only resumes within the current session.
+ */
+const JOIN_POLL_MUTATION_KEY = ['resident-poll-join'] as const;
+const CREATE_POLL_MUTATION_KEY = ['resident-poll-create'] as const;
+
+globalQueryClient.setMutationDefaults(JOIN_POLL_MUTATION_KEY, {
+  mutationFn: (id: string) => api<ResidentPollDetail>(`/bulk-buy/polls/${id}/join`, { method: 'POST' }),
+});
+globalQueryClient.setMutationDefaults(CREATE_POLL_MUTATION_KEY, {
+  mutationFn: (body: CreateResidentPollBody) => api<ResidentPollDetail>('/bulk-buy/polls', { method: 'POST', body }),
+});
 
 /**
  * Resident-initiated bulk-buy polls (Flow B) — the M7 pooling surface. All
@@ -32,6 +53,7 @@ export function useResidentPoll(id: string | undefined) {
 export function useCreateResidentPoll() {
   const client = useQueryClient();
   return useMutation({
+    mutationKey: CREATE_POLL_MUTATION_KEY,
     mutationFn: (body: CreateResidentPollBody) =>
       api<ResidentPollDetail>('/bulk-buy/polls', { method: 'POST', body }),
     onSuccess: (created) => {
@@ -53,6 +75,12 @@ export type UpdateResidentPollBody = {
  * /bulk-buy/polls/:id — see BACKEND gap note in useResidentPolls: the route
  * is not shipped yet, so a save currently returns an error until the backend
  * lands it. The client is ready the moment it does.
+ *
+ * Not registered for restart-persistence (FRONTEND_PLAN §3.3 stretch):
+ * `mutationFn` closes over the hook's `id` argument rather than taking it as
+ * part of the mutation variables, so there's nothing a static
+ * `setMutationDefaults` call could reconstruct after a cold start. It still
+ * queues and replays normally within the current app session.
  */
 export function useUpdateResidentPoll(id: string | undefined) {
   const client = useQueryClient();
@@ -76,6 +104,7 @@ export function useUpdateResidentPoll(id: string | undefined) {
 export function useJoinResidentPoll() {
   const client = useQueryClient();
   return useMutation({
+    mutationKey: JOIN_POLL_MUTATION_KEY,
     mutationFn: (id: string) =>
       api<ResidentPollDetail>(`/bulk-buy/polls/${id}/join`, { method: 'POST' }),
     onMutate: async (id) => {
