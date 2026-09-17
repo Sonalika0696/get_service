@@ -159,54 +159,67 @@ export const lightColors: ColorTokens = {
   },
 };
 
+/**
+ * Dark theme: a black / red / white scheme (reference-driven). True-black,
+ * neutral (non-blue) surfaces; white → neutral-grey ink with no blue cast; a
+ * vivid red lead accent with a warm-orange complement for gradients. The
+ * light theme is intentionally left as-is.
+ */
 export const darkColors: ColorTokens = {
   bg: {
-    primary: '#0E1016',
-    secondary: '#171A22',
-    elevated: '#1E222C',
+    primary: '#0A0A0B',    // near-true black
+    secondary: '#141416',  // subtle lift, neutral
+    elevated: '#1B1B1E',   // card surface, no blue cast
     inverse: '#F7F7FB',
   },
 
   ink: {
-    100: '#F5F6FA',
-    80: '#C9CCDA',
-    60: '#9498AC',
-    40: '#686C82',
-    20: '#3A3D4D',
+    100: '#FAFAFA',
+    80: '#D4D4D8',   // neutral greys (were blue-tinted)
+    60: '#9B9BA3',
+    40: '#6C6C74',
+    20: '#3A3A3F',
     onAccent: '#FFFFFF',
   },
 
   accent: {
-    50: '#141B3D',
-    100: '#1B2555',
-    200: '#253274',
-    300: '#2E419E',
-    400: '#002AFF',
-    500: '#294CFF',
-    600: '#526EFF',
-    700: '#7088FF',
-    800: '#4262FF',
-    900: '#1F44F9',
-    tint: 'rgba(112, 136, 255, 0.12)',
+    // Red scale. Low indices are deep red-blacks for tinted fills; 700 is the
+    // lead action colour (buttons, active tab), 600 the brighter highlight
+    // (e.g. the boot loader "X").
+    50: '#2A0D0A',
+    100: '#3E1611',
+    200: '#5E211A',
+    300: '#8A2E23',
+    400: '#B83A2B',
+    500: '#DC4030',
+    600: '#FF5A47',
+    700: '#F5402C',
+    800: '#E23A28',
+    900: '#B32C1F',
+    tint: 'rgba(245, 64, 44, 0.14)',
   },
 
   accent2: {
-    50: '#1C1640',
-    100: '#271C5C',
-    200: '#372A86',
-    300: '#4B3BB8',
-    400: '#6249E8',
-    500: '#7D63FF',
-    600: '#8B72FF',
-    700: '#9880FF',
-    800: '#7259E0',
-    900: '#5B44B0',
-    tint: 'rgba(152, 128, 255, 0.12)',
+    // Warm-orange complement — pairs with the red for the logo/hero gradients
+    // so the whole scheme stays in the black/red/white/amber family.
+    50: '#2A1608',
+    100: '#3E210E',
+    200: '#5E3316',
+    300: '#8A4A1F',
+    400: '#B85F27',
+    500: '#DC722E',
+    600: '#FF8A4D',
+    700: '#FF9E68',
+    800: '#E27B44',
+    900: '#B35F33',
+    tint: 'rgba(255, 138, 77, 0.12)',
   },
 
   hero: {
-    dueBg: '#B0264A',
-    dueBgTo: '#8E1E3C',
+    // "Amount due" hero — a deep red that stays distinct from the brighter
+    // action-red so the card still reads as its own thing.
+    dueBg: '#8E2118',
+    dueBgTo: '#5E140E',
     dueOn: '#FFFFFF',
   },
 
@@ -217,19 +230,19 @@ export const darkColors: ColorTokens = {
     warningTint: 'rgba(245, 158, 11, 0.16)',
     danger: '#EF4444',
     dangerTint: 'rgba(239, 68, 68, 0.16)',
-    info: '#38BDF8',
-    infoTint: 'rgba(56, 189, 248, 0.16)',
+    info: '#C4C4CC',
+    infoTint: 'rgba(196, 196, 204, 0.14)',
   },
 
   border: {
     subtle: 'rgba(255, 255, 255, 0.08)',
     divider: 'rgba(255, 255, 255, 0.14)',
-    focus: '#7088FF',
+    focus: '#F5402C',
   },
 
   overlay: {
-    scrim: 'rgba(0, 0, 0, 0.55)',
-    glassLight: 'rgba(30, 34, 44, 0.72)',
+    scrim: 'rgba(0, 0, 0, 0.60)',
+    glassLight: 'rgba(20, 20, 22, 0.72)',
   },
 };
 
