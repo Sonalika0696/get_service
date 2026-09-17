@@ -39,3 +39,25 @@ export function majorStringToMinor(major: string): number {
   const value = Number(major);
   return Number.isFinite(value) ? Math.round(value * 100) : 0;
 }
+
+/**
+ * Formats a decimal rupee value already in MAJOR units — e.g. pricing-card
+ * `rate`/`minimum`/`gstRatePct`, which the backend serialises as a Prisma
+ * Decimal string (or, on some routes, a plain number) in rupees, not paise.
+ * Falls back to an em dash on a missing/non-numeric value rather than
+ * propagating NaN into a render.
+ */
+export function formatMajor(
+  major: string | number | null | undefined,
+  currency = 'INR',
+  { showDecimals = true, locale = 'en-IN' }: { showDecimals?: boolean; locale?: string } = {},
+): string {
+  const value = typeof major === 'number' ? major : Number(major);
+  if (major === null || major === undefined || !Number.isFinite(value)) return '—';
+  return new Intl.NumberFormat(locale, {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: showDecimals ? 2 : 0,
+    maximumFractionDigits: showDecimals ? 2 : 0,
+  }).format(value);
+}

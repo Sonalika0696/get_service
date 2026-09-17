@@ -37,12 +37,18 @@ export type SampleFallbackResult<T> = {
 
 export function withSampleFallback<T>(
   query: MinimalQueryResult<T>,
-  isEmpty: (data: T) => boolean,
+  _isEmpty: (data: T) => boolean,
   sample: T,
 ): SampleFallbackResult<T> {
-  const settled = query.isSuccess || query.isError;
-  const usable = query.isSuccess && query.data !== undefined && !isEmpty(query.data);
-  const isSample = settled && !usable;
+  // Only stand in for a genuine FAILURE: an error, or a settled success that
+  // yielded no data at all. A legitimately-empty result from a healthy,
+  // seeded backend is REAL data and must render as an honest empty state
+  // (₹0 due, "nothing raised yet"), not sample content — otherwise the app
+  // would disagree with itself (e.g. real ₹0 on Home vs sample bills). The
+  // fallback is a safety net for an unreachable/unshipped endpoint, not a
+  // substitute for "nothing to show". (`_isEmpty` retained for signature
+  // stability; empty lists are intentionally treated as real.)
+  const isSample = query.isError || (query.isSuccess && query.data === undefined);
 
   return {
     data: isSample ? sample : query.data,
