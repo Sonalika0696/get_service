@@ -32,6 +32,7 @@ import { DelegationModule } from './modules/delegation/delegation.module.js';
 import { ConsentModule } from './modules/consent/consent.module.js';
 import { DashboardModule } from './modules/dashboard/dashboard.module.js';
 import { BillsModule } from './modules/bills/bills.module.js';
+import { HomeModule } from './modules/home/home.module.js';
 import { RealtimeModule } from './modules/realtime/realtime.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor.js';
@@ -79,6 +80,7 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     ConsentModule,
     DashboardModule,
     BillsModule,
+    HomeModule,
     RealtimeModule,
     HealthModule,
   ],
