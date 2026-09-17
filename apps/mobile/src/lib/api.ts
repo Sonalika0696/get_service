@@ -50,9 +50,24 @@ const baseUrl = resolveBaseUrl();
  */
 const devToken = extra.devBearerToken ?? null;
 
+/**
+ * Sentinel stored by the "Developer sign-in" bypass. It is NOT a real
+ * backend token, so it must never be sent as a bearer — when it's the
+ * stored value we send the configured `devBearerToken` instead so guarded
+ * calls actually authenticate. Shared with AuthProvider.
+ */
+export const DEV_BYPASS_TOKEN = 'gatex-dev-bypass';
+
 export const api = createApiClient({
   baseUrl,
-  getToken: async () => (await secureStorage.getToken()) ?? devToken,
+  getToken: async () => {
+    const stored = await secureStorage.getToken();
+    if (!stored) return devToken;
+    // A stored dev-bypass sentinel is not a valid bearer — swap in the real
+    // dev token so the backend doesn't reject it as "session expired".
+    if (stored === DEV_BYPASS_TOKEN) return devToken;
+    return stored;
+  },
   onUnauthorized: () => {
     // AuthProvider.refreshMe handles the local state transition on 401.
   },

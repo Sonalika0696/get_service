@@ -60,38 +60,68 @@ export default function TabsHost() {
   );
 }
 
+/**
+ * Floating, elevated nav bar: a rounded pill detached from the screen edges
+ * with a soft shadow, and an accent-tinted pill behind the active tab so the
+ * selection reads at a glance (reference-inspired).
+ */
 function BottomBar({ index, onSelect }: { index: number; onSelect: (i: number) => void }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   return (
     <View
       style={{
-        flexDirection: 'row',
-        backgroundColor: theme.colors.bg.elevated,
-        borderTopWidth: 1,
-        borderTopColor: theme.colors.border.subtle,
-        paddingTop: 8,
-        paddingBottom: insets.bottom > 0 ? insets.bottom : 10,
+        paddingHorizontal: theme.spacing.md,
+        paddingBottom: insets.bottom > 0 ? insets.bottom : theme.spacing.sm,
+        paddingTop: theme.spacing.xs,
+        backgroundColor: 'transparent',
       }}
     >
-      {TAB_ICONS.map((Icon, i) => {
-        const active = i === index;
-        const color = active ? theme.colors.accent[700] : theme.colors.ink[40];
-        return (
-          <Pressable
-            key={i}
-            accessibilityRole="button"
-            accessibilityState={{ selected: active }}
-            onPress={() => onSelect(i)}
-            style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4, minHeight: 48 }}
-          >
-            <Icon size={24} color={color} active={active} />
-            <Text weight="semibold" style={{ fontSize: 11, lineHeight: 14, color }}>
-              {LABELS[i]}
-            </Text>
-          </Pressable>
-        );
-      })}
+      <View
+        style={{
+          flexDirection: 'row',
+          backgroundColor: theme.colors.bg.elevated,
+          borderRadius: theme.radius.xxxl,
+          paddingVertical: 8,
+          paddingHorizontal: 6,
+          borderWidth: 1,
+          borderColor: theme.colors.border.subtle,
+          ...theme.shadows.lg.native,
+        }}
+      >
+        {TAB_ICONS.map((Icon, i) => {
+          const active = i === index;
+          const color = active ? theme.colors.accent[700] : theme.colors.ink[40];
+          return (
+            <Pressable
+              key={i}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              onPress={() => onSelect(i)}
+              style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
+            >
+              <View
+                style={{
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 3,
+                  paddingVertical: 7,
+                  paddingHorizontal: 8,
+                  borderRadius: theme.radius.xl,
+                  minHeight: 46,
+                  alignSelf: 'stretch',
+                  backgroundColor: active ? theme.colors.accent.tint : 'transparent',
+                }}
+              >
+                <Icon size={23} color={color} active={active} />
+                <Text weight="semibold" style={{ fontSize: 10.5, lineHeight: 13, color }}>
+                  {LABELS[i]}
+                </Text>
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }

@@ -14,8 +14,10 @@ import type {
   SignupBody,
 } from '@sft/api-client';
 import { useQueryClient } from '@tanstack/react-query';
+import Constants from 'expo-constants';
 import { api } from '../lib/api';
 import { secureStorage } from '../lib/storage';
+import { DEV_BYPASS_TOKEN } from '../lib/api';
 
 type AuthStatus =
   | { kind: 'unknown' }        // initial — reading secure storage
@@ -41,7 +43,7 @@ type AuthContextValue = {
  * so every screen (including the committee-only approvals inbox) is
  * reachable while iterating without a working OTP path.
  */
-const DEV_TOKEN = 'gatex-dev-bypass';
+const DEV_TOKEN = DEV_BYPASS_TOKEN;
 
 const DEV_ME: MeResponse = {
   id: 'dev-resident',
@@ -134,9 +136,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const devSignIn = useCallback(async () => {
-    await secureStorage.setToken(DEV_TOKEN);
-    setStatus({ kind: 'signed-in', me: DEV_ME });
-  }, []);
+    // Prefer the real dev bearer token (app.json.extra.devBearerToken) so
+    // every guarded API call authenticates for real and the data screens
+    // load. Only fall back to the mock sentinel (offline UI browsing, no
+    // real data) when no token is configured.
+    const realToken =
+      (Constants.expoConfig?.extra as { devBearerToken?: string | null } | undefined)?.devBearerToken;
+    if (realToken) {
+      await secureStorage.setToken(realToken);
+      await refreshMe();
+    } else {
+      await secureStorage.setToken(DEV_TOKEN);
+      setStatus({ kind: 'signed-in', me: DEV_ME });
+    }
+  }, [refreshMe]);
 
   const signOut = useCallback(async () => {
     try {

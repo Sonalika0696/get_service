@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, ScrollView, useWindowDimensions, type NativeSyntheticEvent, type NativeScrollEvent } from 'react-native';
 
 /**
@@ -28,17 +28,34 @@ export function TabsPager({
   const ref = useRef<ScrollView>(null);
   const [mounted, setMounted] = useState<Set<number>>(() => neighbours(0, pageCount));
 
-  // Animate to the controlled index (tab tap / goTo). A swipe already moved
-  // the ScrollView, so this is a no-op in that case (same offset).
+  // The page the ScrollView is actually showing. Tracked in a ref so the
+  // controlled-index effect can tell a swipe (settled === index already)
+  // from a programmatic change (tab tap) and only scrollTo for the latter —
+  // otherwise the effect would fight the in-progress drag.
+  const settled = useRef(index);
+
   useEffect(() => {
-    ref.current?.scrollTo({ x: index * width, animated: true });
+    if (index !== settled.current) {
+      settled.current = index;
+      ref.current?.scrollTo({ x: index * width, animated: true });
+    }
     setMounted((prev) => union(prev, neighbours(index, pageCount)));
   }, [index, width, pageCount]);
 
-  const onMomentumEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const i = Math.round(e.nativeEvent.contentOffset.x / width);
-    if (i !== index) onIndexChange(i);
-  };
+  // Update the active tab the instant the swipe crosses a page boundary,
+  // rather than waiting for momentum to fully settle (which lagged the
+  // highlight by ~1s). Rounding flips at the halfway point, so the icon
+  // lights up as the next section takes over the screen.
+  const onScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const page = Math.round(e.nativeEvent.contentOffset.x / width);
+      if (page !== settled.current && page >= 0 && page < pageCount) {
+        settled.current = page;
+        onIndexChange(page);
+      }
+    },
+    [width, pageCount, onIndexChange],
+  );
 
   return (
     <ScrollView
@@ -46,7 +63,7 @@ export function TabsPager({
       horizontal
       pagingEnabled
       showsHorizontalScrollIndicator={false}
-      onMomentumScrollEnd={onMomentumEnd}
+      onScroll={onScroll}
       scrollEventThrottle={16}
       keyboardShouldPersistTaps="handled"
       // Keep the initial page aligned before the first layout pass.
