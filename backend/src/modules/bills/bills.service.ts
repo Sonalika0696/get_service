@@ -5,7 +5,7 @@ import { RatificationStatus } from '../../generated/prisma/enums.js';
 import type { ResidentPrincipal } from '../../common/types/current-user.js';
 import { buildPage, decodeCursor, parsePageLimit, type KeysetCursor } from '../../common/pagination/cursor.util.js';
 
-export type BillKind = 'MAINTENANCE' | 'PROCUREMENT';
+export type BillKind = 'MAINTENANCE' | 'PROCUREMENT' | 'ELECTRICITY' | 'WATER';
 
 /** Uniform projection every arm of the UNION produces — see BillsService.list's doc comment. */
 export interface BillLine {
@@ -65,11 +65,22 @@ interface RawBillRow {
  *    `job_cards.residentId`, not by flat, since a JobCard is already
  *    per-resident.
  *
- * Both arms project the SAME 11 columns (see BillLine) so a future arm
- * (utilities, events, ...) slots in as one more `UNION ALL SELECT ...`
- * block inside the `bills` CTE below — the WHERE/ORDER BY/pagination
- * wrapper around it never needs to change. See the inline comment marking
- * where that block goes.
+ * A third arm (added in Phase 10 CAPSTONE) covers utility bills:
+ *  - ELECTRICITY/WATER arm: Phase 10's `flat_bills` rows for the resident's
+ *    own flat(s), joined to their `billing_cycles` row to read `utility`
+ *    (ELECTRICITY vs WATER become the two distinct `kind` values) and to
+ *    gate on `stage = 'PUBLISHED'` — an unpublished (still-running or
+ *    halted) cycle's bills are never a resident-facing obligation yet, same
+ *    as MaintenanceBillingService only ever creating a charge once it
+ *    decides to (there's no "draft" MaintenanceCharge state to filter out,
+ *    but a FlatBill genuinely can exist in the DB before its cycle
+ *    publishes — see BillingCycleService's compute/apportion stages, which
+ *    build the row up progressively ahead of the publish stage).
+ *
+ * All three arms project the SAME 11 columns (see BillLine) so a future arm
+ * (events, ...) slots in as one more `UNION ALL SELECT ...` block inside the
+ * `bills` CTE below — the WHERE/ORDER BY/pagination wrapper around it never
+ * needs to change. See the inline comment marking where that block goes.
  *
  * Pagination/ETag: uses the reusable `src/common/pagination/*` helpers —
  * keyset cursor over `dueDate DESC NULLS LAST, id DESC` (a resident's
@@ -172,12 +183,40 @@ export class BillsService {
         LEFT JOIN payments p ON p.id = c."paymentId"
         WHERE jc."residentId" = ${currentUser.id}
 
+        UNION ALL
+
         -- ---------------------------------------------------------------
-        -- FUTURE ARMS (utilities, events, ...) slot in here: one more
-        -- UNION ALL SELECT producing the SAME 11 columns
-        -- (id, kind, title, label, "amountDue", "amountPaid", status,
-        -- "dueDate", basis, "evidenceType", "evidenceId"). Nothing below
-        -- this CTE needs to change.
+        -- ELECTRICITY/WATER arm (Phase 10 CAPSTONE): this resident's own
+        -- flat(s)' published utility bills. kind is the cycle's own
+        -- utility column (ELECTRICITY or WATER) -- no CASE needed, the
+        -- enum values already match the BillKind strings this endpoint
+        -- accepts. No due-date concept exists on FlatBill today (unlike
+        -- MaintenanceCharge), so dueDate is NULL, same as the PROCUREMENT
+        -- arm above (sorts last -- see the outer ORDER BY).
+        -- ---------------------------------------------------------------
+        SELECT
+          fb.id                                          AS id,
+          bc.utility::text                                AS kind,
+          (INITCAP(LOWER(bc.utility::text)) || ' bill – ' || bc.period) AS title,
+          bc.period                                       AS label,
+          fb.amount::text                                 AS "amountDue",
+          fb."paidAmount"::text                           AS "amountPaid",
+          fb.status::text                                 AS status,
+          NULL::timestamptz                               AS "dueDate",
+          (CASE WHEN fb.basis = 'FALLBACK' THEN 'Apportioned common-area charge (no sub-meter on file)' ELSE 'Metered utility consumption charge' END) AS basis,
+          'FlatBill'                                       AS "evidenceType",
+          fb.id                                            AS "evidenceId"
+        FROM flat_bills fb
+        JOIN billing_cycles bc ON bc.id = fb."billingCycleId"
+        WHERE fb."flatId" IN (${Prisma.join(flatIds)})
+          AND bc.stage = 'PUBLISHED'
+
+        -- ---------------------------------------------------------------
+        -- FUTURE ARMS (events, ...) slot in here: one more UNION ALL
+        -- SELECT producing the SAME 11 columns (id, kind, title, label,
+        -- "amountDue", "amountPaid", status, "dueDate", basis,
+        -- "evidenceType", "evidenceId"). Nothing below this CTE needs to
+        -- change.
         -- ---------------------------------------------------------------
       )
       SELECT * FROM bills
@@ -207,7 +246,7 @@ export class BillsService {
 
   private parseKind(raw: string | undefined): BillKind | null {
     if (raw === undefined) return null;
-    if (raw === 'MAINTENANCE' || raw === 'PROCUREMENT') return raw;
-    throw new BadRequestException('kind must be MAINTENANCE or PROCUREMENT');
+    if (raw === 'MAINTENANCE' || raw === 'PROCUREMENT' || raw === 'ELECTRICITY' || raw === 'WATER') return raw;
+    throw new BadRequestException('kind must be one of MAINTENANCE, PROCUREMENT, ELECTRICITY, WATER');
   }
 }

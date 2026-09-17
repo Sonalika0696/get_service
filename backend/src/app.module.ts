@@ -46,6 +46,7 @@ import { HealthCampsModule } from './modules/health-camps/health-camps.module.js
 import { DonationsModule } from './modules/donations/donations.module.js';
 import { ApprovalsModule } from './modules/approvals/approvals.module.js';
 import { CollectionsModule } from './modules/collections/collections.module.js';
+import { BillingModule } from './modules/electricity/billing/billing.module.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor.js';
 
@@ -102,6 +103,7 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     RealtimeModule,
     MetersModule,
     ReadingsModule,
+    BillingModule,
     HealthModule,
     HealthCampsModule,
     DonationsModule,

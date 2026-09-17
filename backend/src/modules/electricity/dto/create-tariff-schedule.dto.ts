@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer';
 import { IsArray, IsDateString, IsEnum, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
 import { Utility } from '../../../generated/prisma/enums.js';
 
@@ -20,8 +21,25 @@ export class CreateTariffScheduleDto {
   @IsDateString()
   effectiveFrom!: string;
 
-  /** Ordered telescoping slab array — see tariff-config.types.ts's Slab doc comment. Element-level validation happens in the service via parseTariffConfig. */
+  /**
+   * Ordered telescoping slab array — see tariff-config.types.ts's Slab doc
+   * comment. Element-level validation happens in the service via
+   * parseTariffConfig. `@Type(() => Object)` is REQUIRED here, not
+   * decorative: without it, NestJS's global ValidationPipe
+   * (transform:true + transformOptions.enableImplicitConversion:true, see
+   * validation.pipe.ts) reflects this property's design:type as the bare
+   * `Array` constructor (TypeScript can't reflect `unknown[]`'s element
+   * shape) and, with no `@Type()` telling class-transformer what each
+   * element actually is, coerces every element via `Array.from(element)` —
+   * which silently turns each `{upTo, rate}` slab object into `[]` (no
+   * `length`/iterator on a plain object) before this DTO ever reaches
+   * TariffScheduleService.create. `@Type(() => Object)` tells
+   * class-transformer each element is a plain object, not something to be
+   * array-coerced, and leaves its fields untouched for parseTariffConfig
+   * to validate.
+   */
   @IsArray()
+  @Type(() => Object)
   slabs!: unknown[];
 
   /** Optional flat-charge group; missing/malformed defaults to all-zero (see tariff-config.parser.ts). */
