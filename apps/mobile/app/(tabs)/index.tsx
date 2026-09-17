@@ -114,7 +114,7 @@ function BottomBar({ index, onSelect }: { index: number; onSelect: (i: number) =
                   gap: 3,
                   paddingVertical: 7,
                   paddingHorizontal: 2,
-                  borderRadius: theme.radius.xl,
+                  borderRadius: theme.radius.xxl,
                   minHeight: 46,
                   alignSelf: 'stretch',
                   backgroundColor: active ? theme.colors.accent.tint : 'transparent',
