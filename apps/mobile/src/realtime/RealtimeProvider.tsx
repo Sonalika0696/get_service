@@ -45,10 +45,20 @@ const EVENT_MESSAGES: Record<string, string> = {
   'service_request.pooled': 'A request you can join was pooled with others.',
   'service_request.assigned': 'A vendor was assigned to a pooled request.',
   'service_request.confirmed': 'Vendor confirmed a pooled request.',
+  'service_request.cancelled': 'A pooled request was cancelled.',
   'event.created': 'A new society event was posted.',
   'event.fired': 'An event you can join is now confirmed.',
   'event.expired': 'An event closed without enough interest.',
 };
+
+/**
+ * Event types that should refresh the affected screen silently — no banner.
+ * `service_request.joined` fires every time ANY neighbour taps Join on a pool
+ * (backend emits it per join, distinct from `pooled` = threshold reached), so
+ * toasting it would spam a banner on every phone for every tap. We still
+ * invalidate so counts update live; we just don't announce it.
+ */
+const SILENT_EVENT_TYPES = new Set<string>(['service_request.joined']);
 
 const DOMAIN_FALLBACK_MESSAGE: Record<Domain, string> = {
   'resident-polls': 'A pooled request was updated.',
@@ -151,7 +161,11 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
           const domain = domainOf(raw.type);
           if (!domain) return; // unrecognised type: no-op, never crash
           invalidateForDomain(queryClient, domain);
-          showToast(EVENT_MESSAGES[raw.type] ?? DOMAIN_FALLBACK_MESSAGE[domain]);
+          // Refresh always; announce unless this type is silent (e.g. a
+          // per-neighbour join, which would otherwise banner on every tap).
+          if (!SILENT_EVENT_TYPES.has(raw.type)) {
+            showToast(EVENT_MESSAGES[raw.type] ?? DOMAIN_FALLBACK_MESSAGE[domain]);
+          }
           // Society-event updates surface as a Community tab badge too. The
           // provider only sets it; it's cleared by whoever is watching the
           // active tab (see useCommunityUnread's consumer), so an update
